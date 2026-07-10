@@ -104,15 +104,17 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   /** 1 = right hand (default), -1 = left hand */
   private handSide: 1 | -1 = 1
   private baseViewScale = new THREE.Vector3(-1, -1, -1)
+  /** One ready viewmodel per weapon — never clone mid-match */
+  private weaponCache = new Map<string, FPSMesh>()
+  private shellTextureReady: Promise<void> | null = null
 
   constructor(player: Player) {
     super(player)
     // Always use the overlay viewmodel camera so the gun never depth-tests against walls
     this.viewmodelCamera = this.game.renderer.viewmodelRenderer.camera
     this.createViewmodelLights()
-    const fpsMesh = <FPSMesh>Game.getInstance().globalLoadingManager.loadableMeshs.get('AK47')!.clone()
     this.initParticleEmitter()
-    this.setMesh(fpsMesh)
+    this.equipWeaponMesh('AK47', false)
     player.setWeapon('AK47')
     this.setFov(this.baseFov)
     if (this.showDebug) {
@@ -141,6 +143,76 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     }
   }
 
+  /** Get or create a fully-inited viewmodel for a weapon key */
+  private getOrCreateWeaponMesh(key: string): FPSMesh | null {
+    const cached = this.weaponCache.get(key)
+    if (cached) return cached
+    const source = Game.getInstance().globalLoadingManager.loadableMeshs.get(key)
+    if (!source) return null
+    const mesh = source.clone() as FPSMesh
+    mesh.init()
+    // Touch every clipAction once so first Shoot/Reload/Switch never allocates
+    for (const animName of ['Shoot', 'Reload', 'Switch']) {
+      if (mesh.animations.has(animName)) {
+        mesh.playAnimation(animName)
+      }
+    }
+    mesh.mixer?.stopAllAction()
+    this.weaponCache.set(key, mesh)
+    return mesh
+  }
+
+  /**
+   * Swap to a cached weapon mesh (no mid-match SkeletonUtils.clone).
+   * @param playSwitchAnim false when warming / initial equip
+   */
+  public equipWeaponMesh(key: string, playSwitchAnim = true): boolean {
+    const mesh = this.getOrCreateWeaponMesh(key)
+    if (!mesh) return false
+    if (this.fpsMesh === mesh) {
+      if (playSwitchAnim) this.handleWeaponSwitch()
+      return true
+    }
+    this.setMesh(mesh, playSwitchAnim)
+    return true
+  }
+
+  /** Pre-init AK / USP / Knife + compile viewmodel shaders before combat */
+  public warmWeapons(renderer: THREE.WebGLRenderer): void {
+    const keys = ['AK47', 'Usp', 'Knife']
+    const meshes: THREE.Object3D[] = []
+    for (const key of keys) {
+      const mesh = this.getOrCreateWeaponMesh(key)
+      if (mesh?.mesh) meshes.push(mesh.mesh)
+    }
+    this.game.renderer.viewmodelRenderer.warm(renderer, meshes)
+    // Restore currently equipped gun under the camera
+    if (this.fpsMesh?.mesh) {
+      this.viewmodelCamera.add(this.fpsMesh.mesh)
+      this.fpsMesh.addLights(this.viewmodelLights)
+      this.show()
+    }
+  }
+
+  public async warmShellParticles(): Promise<void> {
+    if (this.shellTextureReady) await this.shellTextureReady
+    if (!this.fpsMesh?.mesh || !this.tempEmitter) return
+
+    const mesh = this.fpsMesh.mesh
+    const prevVisible = mesh.visible
+    mesh.visible = false
+    try {
+      this.tempEmitter.setRate(new Rate(1, 0.05))
+      this.tempEmitter.emit()
+      await new Promise<void>((r) => setTimeout(r, 80))
+      this.tempEmitter.setRate(new Rate(0, 0))
+    } catch {
+      /* ignore */
+    } finally {
+      mesh.visible = prevVisible
+    }
+  }
+
   /** Dedicated lights so hands/guns aren't crushed by world shadows */
   private createViewmodelLights(): void {
     const key = new THREE.PointLight(0xfff2e6, 3.2, 3.5, 1.6)
@@ -156,10 +228,14 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.viewmodelLights = [key, fill, ambient]
   }
 
-  public setMesh(mesh: LoadableMesh): void {
+  public setMesh(mesh: LoadableMesh, playSwitchAnim = true): void {
     this.removeMesh()
     this.fpsMesh = mesh as FPSMesh
-    this.fpsMesh.init()
+    // Cached / already-inited weapons skip the expensive material bleach pass
+    if (!this.fpsMesh.mixer) {
+      this.fpsMesh.init()
+    }
+    this.weaponCache.set(this.fpsMesh.key, this.fpsMesh)
     // Remember post-init scale so hand flip never destroys model size
     this.baseViewScale.copy(this.fpsMesh.mesh.scale)
     // Re-parent lights onto the new viewmodel each switch
@@ -168,7 +244,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.initViewmodelPosition()
     this.applyHandSide()
     this.show()
-    this.handleWeaponSwitch()
+    if (playSwitchAnim) this.handleWeaponSwitch()
   }
 
   /** Flip viewmodel between right / left hand */
@@ -265,16 +341,22 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.moveEffect = new Vector3D(moveVector.x, this.moveEffect.y + 16 * dt, moveVector.z)
   }
   private initParticleEmitter() {
-    const createSprite = () => {
-      var map = new THREE.TextureLoader().load('dot.png')
-      var material = new THREE.SpriteMaterial({
-        map: map,
+    this.shellTextureReady = new Promise((resolve) => {
+      const map = new THREE.TextureLoader().load(
+        'dot.png',
+        () => resolve(),
+        undefined,
+        () => resolve()
+      )
+      const material = new THREE.SpriteMaterial({
+        map,
         color: 0xff0000,
         blending: THREE.AdditiveBlending,
         fog: true,
       })
-      return new THREE.Sprite(material)
-    }
+      // Touch sprite construction once
+      void new THREE.Sprite(material)
+    })
     this.tempEmitter = new Emitter()
 
     this.tempEmitter

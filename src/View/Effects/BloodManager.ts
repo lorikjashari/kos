@@ -95,6 +95,37 @@ export class BloodManager implements IUpdatable {
     })
   }
 
+  /** Compile materials + allocate first meshes off-screen so first hit never hitchs */
+  public warm(renderer?: THREE.WebGLRenderer, camera?: THREE.Camera): void {
+    const off = new Vector3D(0, -800, 0)
+    const dummy = new THREE.Object3D()
+    dummy.position.set(0, -800, 0)
+    this.scene.add(dummy)
+
+    // Cover every body part + attachTo path used on real bot hits
+    this.spawn(off, new Vector3D(0, 1, 0), 'body', dummy)
+    this.spawn(off, new Vector3D(0, 1, 0), 'head', dummy)
+    this.spawn(off, new Vector3D(0, 1, 0), 'legs', dummy)
+    this.spawn(off, new Vector3D(0, 1, 0), 'body')
+    this.spawn(off, new Vector3D(0, 1, 0), 'head')
+    this.spawn(off, new Vector3D(0, 1, 0), 'legs')
+
+    if (renderer && camera) {
+      renderer.compile(this.scene, camera)
+    }
+
+    // Drain warm particles / decals immediately
+    for (const p of this.particles) {
+      this.scene.remove(p.mesh)
+    }
+    this.particles.length = 0
+    for (const a of this.attached) {
+      a.parent.remove(a.mesh)
+    }
+    this.attached.length = 0
+    this.scene.remove(dummy)
+  }
+
   /**
    * Impact blood: splat sticks to the bot (moves with him),
    * plus a burst of flying droplets / mist in world space.

@@ -182,7 +182,7 @@ export abstract class PlayerRenderer implements IUpdatable {
       }
     }
   }
-  public abstract setMesh(mesh: LoadableMesh): void
+  public abstract setMesh(mesh: LoadableMesh, playSwitchAnim?: boolean): void
   public abstract handleMove(moveVector: Vector3D, dt: number): void
   public abstract handleZoom(): void
   public abstract handleReload(): void

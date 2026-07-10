@@ -10,49 +10,107 @@ interface FlashEffect {
 
 export class MuzzleFlashManager {
   private scene: THREE.Scene
-  private texture: THREE.Texture
+  private texture!: THREE.Texture
   private effects: FlashEffect[] = []
+  private textureReady: Promise<void>
+  private warmed = false
+  private lightPool: THREE.PointLight[] = []
+  private spritePool: THREE.Sprite[] = []
+  private sharedMaterial!: THREE.SpriteMaterial
+  private readonly _lookTarget = new THREE.Vector3()
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
-    this.texture = new THREE.TextureLoader().load('/particle.png')
-    this.texture.colorSpace = THREE.SRGBColorSpace
+    this.textureReady = new Promise((resolve) => {
+      this.texture = new THREE.TextureLoader().load(
+        '/particle.png',
+        () => resolve(),
+        undefined,
+        () => resolve()
+      )
+      this.texture.colorSpace = THREE.SRGBColorSpace
+    })
+  }
+
+  public async whenReady(): Promise<void> {
+    await this.textureReady
+  }
+
+  private ensureMaterial(): THREE.SpriteMaterial {
+    if (!this.sharedMaterial) {
+      this.sharedMaterial = new THREE.SpriteMaterial({
+        map: this.texture,
+        color: 0xffaa44,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    }
+    return this.sharedMaterial
+  }
+
+  private acquireSprite(): THREE.Sprite {
+    const sprite = this.spritePool.pop() || new THREE.Sprite(this.ensureMaterial())
+    sprite.material = this.ensureMaterial()
+    sprite.material.opacity = 1
+    sprite.scale.set(0.55, 0.55, 0.55)
+    sprite.visible = true
+    return sprite
+  }
+
+  private releaseSprite(sprite: THREE.Sprite): void {
+    sprite.visible = false
+    this.scene.remove(sprite)
+    this.spritePool.push(sprite)
   }
 
   /** Force GPU upload so first shot never stalls on texture decode */
   public warm(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    if (this.warmed) return
     if (!this.texture.image) return
-    const mat = new THREE.SpriteMaterial({
-      map: this.texture,
-      transparent: true,
-      opacity: 0.01,
-      depthWrite: false,
-    })
-    const sprite = new THREE.Sprite(mat)
+
+    this.ensureMaterial()
+    // Pre-build a few sprites + lights so first real shots never allocate
+    for (let i = 0; i < 6; i++) {
+      this.spritePool.push(new THREE.Sprite(this.ensureMaterial()))
+    }
+    for (let i = 0; i < 4; i++) {
+      this.lightPool.push(new THREE.PointLight(0xff9933, 4, 6))
+    }
+
+    const sprite = this.acquireSprite()
     sprite.position.set(0, -999, 0)
+    sprite.scale.set(0.01, 0.01, 0.01)
     this.scene.add(sprite)
+
+    const light = this.acquireLight()
+    light.intensity = 0.001
+    light.position.set(0, -999, 0)
+    this.scene.add(light)
+
     renderer.compile(this.scene, camera)
-    this.scene.remove(sprite)
-    mat.dispose()
+    this.releaseSprite(sprite)
+    this.scene.remove(light)
+    this.lightPool.push(light)
+    this.warmed = true
+  }
+
+  private acquireLight(): THREE.PointLight {
+    const light = this.lightPool.pop() || new THREE.PointLight(0xff9933, 4, 6)
+    light.intensity = 4
+    light.distance = 6
+    return light
   }
 
   public spawn(position: Vector3D, direction: Vector3D): void {
-    const material = new THREE.SpriteMaterial({
-      map: this.texture,
-      color: 0xffaa44,
-      transparent: true,
-      opacity: 1,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    })
-
-    const sprite = new THREE.Sprite(material)
+    const sprite = this.acquireSprite()
     sprite.position.copy(position)
-    sprite.scale.set(0.55, 0.55, 0.55)
-    sprite.lookAt(position.clone().add(direction))
+    this._lookTarget.copy(position).add(direction)
+    sprite.lookAt(this._lookTarget)
     this.scene.add(sprite)
 
-    const light = new THREE.PointLight(0xff9933, 4, 6)
+    const light = this.acquireLight()
     light.position.copy(position)
     this.scene.add(light)
 
@@ -73,10 +131,10 @@ export class MuzzleFlashManager {
       }
 
       if (effect.life >= effect.maxLife) {
-        this.scene.remove(effect.sprite)
-        effect.sprite.material.dispose()
+        this.releaseSprite(effect.sprite)
         if (effect.light) {
           this.scene.remove(effect.light)
+          this.lightPool.push(effect.light)
         }
         this.effects.splice(i, 1)
       }

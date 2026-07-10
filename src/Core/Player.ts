@@ -11,6 +11,7 @@ import { AmmoInstance } from '../Physics/Ammo'
 import { WeaponConfig, getWeaponConfig } from './Weapon'
 import { raycastBotMeshes } from './BotMeshHit'
 import { FPSMesh } from '../View/Mesh/FPSMesh'
+import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
 
 // Good reference : https://github.com/222464/EvolvedVirtualCreaturesRepo/blob/master/VirtualCreatures/Volumetric_SDL/Source/SceneObjects/Physics/DynamicCharacterController.cpp
 export class Player extends Pawn implements IUpdatable {
@@ -465,10 +466,12 @@ export class Player extends Pawn implements IUpdatable {
     this.recoilIndex = 0
 
     const game = Game.getInstance()
-    const ak = game.globalLoadingManager.loadableMeshs.get('AK47')
     const renderer = game.currentPlayer?.renderer
-    if (ak && renderer) {
-      renderer.setMesh(ak.clone() as FPSMesh)
+    if (renderer instanceof FPSRenderer) {
+      renderer.equipWeaponMesh('AK47', false)
+    } else if (renderer) {
+      const ak = game.globalLoadingManager.loadableMeshs.get('AK47')
+      if (ak) renderer.setMesh(ak.clone() as FPSMesh, false)
     }
   }
 

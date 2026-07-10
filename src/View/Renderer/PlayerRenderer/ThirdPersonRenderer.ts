@@ -28,7 +28,7 @@ export class ThirdPersonRenderer extends PlayerRenderer {
     }
     public handleWeaponSwitch(): void {
     }
-    public setMesh(mesh: LoadableMesh): void {
+    public setMesh(mesh: LoadableMesh, _playSwitchAnim?: boolean): void {
         this.tpsMesh = mesh as ThirdPersonMesh;
         this.tpsMesh.init();
         this.addToRenderer();

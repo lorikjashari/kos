@@ -18,12 +18,12 @@ export class FPSMesh extends AnimatedLoadableMesh implements IUpdatable {
   private meshPrepared = false
 
   private initMesh(): void {
-    // Idempotent — never flip scale twice
-    if (!this.meshPrepared) {
-      this.mesh.scale.multiplyScalar(-1)
-      this.meshPrepared = true
-    }
     this.mesh.visible = true
+    // Already prepared (pooled / re-equipped) — skip expensive material clone pass
+    if (this.meshPrepared) return
+
+    this.mesh.scale.multiplyScalar(-1)
+    this.meshPrepared = true
     this.mesh.traverse((child) => {
       child.castShadow = false
       // Don't receive world shadows — they crush hands/guns to black

@@ -13,6 +13,7 @@ import { MapMesh } from './View/Mesh/MapMesh'
 import { AudioManager } from './View/Audio/AudioManager'
 import { BotDifficulty, TrainingBot } from './Core/TrainingBot'
 import { TrainingBotRenderer } from './View/Renderer/TrainingBotRenderer'
+import { FPSRenderer } from './View/Renderer/PlayerRenderer/FPSRenderer'
 import type { BotMatchConfig } from './UI/MainMenu'
 import { MatchStats, pickBotNames, type ScoreRow } from './Core/MatchStats'
 import {
@@ -108,6 +109,7 @@ export class Game implements IUpdatable {
     this.renderer.hud?.setScoreboardVisible(false)
     this.renderer.hud?.setPauseMenuOpen(false)
 
+    // Warm already kicked off from menu click; keep a background pass too
     void this.warmCombatSystems()
     setTimeout(() => this.inputManager.onLock(), 80)
   }
@@ -242,26 +244,54 @@ export class Game implements IUpdatable {
     return this.matchStarted && this.combatLive && this.lockdownTimer <= 0
   }
 
+  public async prepareCombat(): Promise<void> {
+    await this.warmCombatSystems()
+  }
+
   private async warmCombatSystems(): Promise<void> {
-    if (this.effectsWarmed) {
-      await this.audioManager.warmPlayback()
-      return
-    }
     try {
       await this.audioManager.unlock()
       await this.audioManager.warmPlayback()
-      this.renderer.projectileManager.warm()
-      // Wait a frame so particle.png can finish loading, then compile
+
+      const renderer = this.renderer
+      const camera = renderer.camera
+      const fpsRenderer = this.currentPlayer?.renderer as FPSRenderer | undefined
+
+      // Wait for muzzle texture so compile actually uploads it
+      await renderer.muzzleFlashManager.whenReady()
       await new Promise<void>((r) => requestAnimationFrame(() => r()))
-      this.renderer.muzzleFlashManager.warm(this.renderer, this.renderer.camera)
-      // Dummy off-screen flash + blood touch to upload GPU state
+
+      // Pre-init every gun + compile viewmodel shaders (biggest switch hitch)
+      fpsRenderer?.warmWeapons(renderer)
+      await Promise.all([
+        fpsRenderer?.warmShellParticles() ?? Promise.resolve(),
+        renderer.particleManager.whenReady(),
+      ])
+
+      renderer.projectileManager.warm(renderer, camera)
+      renderer.muzzleFlashManager.warm(renderer, camera)
+      renderer.bloodManager.warm(renderer, camera)
+      renderer.bulletHoleManager.warm(renderer, camera)
+      renderer.hud?.warmWeaponIcons()
+
+      // Live off-screen spawn once so first real shot/hit uses hot paths
       const off = new Vector3D(0, -500, 0)
-      this.renderer.muzzleFlashManager.spawn(off, new Vector3D(0, 0, -1))
-      this.renderer.bloodManager.spawn(off, new Vector3D(0, 1, 0), 'body')
+      const dir = new Vector3D(0, 0, -1)
+      renderer.muzzleFlashManager.spawn(off, dir)
+      renderer.projectileManager.spawn(off, dir, undefined, 50)
+      renderer.bloodManager.spawn(off, new Vector3D(0, 1, 0), 'body')
+      renderer.bloodManager.spawn(off, new Vector3D(0, 1, 0), 'head')
+      renderer.bloodManager.spawn(off, new Vector3D(0, 1, 0), 'legs')
+      renderer.bulletHoleManager.spawn(off, new Vector3D(0, 1, 0))
+
+      // Force a compile + one render of warm objects
+      renderer.compile(renderer.scene, camera)
+      renderer.render(renderer.scene, camera)
+
       this.effectsWarmed = true
-      // Clear warm-up debris next frames via managers' normal update
     } catch (e) {
       console.warn('[warm]', e)
+      this.effectsWarmed = true
     }
   }
 

@@ -187,20 +187,37 @@ export class AudioManager extends THREE.AudioListener {
 
   public async warmPlayback(): Promise<void> {
     await this.unlock()
-    // Touch each buffer through the audio graph so first real shot isn't cold
-    for (const id of ['ak_shot', 'usp_shot', 'flesh_bullet1', 'headshot1', 'death1', 'empty_rifle'] as SoundId[]) {
+    // Ensure every combat buffer is decoded before first shot/hit
+    await Promise.all(PRIORITY.map((id) => this.ensureBuffer(id)))
+
+    const ctx = this.getCtx()
+    if (ctx.state === 'suspended') await ctx.resume()
+
+    // Touch every buffer through the graph (incl. HRTF path used by bot shots)
+    for (const id of PRIORITY) {
       const buffer = this.buffers.get(id)
       if (!buffer) continue
       try {
-        const ctx = this.getCtx()
         const src = ctx.createBufferSource()
         src.buffer = buffer
         const gain = ctx.createGain()
         gain.gain.value = 0.0001
         src.connect(gain)
-        gain.connect(this.masterGain)
+
+        const panner = ctx.createPanner()
+        panner.panningModel = 'HRTF'
+        panner.distanceModel = 'inverse'
+        panner.refDistance = 4
+        panner.maxDistance = 72
+        if (typeof panner.positionX !== 'undefined') {
+          panner.positionX.value = 0
+          panner.positionY.value = -50
+          panner.positionZ.value = 0
+        }
+        gain.connect(panner)
+        panner.connect(this.masterGain)
         src.start(0)
-        src.stop(ctx.currentTime + 0.02)
+        src.stop(ctx.currentTime + 0.015)
       } catch {
         /* ignore */
       }

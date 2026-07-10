@@ -31,9 +31,13 @@ export class BulletHoleManager {
   private material: THREE.MeshBasicMaterial
   private geometry: THREE.CircleGeometry
   private holes: THREE.Mesh[] = []
+  private meshPool: THREE.Mesh[] = []
   private readonly maxHoles = 250
   private readonly holeRadius = 0.075
   private readonly surfaceOffset = 0.015
+  private readonly _n = new THREE.Vector3()
+  private readonly _pos = new THREE.Vector3()
+  private readonly _up = new THREE.Vector3(0, 0, 1)
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -51,13 +55,30 @@ export class BulletHoleManager {
     this.geometry = new THREE.CircleGeometry(this.holeRadius, 20)
   }
 
-  public spawn(position: Vector3D, normal: Vector3D): void {
-    const hole = new THREE.Mesh(this.geometry, this.material)
-    const surfaceNormal = normal.clone().normalize()
-    const offsetPosition = position.clone().add(surfaceNormal.clone().multiplyScalar(this.surfaceOffset))
+  private acquireHole(): THREE.Mesh {
+    return this.meshPool.pop() || new THREE.Mesh(this.geometry, this.material)
+  }
 
-    hole.position.copy(offsetPosition)
-    hole.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), surfaceNormal)
+  /** Upload decal material + pre-allocate meshes so first wall hit doesn't stall */
+  public warm(renderer?: THREE.WebGLRenderer, camera?: THREE.Camera): void {
+    for (let i = 0; i < 32; i++) {
+      this.meshPool.push(new THREE.Mesh(this.geometry, this.material))
+    }
+    const hole = this.acquireHole()
+    hole.position.set(0, -800, 0)
+    this.scene.add(hole)
+    if (renderer && camera) renderer.compile(this.scene, camera)
+    this.scene.remove(hole)
+    this.meshPool.push(hole)
+  }
+
+  public spawn(position: Vector3D, normal: Vector3D): void {
+    const hole = this.acquireHole()
+    this._n.copy(normal).normalize()
+    this._pos.copy(position).addScaledVector(this._n, this.surfaceOffset)
+
+    hole.position.copy(this._pos)
+    hole.quaternion.setFromUnitVectors(this._up, this._n)
     this.scene.add(hole)
     this.holes.push(hole)
 
@@ -65,6 +86,7 @@ export class BulletHoleManager {
       const oldest = this.holes.shift()
       if (oldest) {
         this.scene.remove(oldest)
+        this.meshPool.push(oldest)
       }
     }
   }

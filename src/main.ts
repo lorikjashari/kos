@@ -8,10 +8,13 @@ async function main() {
     onPlayBots: (config) => {
       const game = Game.getInstance()
       game.audioManager.stopMenuMusic()
-      // User click unlocks audio — warm graph before match hitch
-      void game.audioManager.warmPlayback()
-      game.startBotMatch(config)
       menu.hide()
+      // Warm audio + VFX on the user gesture so first shot/hit never hitchs
+      void (async () => {
+        await game.audioManager.unlock()
+        await game.prepareCombat()
+        game.startBotMatch(config)
+      })()
     },
     onSettingsChanged: (settings) => {
       const game = Game.getInstance()

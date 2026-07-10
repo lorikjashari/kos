@@ -5,30 +5,40 @@ import { Game } from "../../Game";
 import { FPSRenderer } from "../Renderer/PlayerRenderer/FPSRenderer";
 
 export class ParticleManager extends ParticleSystem implements IUpdatable {
+  private muzzleTextureReady: Promise<void>
+
   constructor(scene: THREE.Scene) {
     super();
-    this.addScene(scene);
+    this.muzzleTextureReady = this.addScene(scene);
   }
-  addScene(scene: THREE.Scene) {
+
+  public whenReady(): Promise<void> {
+    return this.muzzleTextureReady
+  }
+
+  addScene(scene: THREE.Scene): Promise<void> {
     const renderer = new CustomRenderer();
-    const createSprite = () => {
-      var map = new THREE.TextureLoader().load("muzzle.png");
-      var material = new THREE.SpriteMaterial({
-        map: map,
+    const textureReady = new Promise<void>((resolve) => {
+      const map = new THREE.TextureLoader().load(
+        "muzzle.png",
+        () => resolve(),
+        undefined,
+        () => resolve()
+      );
+      const material = new THREE.SpriteMaterial({
+        map,
         color: 0x22334455,
         blending: THREE.AdditiveBlending,
         fog: true,
       });
-      return new THREE.Sprite(material);
-    };
-    const sprite = createSprite();
+      void new THREE.Sprite(material);
+    });
     renderer.onParticleCreated = function (p) {
       const game = Game.getInstance();
       const bulletMesh =
         game.globalLoadingManager.loadableMeshs.get("Bullet")!.mesh;
       const fpsRenderer = game.currentPlayer.renderer as FPSRenderer;
       const fpsMesh = fpsRenderer.fpsMesh;
-      const offset = fpsRenderer.weaponOffset;
       p.target = this.targetPool.get(bulletMesh);
       p.target.position.set(1, -1, -2);
       p.target.scale.set(0.04, 0.04, 0.04);
@@ -51,6 +61,7 @@ export class ParticleManager extends ParticleSystem implements IUpdatable {
       p.target = null;
     };
     super.addRenderer(renderer);
+    return textureReady;
   }
   public addParticleEmitter(emitter: Emitter) {
     super.addEmitter(emitter);

@@ -333,10 +333,18 @@ export class GameHUD {
 
   private bakeIcons(): void {
     const ak = this.iconRenderer.getIcon('AK47')
+    const usp = this.iconRenderer.getIcon('Usp')
     const knife = this.iconRenderer.getIcon('Knife')
     if (ak) this.weaponIconEl.src = ak
+    // Touch USP so first pistol equip never bakes mid-match
+    void usp
     if (knife) this.knifeIconEl.src = knife
     this.iconsReady = true
+  }
+
+  /** Pre-bake every weapon silhouette before combat */
+  public warmWeaponIcons(): void {
+    this.bakeIcons()
   }
 
   private setWeaponIcon(weaponKey: string): void {

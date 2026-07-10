@@ -7,7 +7,6 @@ import { Vector3D } from '../Core/Vector'
 import { PlayerRenderer } from '../View/Renderer/PlayerRenderer/PlayerRenderer'
 import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
 import { FPSCameraManager } from '../View/CameraManager/FPSCameraManager'
-import { FPSMesh } from '../View/Mesh/FPSMesh'
 import { DEFAULT_KEYBINDS, type KeybindMap } from '../UI/SettingsStore'
 
 export class InputManager implements IUpdatable {
@@ -179,24 +178,21 @@ export class InputManager implements IUpdatable {
     }
 
     if (this.keys.get(Key.One)?.justReleased) {
-      const ak47 = Game.getInstance().globalLoadingManager.loadableMeshs.get('AK47')
-      if (ak47 && player.setWeapon('AK47')) {
-        playerRenderer?.setMesh(ak47.clone() as FPSMesh)
+      if (player.setWeapon('AK47')) {
+        ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('AK47')
         void Game.getInstance().audioManager.playSwitch('AK47')
       }
     }
     if (this.keys.get(Key.Two)?.justReleased) {
-      const usp = Game.getInstance().globalLoadingManager.loadableMeshs.get('Usp')
-      if (usp && player.setWeapon('Usp')) {
-        playerRenderer?.setMesh(usp.clone() as FPSMesh)
+      if (player.setWeapon('Usp')) {
+        ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('Usp')
         void Game.getInstance().audioManager.playSwitch('Usp')
       }
     }
 
     if (this.keys.get(Key.Three)?.justReleased) {
-      const knife = Game.getInstance().globalLoadingManager.loadableMeshs.get('Knife')
-      if (knife && player.setWeapon('Knife')) {
-        playerRenderer?.setMesh(knife.clone() as FPSMesh)
+      if (player.setWeapon('Knife')) {
+        ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('Knife')
         void Game.getInstance().audioManager.playSwitch('Knife')
       }
     }

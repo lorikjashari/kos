@@ -28,6 +28,25 @@ export class ViewmodelRenderer {
     renderer.debugUI.addMesh(this.camera)
   }
 
+  /** Compile viewmodel shaders so first gun switch never hitchs */
+  public warm(renderer: THREE.WebGLRenderer, meshes: THREE.Object3D[]): void {
+    const added: THREE.Object3D[] = []
+    for (const mesh of meshes) {
+      if (!mesh) continue
+      mesh.position.set(0, -50, 0)
+      mesh.visible = true
+      this.camera.add(mesh)
+      added.push(mesh)
+    }
+    renderer.compile(this.scene, this.camera)
+    renderer.clearDepth()
+    renderer.render(this.scene, this.camera)
+    for (const mesh of added) {
+      this.camera.remove(mesh)
+      mesh.visible = false
+    }
+  }
+
   public render(renderer: Renderer, dt: number) {
     // Draw on top of the world: clear depth so walls never cut the gun
     renderer.clearDepth()
