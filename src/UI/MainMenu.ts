@@ -133,10 +133,6 @@ export class MainMenu {
     this.audio()?.playMenuHover()
   }
 
-  private playClick(): void {
-    this.audio()?.playMenuClick()
-  }
-
   private buildHtml(): string {
     return `
       <div class="kos-bg" aria-hidden="true">
@@ -281,9 +277,6 @@ export class MainMenu {
       if (!t) return
 
       const action = t.getAttribute('data-action')
-      if (action || t.getAttribute('data-diff') || t.getAttribute('data-tab')) {
-        if (!(t as HTMLButtonElement).disabled) this.playClick()
-      }
       if (action === 'bots') this.showScreen('bots')
       if (action === 'settings') this.showScreen('settings')
       if (action === 'back-main') this.showScreen('main')

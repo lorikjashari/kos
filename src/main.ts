@@ -25,6 +25,10 @@ async function main() {
 
     menu.setLoadingProgress('Starting engine…', 20)
     const game = Game.getInstance()
+    game.setReturnToMenuHandler(() => {
+      void game.audioManager.startMenuMusic()
+      menu.show()
+    })
     const settings = loadSettings()
     game.inputManager.applyKeybinds(settings.keybinds)
 

@@ -173,11 +173,6 @@ export class AudioManager extends THREE.AudioListener {
     this.playId('weapon_select', 0.55)
   }
 
-  /** Slightly stronger click for menu actions */
-  public playMenuClick(): void {
-    this.playId('weapon_select', 0.85)
-  }
-
   public startLoading(): void {
     if (this.loadStarted) return
     this.loadStarted = true

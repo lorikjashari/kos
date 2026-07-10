@@ -38,6 +38,8 @@ export class GameHUD {
   private killFeedEl!: HTMLElement
   private scoreboardEl!: HTMLElement
   private sbRowsEl!: HTMLElement
+  private pauseMenuEl!: HTMLElement
+  private pauseBtnEl!: HTMLElement
   private damageFlashUntil = 0
   private lastHealthShown = 100
   private deathShown = false
@@ -53,6 +55,16 @@ export class GameHUD {
     this.root.id = 'game-hud'
     this.root.innerHTML = `
       <div class="kos-brand">KoS</div>
+
+      <div class="cs-pause-menu" id="hud-pause">
+        <button type="button" class="cs-pause-btn" id="hud-pause-btn" title="Menu" aria-label="Open menu">
+          <span></span><span></span>
+        </button>
+        <div class="cs-pause-panel" id="hud-pause-panel" aria-hidden="true">
+          <button type="button" class="cs-pause-opt" data-pause="resume">Back to game</button>
+          <button type="button" class="cs-pause-opt" data-pause="menu">Back to menu</button>
+        </div>
+      </div>
 
       <div class="cs-bottom-left">
         <div class="cs-vital">
@@ -128,6 +140,7 @@ export class GameHUD {
     this.root.style.display = ''
     if (this.killFeedEl) this.killFeedEl.innerHTML = ''
     this.setScoreboardVisible(false)
+    this.setPauseMenuOpen(false)
   }
 
   private bind(): void {
@@ -150,6 +163,35 @@ export class GameHUD {
     this.killFeedEl = document.getElementById('hud-killfeed')!
     this.scoreboardEl = document.getElementById('hud-scoreboard')!
     this.sbRowsEl = document.getElementById('hud-sb-rows')!
+    this.pauseMenuEl = document.getElementById('hud-pause')!
+    this.pauseBtnEl = document.getElementById('hud-pause-btn')!
+
+    this.pauseBtnEl.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const game = Game.getInstance()
+      if (game.matchPaused) game.resumeMatch()
+      else game.pauseMatch()
+    })
+
+    this.pauseMenuEl.querySelectorAll('[data-pause]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const action = (btn as HTMLElement).getAttribute('data-pause')
+        const game = Game.getInstance()
+        if (action === 'resume') game.resumeMatch()
+        if (action === 'menu') game.returnToMenu()
+      })
+    })
+  }
+
+  public setPauseMenuOpen(open: boolean): void {
+    if (!this.pauseMenuEl) return
+    this.pauseMenuEl.classList.toggle('is-open', open)
+    this.pauseBtnEl?.classList.toggle('is-active', open)
+    const panel = document.getElementById('hud-pause-panel')
+    panel?.setAttribute('aria-hidden', open ? 'false' : 'true')
   }
 
   public setScoreboardVisible(visible: boolean): void {
@@ -329,6 +371,81 @@ export class GameHUD {
         letter-spacing: 0.28em;
         color: rgba(255,255,255,0.28);
         text-shadow: none;
+      }
+
+      .cs-pause-menu {
+        position: absolute;
+        top: 12px;
+        left: 14px;
+        z-index: 20;
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .cs-pause-btn {
+        width: 36px;
+        height: 36px;
+        appearance: none;
+        border: 1px solid rgba(255,255,255,0.18);
+        background: rgba(0,0,0,0.45);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        padding: 0;
+        transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+      }
+      .cs-pause-btn span {
+        display: block;
+        width: 3px;
+        height: 14px;
+        background: #fff;
+        border-radius: 1px;
+        box-shadow: 0 0 6px rgba(255,255,255,0.25);
+      }
+      .cs-pause-btn:hover {
+        background: rgba(26, 95, 255, 0.35);
+        border-color: rgba(26, 95, 255, 0.55);
+        transform: translateY(-1px);
+      }
+      .cs-pause-btn.is-active {
+        background: rgba(26, 95, 255, 0.45);
+        border-color: rgba(201, 162, 39, 0.55);
+      }
+      .cs-pause-panel {
+        display: none;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 168px;
+        padding: 8px;
+        background: linear-gradient(165deg, rgba(12, 16, 28, 0.94), rgba(8, 10, 18, 0.96));
+        border: 1px solid rgba(255,255,255,0.10);
+        border-left: 3px solid #1a5fff;
+        box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+        animation: kos-fade-in 180ms ease both;
+      }
+      .cs-pause-menu.is-open .cs-pause-panel { display: flex; }
+      .cs-pause-opt {
+        appearance: none;
+        border: none;
+        background: transparent;
+        color: #fff;
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-align: left;
+        padding: 11px 12px;
+        cursor: pointer;
+        transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+      }
+      .cs-pause-opt:hover {
+        background: rgba(26, 95, 255, 0.18);
+        color: #c9a227;
+        transform: translateX(2px);
       }
 
       .cs-bottom-left {

@@ -38,6 +38,7 @@ export class Game implements IUpdatable {
   public trainingBots: TrainingBot[] = []
   public botRenderers: TrainingBotRenderer[] = []
   public matchStarted = false
+  public matchPaused = false
   public playerName = 'Player'
   /** When true, killing a bot instantly refills the current mag */
   public refillAmmoOnKill = false
@@ -50,6 +51,7 @@ export class Game implements IUpdatable {
   private combatLive = false
   public stats = new MatchStats()
   private nameQueue: string[] = []
+  private onReturnToMenu: (() => void) | null = null
 
   constructor() {
     this.players = new Array<PlayerWrapper>()
@@ -58,6 +60,10 @@ export class Game implements IUpdatable {
     this.inputManager = new InputManager()
     this.update = this.update.bind(this)
     this.audioManager = new AudioManager()
+  }
+
+  public setReturnToMenuHandler(handler: () => void): void {
+    this.onReturnToMenu = handler
   }
 
   /** Load world + player; bots spawn when match starts from menu */
@@ -75,6 +81,7 @@ export class Game implements IUpdatable {
     this.playerName = config.playerName || 'Player'
     this.refillAmmoOnKill = !!config.refillAmmoOnKill
     this.matchStarted = true
+    this.matchPaused = false
     this.combatLive = false
     this.lockdownTimer = this.lockdownDuration
     this.inputManager.gameplayEnabled = true
@@ -99,9 +106,45 @@ export class Game implements IUpdatable {
     this.renderer.hud?.showGameplay()
     this.renderer.hud?.setLockdown(this.lockdownTimer)
     this.renderer.hud?.setScoreboardVisible(false)
+    this.renderer.hud?.setPauseMenuOpen(false)
 
     void this.warmCombatSystems()
     setTimeout(() => this.inputManager.onLock(), 80)
+  }
+
+  public pauseMatch(): void {
+    if (!this.matchStarted || this.matchPaused) return
+    this.matchPaused = true
+    this.inputManager.gameplayEnabled = false
+    this.inputManager.unlock()
+    this.renderer.hud?.setScoreboardVisible(false)
+    this.renderer.hud?.setPauseMenuOpen(true)
+  }
+
+  public resumeMatch(): void {
+    if (!this.matchStarted || !this.matchPaused) return
+    this.matchPaused = false
+    this.inputManager.gameplayEnabled = true
+    this.renderer.hud?.setPauseMenuOpen(false)
+    setTimeout(() => this.inputManager.onLock(), 40)
+  }
+
+  public returnToMenu(): void {
+    this.matchPaused = false
+    this.matchStarted = false
+    this.combatLive = false
+    this.lockdownTimer = 0
+    this.clearBots()
+    this.stats.reset()
+    this.inputManager.gameplayEnabled = false
+    this.inputManager.unlock()
+    this.renderer.hud?.setPauseMenuOpen(false)
+    this.renderer.hud?.setLockdown(null)
+    this.renderer.hud?.setScoreboardVisible(false)
+    const hudRoot = document.getElementById('game-hud')
+    if (hudRoot) hudRoot.style.display = 'none'
+    document.getElementById('game-crosshair')?.classList.remove('is-on')
+    this.onReturnToMenu?.()
   }
 
   /**
@@ -356,6 +399,13 @@ export class Game implements IUpdatable {
     this.currentPlayer.player.prestep(dt)
 
     if (this.matchStarted) {
+      if (this.matchPaused) {
+        this.renderer.update(0)
+        this.lastUpdateTS = now
+        requestAnimationFrame(this.update)
+        return
+      }
+
       // Stagger bot mesh creation across lockdown frames
       if (this.pendingBotSpawns.length > 0) {
         this.botSpawnAcc += dt

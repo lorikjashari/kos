@@ -307,7 +307,8 @@ export class InputManager implements IUpdatable {
     if (menu && !menu.classList.contains('is-hidden')) return true
     const target = event.target as HTMLElement
     if (target.nodeName === 'BODY' || target.nodeName === 'CANVAS') return false
-    return !!target.closest('#game-hud')
+    // Only treat interactive HUD chrome as blocking (pause button / panel)
+    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu')
   }
 
   onMouseDown(event: MouseEvent): void {
