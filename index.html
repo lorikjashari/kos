@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <title>KoS — FPS Shooting</title>
+
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+        background: #f3f6fb;
+      }
+
+      #fps {
+        position: absolute;
+        background: rgba(0, 0, 0, 0);
+        top: 12px;
+        left: 20px;
+        font-weight: 500;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        font-family: 'Segoe UI', 'Gill Sans', Calibri, sans-serif;
+        color: rgba(255, 255, 255, 0.75);
+        z-index: 6;
+        pointer-events: none;
+      }
+
+      canvas {
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+
+  <body>
+    <p id="fps"></p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
