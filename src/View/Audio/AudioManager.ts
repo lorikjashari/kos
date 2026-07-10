@@ -96,6 +96,9 @@ export class AudioManager extends THREE.AudioListener {
   private masterGain!: GainNode
   private loadStarted = false
   private ctx!: AudioContext
+  private menuMusic: HTMLAudioElement | null = null
+  private menuMusicWanted = false
+  private lastHoverAt = 0
 
   constructor() {
     super()
@@ -126,9 +129,53 @@ export class AudioManager extends THREE.AudioListener {
         src.start(0)
         this.unlocked = true
       }
+      if (this.menuMusicWanted) void this.startMenuMusic()
     } catch {
       /* ignore */
     }
+  }
+
+  /** Looping menu theme — menus only, never during loading / match */
+  public async startMenuMusic(): Promise<void> {
+    this.menuMusicWanted = true
+    await this.unlock()
+    try {
+      if (!this.menuMusic) {
+        this.menuMusic = new Audio('/kosmenusong.mp3')
+        this.menuMusic.loop = true
+        this.menuMusic.preload = 'auto'
+        this.menuMusic.volume = 0.38
+      }
+      if (this.menuMusic.paused) {
+        await this.menuMusic.play()
+      }
+    } catch {
+      /* autoplay blocked until next gesture — unlock() retries */
+    }
+  }
+
+  public stopMenuMusic(): void {
+    this.menuMusicWanted = false
+    if (!this.menuMusic) return
+    try {
+      this.menuMusic.pause()
+      this.menuMusic.currentTime = 0
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Soft hover tick for menu buttons */
+  public playMenuHover(): void {
+    const now = performance.now()
+    if (now - this.lastHoverAt < 55) return
+    this.lastHoverAt = now
+    this.playId('weapon_select', 0.55)
+  }
+
+  /** Slightly stronger click for menu actions */
+  public playMenuClick(): void {
+    this.playId('weapon_select', 0.85)
   }
 
   public startLoading(): void {

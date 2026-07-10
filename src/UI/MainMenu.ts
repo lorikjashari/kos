@@ -11,6 +11,7 @@ import {
 } from './SettingsStore'
 import { CrosshairRenderer } from './CrosshairRenderer'
 import { Key } from '../Input/KeyBinding'
+import { Game } from '../Game'
 
 export type BotMatchConfig = {
   difficulty: BotDifficulty
@@ -38,6 +39,7 @@ export class MainMenu {
   private listeningKey: Key | null = null
   private selectedDifficulty: BotDifficulty = 'medium'
   private selectedBotCount = 5
+  private currentScreen: 'loading' | 'main' | 'bots' | 'settings' = 'loading'
 
   constructor(callbacks: MenuCallbacks) {
     this.callbacks = callbacks
@@ -78,6 +80,7 @@ export class MainMenu {
   }
 
   public hide(): void {
+    this.stopMenuAudio()
     this.root.classList.add('is-hidden')
     this.root.setAttribute('aria-hidden', 'true')
     document.getElementById('game-crosshair')?.classList.add('is-on')
@@ -91,15 +94,47 @@ export class MainMenu {
   }
 
   private showScreen(id: 'loading' | 'main' | 'bots' | 'settings'): void {
+    this.currentScreen = id
     this.root.querySelectorAll('.kos-screen').forEach((el) => {
       el.classList.toggle('is-active', el.getAttribute('data-screen') === id)
     })
     this.root.classList.toggle('is-bg-blur', id !== 'main')
+    this.syncMenuMusic()
     if (id === 'settings') {
       this.renderKeybindList()
       this.syncCrosshairControls()
       this.crosshairPreview?.draw()
     }
+  }
+
+  private audio() {
+    try {
+      return Game.getInstance().audioManager
+    } catch {
+      return null
+    }
+  }
+
+  private syncMenuMusic(): void {
+    const audio = this.audio()
+    if (!audio) return
+    if (this.currentScreen === 'loading' || this.root.classList.contains('is-hidden')) {
+      audio.stopMenuMusic()
+      return
+    }
+    void audio.startMenuMusic()
+  }
+
+  private stopMenuAudio(): void {
+    this.audio()?.stopMenuMusic()
+  }
+
+  private playHover(): void {
+    this.audio()?.playMenuHover()
+  }
+
+  private playClick(): void {
+    this.audio()?.playMenuClick()
   }
 
   private buildHtml(): string {
@@ -229,11 +264,26 @@ export class MainMenu {
       if ((e.target as HTMLElement).closest('.kos-bg')) e.preventDefault()
     })
 
+    this.root.addEventListener(
+      'pointerenter',
+      (e) => {
+        const t = (e.target as HTMLElement).closest(
+          'button.kos-btn, button.kos-chip, button.kos-tab, button.kos-back, button.kos-bind'
+        ) as HTMLButtonElement | null
+        if (!t || t.disabled) return
+        this.playHover()
+      },
+      true
+    )
+
     this.root.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest('[data-action], [data-diff], [data-tab]') as HTMLElement | null
       if (!t) return
 
       const action = t.getAttribute('data-action')
+      if (action || t.getAttribute('data-diff') || t.getAttribute('data-tab')) {
+        if (!(t as HTMLButtonElement).disabled) this.playClick()
+      }
       if (action === 'bots') this.showScreen('bots')
       if (action === 'settings') this.showScreen('settings')
       if (action === 'back-main') this.showScreen('main')
@@ -305,6 +355,7 @@ export class MainMenu {
     this.selectedBotCount = this.readBotCount()
     const refill = !!(this.root.querySelector('#kos-refill-kill') as HTMLInputElement | null)?.checked
     this.persist()
+    this.stopMenuAudio()
     this.callbacks.onPlayBots({
       difficulty: this.selectedDifficulty,
       botCount: this.selectedBotCount,

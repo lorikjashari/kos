@@ -7,6 +7,7 @@ async function main() {
   const menu = new MainMenu({
     onPlayBots: (config) => {
       const game = Game.getInstance()
+      game.audioManager.stopMenuMusic()
       // User click unlocks audio — warm graph before match hitch
       void game.audioManager.warmPlayback()
       game.startBotMatch(config)
@@ -46,6 +47,8 @@ async function main() {
     // Brief beat so the bar reads as complete
     await new Promise((r) => setTimeout(r, 280))
     menu.showMain()
+    // Menu theme starts after first user gesture (browser autoplay policy)
+    void game.audioManager.startMenuMusic()
   } catch (error) {
     console.error(error)
     menu.showError(error instanceof Error ? error.message : 'An unknown error occurred while loading the game.')
