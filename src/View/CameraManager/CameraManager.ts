@@ -4,6 +4,11 @@ import { Vector2D } from '../../Core/Vector'
 import { IUpdatable } from '../../Interface/IUpdatable'
 
 export abstract class CameraManager implements IUpdatable {
+  /** Base radians-per-pixel at sensitivity 1. */
+  public static readonly BASE_MOUSE_SCALE = 0.0015
+  /** Live mouse look multiplier (driven by settings / console). */
+  public static mouseSensitivity = 3
+
   public camera: THREE.PerspectiveCamera
   public player: Player
   public isRotating = false
@@ -13,6 +18,11 @@ export abstract class CameraManager implements IUpdatable {
   constructor(player: Player, camera: THREE.PerspectiveCamera) {
     this.player = player
     this.camera = camera
+  }
+
+  /** Effective mouse look scale for this frame. */
+  public static getMouseScale(): number {
+    return CameraManager.BASE_MOUSE_SCALE * CameraManager.mouseSensitivity
   }
   private updateRotationState(dt: number): void {
     if (this.isRotating) {

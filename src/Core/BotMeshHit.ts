@@ -58,6 +58,9 @@ export function raycastBotMeshes(
     if (!t.alive || !t.root.visible) continue
     const hits = raycaster.intersectObject(t.root, true)
     for (const hit of hits) {
+      // The held weapon prop floats in front of the hand — never a hit surface,
+      // otherwise bullets "stop in the air" on the gun instead of hitting the bot.
+      if (isGunPart(hit.object)) continue
       const part = findBodyPart(hit.object)
       if (!part) continue
       if (!best || hit.distance < best.distance) {
@@ -75,6 +78,16 @@ export function raycastBotMeshes(
     }
   }
   return best
+}
+
+/** True if this object or any ancestor is a held weapon prop (userData.isGun). */
+function isGunPart(obj: THREE.Object3D): boolean {
+  let cur: THREE.Object3D | null = obj
+  while (cur) {
+    if (cur.userData?.isGun) return true
+    cur = cur.parent
+  }
+  return false
 }
 
 function findBodyPart(obj: THREE.Object3D): BodyPart | undefined {

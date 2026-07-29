@@ -15,6 +15,17 @@ export type EditorMenuHandlers = {
   onYaw: (deltaRad: number) => void
   onSnapGround: () => void
   onResetPose: () => void
+  onPreviewAnim: (clip: string) => void
+  /** Switch held weapon ('Usp' | 'AK') */
+  onSelectWeapon: (key: string) => void
+  /** '' = move whole bot; otherwise a bone key from getEditableBones() */
+  onSelectBone: (boneKey: string) => void
+  /** Set the selected joint's rotation (degrees, XYZ offset from bind) */
+  onBoneRot: (x: number, y: number, z: number) => void
+  /** Reset the selected joint to bind */
+  onResetBone: () => void
+  /** Returns a text summary of all joint edits (for copy/paste) */
+  getPoseText: () => string
   onFpsLook: () => void
   onEditCursor: () => void
   onExit: () => void
@@ -32,6 +43,10 @@ export type EditorMenuState = {
   pos: { x: number; y: number; z: number }
   yawDeg: number
   fpsLook: boolean
+  previewAnim: string
+  weapon: string
+  selectedBone: string
+  boneRot: { x: number; y: number; z: number }
 }
 
 export class EditorMenu {
@@ -100,6 +115,39 @@ export class EditorMenu {
         </section>
 
         <section class="kos-ed-sec">
+          <div class="kos-ed-label">Animation preview</div>
+          <p class="kos-ed-hint" style="margin-bottom:8px">Advanced gait on the CS terrorist — clavicles, shoulders, elbows, wrists. X-Ray is separate under Display.</p>
+          <div class="kos-ed-row kos-ed-anims">
+            <button type="button" data-anim="Idle" class="is-on">Idle</button>
+            <button type="button" data-anim="Walking">Walking</button>
+            <button type="button" data-anim="Running">Running</button>
+          </div>
+        </section>
+
+        <section class="kos-ed-sec">
+          <div class="kos-ed-label">Weapon</div>
+          <p class="kos-ed-hint" style="margin-bottom:8px">He always holds the selected gun — Idle / Walking / Running.</p>
+          <div class="kos-ed-row kos-ed-anims">
+            <button type="button" data-weapon="Usp" class="is-on">USP</button>
+            <button type="button" data-weapon="AK">AK</button>
+          </div>
+        </section>
+
+        <section class="kos-ed-sec">
+          <div class="kos-ed-label">Rig · pose a joint</div>
+          <select id="kos-ed-bone" class="kos-ed-select">
+            <option value="">Whole body (move bot)</option>
+          </select>
+          <div id="kos-ed-bonerot" class="kos-ed-bonerot" style="display:none">
+            <div class="kos-ed-rotrow"><b>X</b><input type="range" data-brot="x" min="-180" max="180" step="1" value="0" /><span data-brotval="x">0°</span></div>
+            <div class="kos-ed-rotrow"><b>Y</b><input type="range" data-brot="y" min="-180" max="180" step="1" value="0" /><span data-brotval="y">0°</span></div>
+            <div class="kos-ed-rotrow"><b>Z</b><input type="range" data-brot="z" min="-180" max="180" step="1" value="0" /><span data-brotval="z">0°</span></div>
+            <div class="kos-ed-row"><button type="button" data-act="resetBone">Reset this joint</button></div>
+          </div>
+          <p class="kos-ed-hint">Pick a joint (head, elbow, knee…) then drag the sliders — or the gizmo — to rotate it. The animation pauses so your pose sticks. Choose “Whole body” to move the bot again.</p>
+        </section>
+
+        <section class="kos-ed-sec">
           <div class="kos-ed-label">Pose</div>
           <div class="kos-ed-row">
             <button type="button" data-act="reset">Reset pose</button>
@@ -118,6 +166,14 @@ export class EditorMenu {
         <section class="kos-ed-sec kos-ed-stats">
           <div class="kos-ed-label">Selection</div>
           <pre id="kos-ed-stats">—</pre>
+        </section>
+
+        <section class="kos-ed-sec">
+          <div class="kos-ed-label">Share your changes</div>
+          <div class="kos-ed-row">
+            <button type="button" id="kos-ed-copy" data-act="copyPose" class="kos-ed-copybtn">Copy my changes</button>
+          </div>
+          <p class="kos-ed-hint">Copies every joint you rotated as text. Paste it back in chat and I’ll bake your pose into the game.</p>
         </section>
       </div>
     `
@@ -221,6 +277,25 @@ export class EditorMenu {
           width: 100%;
           accent-color: #38bdf8;
         }
+        .kos-ed-select {
+          width: 100%;
+          padding: 7px 8px;
+          border-radius: 6px;
+          border: 1px solid rgba(255,255,255,0.16);
+          background: rgba(255,255,255,0.06);
+          color: #f1f5f9;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .kos-ed-select:focus { outline: none; border-color: rgba(125,211,252,0.6); }
+        .kos-ed-bonerot { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
+        .kos-ed-rotrow { display: flex; align-items: center; gap: 8px; }
+        .kos-ed-rotrow b { width: 12px; color: #7dd3fc; font-size: 12px; }
+        .kos-ed-rotrow input[type="range"] { flex: 1; accent-color: #38bdf8; }
+        .kos-ed-rotrow span { width: 42px; text-align: right; font-size: 11px; color: #cbd5e1; }
+        .kos-ed-copybtn { width: 100%; background: rgba(56,189,248,0.2); border-color: rgba(125,211,252,0.5); }
+        .kos-ed-copybtn.copied { background: rgba(74,222,128,0.3); border-color: rgba(74,222,128,0.6); }
         .kos-ed-stats pre {
           margin: 0;
           font-size: 11px;
@@ -282,15 +357,49 @@ export class EditorMenu {
       })
     })
 
+    this.root.querySelectorAll('[data-anim]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const clip = (btn as HTMLElement).getAttribute('data-anim') || 'Idle'
+        this.handlers.onPreviewAnim(clip)
+        this.refresh()
+      })
+    })
+
+    this.root.querySelectorAll('[data-weapon]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = (btn as HTMLElement).getAttribute('data-weapon') || 'Usp'
+        this.handlers.onSelectWeapon(key)
+        this.refresh()
+      })
+    })
+
     this.root.querySelectorAll('[data-act]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const act = (btn as HTMLElement).getAttribute('data-act')
         if (act === 'snap') this.handlers.onSnapGround()
         if (act === 'reset') this.handlers.onResetPose()
+        if (act === 'resetBone') this.handlers.onResetBone()
+        if (act === 'copyPose') {
+          this.copyPose()
+          return
+        }
         if (act === 'fpsLook') this.handlers.onFpsLook()
         if (act === 'editCursor') this.handlers.onEditCursor()
         if (act === 'exit') this.handlers.onExit()
         this.refresh()
+      })
+    })
+
+    const readRot = (): { x: number; y: number; z: number } => {
+      const get = (ax: string) =>
+        Number((this.root.querySelector(`[data-brot="${ax}"]`) as HTMLInputElement)?.value ?? 0)
+      return { x: get('x'), y: get('y'), z: get('z') }
+    }
+    this.root.querySelectorAll('[data-brot]').forEach((el) => {
+      el.addEventListener('input', () => {
+        const r = readRot()
+        this.handlers.onBoneRot(r.x, r.y, r.z)
+        this.updateRotLabels(r)
       })
     })
 
@@ -299,6 +408,62 @@ export class EditorMenu {
       this.handlers.onScale(Number(scale.value))
       this.refresh()
     })
+
+    const bone = this.root.querySelector('#kos-ed-bone') as HTMLSelectElement
+    bone.addEventListener('change', () => {
+      this.handlers.onSelectBone(bone.value)
+      this.refresh()
+    })
+  }
+
+  private updateRotLabels(r: { x: number; y: number; z: number }): void {
+    const set = (ax: 'x' | 'y' | 'z') => {
+      const el = this.root.querySelector(`[data-brotval="${ax}"]`)
+      if (el) el.textContent = `${Math.round(r[ax])}°`
+    }
+    set('x')
+    set('y')
+    set('z')
+  }
+
+  private async copyPose(): Promise<void> {
+    const text = this.handlers.getPoseText()
+    const btn = this.root.querySelector('#kos-ed-copy') as HTMLButtonElement | null
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      // Fallback for non-secure contexts
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+      } catch {
+        /* ignore */
+      }
+      document.body.removeChild(ta)
+    }
+    if (btn) {
+      const prev = btn.textContent
+      btn.textContent = 'Copied! Paste it in chat'
+      btn.classList.add('copied')
+      window.setTimeout(() => {
+        btn.textContent = prev
+        btn.classList.remove('copied')
+      }, 1600)
+    }
+  }
+
+  /** Populate the rig dropdown with the bot's editable joints. */
+  public setBones(bones: Array<{ key: string; label: string }>): void {
+    const sel = this.root.querySelector('#kos-ed-bone') as HTMLSelectElement | null
+    if (!sel) return
+    sel.innerHTML =
+      '<option value="">Whole body (move bot)</option>' +
+      bones.map((b) => `<option value="${b.key}">${b.label}</option>`).join('')
   }
 
   public isOpen(): boolean {
@@ -338,6 +503,32 @@ export class EditorMenu {
     const scaleVal = this.root.querySelector('#kos-ed-scale-val')
     if (scale && document.activeElement !== scale) scale.value = String(s.scale)
     if (scaleVal) scaleVal.textContent = s.scale.toFixed(2)
+
+    this.root.querySelectorAll('[data-anim]').forEach((btn) => {
+      btn.classList.toggle('is-on', (btn as HTMLElement).getAttribute('data-anim') === s.previewAnim)
+    })
+
+    this.root.querySelectorAll('[data-weapon]').forEach((btn) => {
+      btn.classList.toggle('is-on', (btn as HTMLElement).getAttribute('data-weapon') === s.weapon)
+    })
+
+    const bone = this.root.querySelector('#kos-ed-bone') as HTMLSelectElement | null
+    if (bone && document.activeElement !== bone && bone.value !== s.selectedBone) {
+      bone.value = s.selectedBone
+    }
+
+    const rotBox = this.root.querySelector('#kos-ed-bonerot') as HTMLElement | null
+    if (rotBox) rotBox.style.display = s.selectedBone ? 'flex' : 'none'
+    if (s.selectedBone) {
+      const axes: Array<'x' | 'y' | 'z'> = ['x', 'y', 'z']
+      for (const ax of axes) {
+        const slider = this.root.querySelector(`[data-brot="${ax}"]`) as HTMLInputElement | null
+        if (slider && document.activeElement !== slider) {
+          slider.value = String(Math.round(s.boneRot[ax]))
+        }
+      }
+      this.updateRotLabels(s.boneRot)
+    }
 
     this.root.querySelector('#kos-ed-btn-edit')?.classList.toggle('is-on', !s.fpsLook)
     this.root.querySelector('#kos-ed-btn-fps')?.classList.toggle('is-on', s.fpsLook)

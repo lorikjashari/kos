@@ -31,8 +31,9 @@ export class TPSCameraManager extends CameraManager {
         var movementY =
             event.movementY || event.mozMovementY || event.webkitMovementY || 0;
         this.euler.setFromQuaternion(this.camera.quaternion);
-        this.euler.y -= movementX * 0.0015;
-        this.euler.x -= movementY * 0.0015;
+        const scale = CameraManager.getMouseScale();
+        this.euler.y -= movementX * scale;
+        this.euler.x -= movementY * scale;
 
         this.euler.x = Math.max(
             PI_2 - maxPolarAngle,

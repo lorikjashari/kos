@@ -94,6 +94,8 @@ export class AudioManager extends THREE.AudioListener {
   private footIndex = 0
   private reloadTimers: number[] = []
   private masterGain!: GainNode
+  private masterVolume = 1
+  private musicVolume = 0.38
   private loadStarted = false
   private ctx!: AudioContext
   private menuMusic: HTMLAudioElement | null = null
@@ -111,10 +113,31 @@ export class AudioManager extends THREE.AudioListener {
     if (!this.ctx) {
       this.ctx = THREE.AudioContext.getContext() as unknown as AudioContext
       this.masterGain = this.ctx.createGain()
-      this.masterGain.gain.value = 1
+      this.masterGain.gain.value = this.masterVolume
       this.masterGain.connect(this.ctx.destination)
     }
     return this.ctx
+  }
+
+  /** Master SFX volume 0..1 (console: volume). */
+  public setSfxVolume(v: number): void {
+    this.masterVolume = Math.max(0, Math.min(1, v))
+    this.getCtx()
+    if (this.masterGain) this.masterGain.gain.value = this.masterVolume
+  }
+
+  public getSfxVolume(): number {
+    return this.masterVolume
+  }
+
+  /** Menu/background music volume 0..1 (console: MP3Volume / bgmvolume). */
+  public setMusicVolume(v: number): void {
+    this.musicVolume = Math.max(0, Math.min(1, v))
+    if (this.menuMusic) this.menuMusic.volume = this.musicVolume
+  }
+
+  public getMusicVolume(): number {
+    return this.musicVolume
   }
 
   public async unlock(): Promise<void> {
@@ -144,7 +167,7 @@ export class AudioManager extends THREE.AudioListener {
         this.menuMusic = new Audio('/kosmenusong.mp3')
         this.menuMusic.loop = true
         this.menuMusic.preload = 'auto'
-        this.menuMusic.volume = 0.38
+        this.menuMusic.volume = this.musicVolume
       }
       if (this.menuMusic.paused) {
         await this.menuMusic.play()
@@ -415,6 +438,23 @@ export class AudioManager extends THREE.AudioListener {
     const feet: SoundId[] = ['foot_tile1', 'foot_tile2', 'foot_tile3']
     this.playId(feet[this.footIndex % feet.length], volumeScale)
     this.footIndex++
+    return Promise.resolve()
+  }
+
+  /** Spatial footstep for bots — distance falloff so far steps are faint/silent. */
+  public playFootstepAt(worldPos: { x: number; y: number; z: number }, volumeScale = 1): Promise<void> {
+    const feet: SoundId[] = ['foot_tile1', 'foot_tile2', 'foot_tile3']
+    const id = feet[this.footIndex % feet.length]
+    this.footIndex++
+    void this.unlock()
+    const buffer = this.buffers.get(id)
+    if (!buffer) {
+      void this.ensureBuffer(id).then((b) => {
+        if (b) this.playBuffer(id, b, volumeScale, worldPos)
+      })
+      return Promise.resolve()
+    }
+    this.playBuffer(id, buffer, volumeScale, worldPos)
     return Promise.resolve()
   }
 

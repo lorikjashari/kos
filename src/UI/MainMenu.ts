@@ -63,6 +63,11 @@ export class MainMenu {
     return this.settings
   }
 
+  /** In-game crosshair renderer (for the console to tweak live). */
+  public getGameCrosshair(): CrosshairRenderer {
+    return this.gameCrosshair
+  }
+
   public setLoadingProgress(label: string, pct: number): void {
     const bar = this.root.querySelector('.kos-load-fill') as HTMLElement | null
     const text = this.root.querySelector('.kos-load-label') as HTMLElement | null
@@ -107,6 +112,7 @@ export class MainMenu {
     if (id === 'settings') {
       this.renderKeybindList()
       this.syncCrosshairControls()
+      this.syncSensitivityControl()
       this.crosshairPreview?.draw()
     }
   }
@@ -251,6 +257,10 @@ export class MainMenu {
 
           <div class="kos-tab-panel" data-panel="keybinds">
             <p class="kos-hint">Click a bind, then press a new key. Esc cancels.</p>
+            <label class="kos-slider kos-sens-slider">
+              <span>Mouse Sensitivity<em id="kos-sens-val">3</em></span>
+              <input id="kos-sensitivity" type="range" min="0.1" max="10" step="0.05" value="3" />
+            </label>
             <label class="kos-check kos-match-opt">
               <input id="kos-jump-wheel" type="checkbox" />
               <span>
@@ -279,6 +289,19 @@ export class MainMenu {
       jumpWheel.checked = !!this.settings.jumpWithScrollWheel
       jumpWheel.addEventListener('change', () => {
         this.settings.jumpWithScrollWheel = jumpWheel.checked
+        this.persist()
+      })
+    }
+
+    const sensInput = this.root.querySelector('#kos-sensitivity') as HTMLInputElement | null
+    const sensVal = this.root.querySelector('#kos-sens-val')
+    if (sensInput) {
+      sensInput.value = String(this.settings.sensitivity)
+      if (sensVal) sensVal.textContent = String(this.settings.sensitivity)
+      sensInput.addEventListener('input', () => {
+        const v = Number(sensInput.value)
+        this.settings.sensitivity = Number.isFinite(v) ? Math.round(v * 100) / 100 : 3
+        if (sensVal) sensVal.textContent = String(this.settings.sensitivity)
         this.persist()
       })
     }
@@ -468,6 +491,14 @@ export class MainMenu {
         this.persist()
       })
     })
+  }
+
+  private syncSensitivityControl(): void {
+    const sensInput = this.root.querySelector('#kos-sensitivity') as HTMLInputElement | null
+    const sensVal = this.root.querySelector('#kos-sens-val')
+    if (!sensInput) return
+    sensInput.value = String(this.settings.sensitivity)
+    if (sensVal) sensVal.textContent = String(this.settings.sensitivity)
   }
 
   private syncCrosshairControls(): void {
@@ -1001,6 +1032,7 @@ export class MainMenu {
       .kos-slider input[type=range] {
         width: 100%; accent-color: var(--kos-blue); height: 4px; cursor: pointer;
       }
+      .kos-sens-slider { margin-bottom: 10px; }
 
       .kos-check {
         display: flex; align-items: center; gap: 10px;

@@ -178,8 +178,9 @@ export class FPSCameraManager extends CameraManager {
     var movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0
     var movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0
 
-    this.aimYaw -= movementX * 0.0015
-    this.aimPitch -= movementY * 0.0015
+    const scale = CameraManager.getMouseScale()
+    this.aimYaw -= movementX * scale
+    this.aimPitch -= movementY * scale
     this.aimPitch = Math.max(PI_2 - maxPolarAngle, Math.min(PI_2 - minPolarAngle, this.aimPitch))
     this.applyView()
   }

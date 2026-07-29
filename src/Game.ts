@@ -32,8 +32,12 @@ import {
   spawnToPlayerVector,
 } from './Core/SpawnPoints'
 import { CommandConsole } from './UI/CommandConsole'
+import { PerfOverlay } from './UI/PerfOverlay'
 import { EditorMenu, type EditorTool } from './UI/EditorMenu'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
+import type { CrosshairRenderer } from './UI/CrosshairRenderer'
+import type { PlayerSettings } from './UI/SettingsStore'
+import { clampSensitivity, loadSettings, saveSettings } from './UI/SettingsStore'
 
 export class Game implements IUpdatable {
   public static game: Game
@@ -73,6 +77,16 @@ export class Game implements IUpdatable {
   private onHideMenu: (() => void) | null = null
   private commandConsole: CommandConsole | null = null
   private consoleResumeGameplay = false
+  private perfOverlay: PerfOverlay | null = null
+  private crosshairRenderer: CrosshairRenderer | null = null
+  private crosshairSettings: PlayerSettings['crosshair'] | null = null
+  private playerSettings: PlayerSettings | null = null
+  private lastMatchConfig: BotMatchConfig | null = null
+  /** Generic CS-style cvar store for values with no local system yet. */
+  private cvars = new Map<string, string>()
+  /** 0 = uncapped; otherwise target frames per second for the render loop. */
+  private fpsCap = 0
+  private lastFrameTS = 0
   /** /editormode sandbox */
   public editorActive = false
   private editorMenu: EditorMenu | null = null
@@ -84,6 +98,10 @@ export class Game implements IUpdatable {
   private editorHitZonesOnly = false
   private editorFpsLook = false
   private editorDragging = false
+  private editorPreviewAnim = 'Idle'
+  private editorWeapon = 'Usp'
+  /** '' = gizmo moves the whole bot; otherwise a bone key being posed */
+  private editorBoneKey = ''
   private boundEditorKeys: ((e: KeyboardEvent) => void) | null = null
 
   constructor() {
@@ -107,7 +125,7 @@ export class Game implements IUpdatable {
     return !!this.commandConsole?.isOpen()
   }
 
-  /** Press `/` in-game or on the menu to open the slash-command bar. */
+  /** Press ` (backtick) in-game or on the menu to open the CS-style console. */
   public openCommandConsole(): void {
     if (!this.commandConsole) {
       this.commandConsole = new CommandConsole({
@@ -122,6 +140,15 @@ export class Game implements IUpdatable {
     this.commandConsole.show()
   }
 
+  /** Backtick toggles the console open/closed. */
+  public toggleCommandConsole(): void {
+    if (this.isCommandConsoleOpen()) {
+      this.commandConsole?.close()
+    } else {
+      this.openCommandConsole()
+    }
+  }
+
   private onCommandConsoleClosed(): void {
     if (this.consoleResumeGameplay && this.matchStarted && !this.matchPaused) {
       this.inputManager.gameplayEnabled = true
@@ -130,15 +157,236 @@ export class Game implements IUpdatable {
     this.consoleResumeGameplay = false
   }
 
-  private async runCommand(line: string): Promise<void> {
-    const cmd = line.trim().toLowerCase().split(/\s+/)[0] ?? ''
-    if (cmd === 'editormode') {
-      // Don't auto-relock mid-command; enterEditorMode takes over input
-      this.consoleResumeGameplay = false
-      await this.enterEditorMode()
-      return
+  /** Wire the in-game crosshair + live settings so the console can tweak them. */
+  public attachCrosshair(renderer: CrosshairRenderer, settings: PlayerSettings): void {
+    this.crosshairRenderer = renderer
+    this.crosshairSettings = settings.crosshair
+    this.playerSettings = settings
+    this.inputManager.setSensitivity(settings.sensitivity)
+  }
+
+  /** Apply mouse look sensitivity (settings + console). Persists to localStorage. */
+  public setSensitivity(value: number): number {
+    const s = clampSensitivity(value)
+    this.inputManager.setSensitivity(s)
+    if (this.playerSettings) this.playerSettings.sensitivity = s
+    const stored = loadSettings()
+    stored.sensitivity = s
+    saveSettings(stored)
+    return s
+  }
+
+  private conPrint(msg: string, kind: '' | 'echo' | 'warn' | 'ok' = ''): void {
+    this.commandConsole?.print(msg, kind)
+  }
+
+  /** Split a command line into tokens, honouring "quoted strings". */
+  private tokenize(line: string): string[] {
+    const out: string[] = []
+    const re = /"([^"]*)"|(\S+)/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(line)) !== null) out.push(m[1] ?? m[2] ?? '')
+    return out
+  }
+
+  private toNum(v: string | undefined, fallback = 0): number {
+    if (v === undefined) return fallback
+    const n = Number(v)
+    return Number.isFinite(n) ? n : fallback
+  }
+
+  private ensurePerfOverlay(): PerfOverlay {
+    if (!this.perfOverlay) this.perfOverlay = new PerfOverlay()
+    return this.perfOverlay
+  }
+
+  /**
+   * fps_max: 0 = uncapped (as fast as the display allows), 1..24 clamp up to 24,
+   * 25..999 use that exact cap.
+   */
+  private setFpsCap(n: number): number {
+    if (n <= 0) this.fpsCap = 0
+    else if (n <= 24) this.fpsCap = 24
+    else this.fpsCap = Math.min(999, Math.floor(n))
+    return this.fpsCap
+  }
+
+  private applyCrosshair(): void {
+    if (this.crosshairRenderer && this.crosshairSettings) {
+      this.crosshairRenderer.setSettings(this.crosshairSettings)
     }
-    console.warn('[cmd] unknown command:', cmd || '(empty)')
+  }
+
+  private async runCommand(line: string): Promise<void> {
+    const args = this.tokenize(line)
+    if (args.length === 0) return
+    const cmd = (args[0] ?? '').toLowerCase()
+    const arg1 = args[1]
+    const val = this.toNum(arg1, 0)
+    const onOff = (n: number) => (n ? 'on' : 'off')
+
+    switch (cmd) {
+      // ---- Console / engine ----
+      case 'editormode':
+        this.consoleResumeGameplay = false
+        this.conPrint('Entering editor sandbox...', 'ok')
+        await this.enterEditorMode()
+        return
+      case 'toggleconsole':
+        this.commandConsole?.close()
+        return
+      case 'clear':
+      case 'cls':
+        this.commandConsole?.clear()
+        return
+      case 'echo':
+        this.conPrint(args.slice(1).join(' '))
+        return
+      case 'help':
+      case 'cmdlist':
+        this.conPrint('Commands: crosshair, cl_crosshair_size, cl_crosshair_color,')
+        this.conPrint('  cl_showfps, net_graph, volume, MP3Volume, bgmvolume, fps_max,')
+        this.conPrint('  sensitivity, disconnect, retry, reconnect, connect, toggleconsole, clear')
+        return
+
+      // ---- FPS / perf ----
+      case 'cl_showfps':
+        this.ensurePerfOverlay().setShowFps(val > 0)
+        this.conPrint(`cl_showfps ${onOff(val)}`, 'ok')
+        return
+      case 'net_graph':
+        this.ensurePerfOverlay().setNetGraph(val)
+        this.conPrint(`net_graph ${Math.max(0, Math.min(3, Math.floor(val)))}`, 'ok')
+        return
+      case 'net_graphpos':
+        this.ensurePerfOverlay().setPos(val)
+        this.cvars.set(cmd, arg1 ?? '')
+        this.conPrint(`net_graphpos ${val}`, 'ok')
+        return
+      case 'net_graphwidth':
+        this.ensurePerfOverlay().setWidth(val)
+        this.cvars.set(cmd, arg1 ?? '')
+        this.conPrint(`net_graphwidth ${val}`, 'ok')
+        return
+
+      // ---- Crosshair ----
+      case 'crosshair': {
+        const canvas = document.getElementById('game-crosshair') as HTMLElement | null
+        if (canvas) canvas.style.display = val > 0 ? '' : 'none'
+        this.conPrint(`crosshair ${onOff(val)}`, 'ok')
+        return
+      }
+      case 'cl_crosshair_size': {
+        if (!this.crosshairSettings) return this.conPrint('crosshair not ready', 'warn')
+        const map: Record<string, number> = { small: 2, medium: 4, large: 6 }
+        const size = map[(arg1 ?? '').toLowerCase()] ?? this.toNum(arg1, this.crosshairSettings.size)
+        this.crosshairSettings.size = size
+        this.applyCrosshair()
+        this.conPrint(`cl_crosshair_size ${arg1 ?? size}`, 'ok')
+        return
+      }
+      case 'cl_crosshair_color': {
+        if (!this.crosshairSettings) return this.conPrint('crosshair not ready', 'warn')
+        const parts = (args.slice(1).join(' ').match(/\d+/g) ?? []).map(Number)
+        if (parts.length >= 3) {
+          this.crosshairSettings.colorR = parts[0]
+          this.crosshairSettings.colorG = parts[1]
+          this.crosshairSettings.colorB = parts[2]
+          this.applyCrosshair()
+          this.conPrint(`cl_crosshair_color "${parts[0]} ${parts[1]} ${parts[2]}"`, 'ok')
+        } else {
+          this.conPrint('usage: cl_crosshair_color "R G B"', 'warn')
+        }
+        return
+      }
+      case 'cl_dynamiccrosshair':
+      case 'cl_observercrosshair':
+        this.cvars.set(cmd, arg1 ?? '')
+        this.conPrint(`${cmd} ${onOff(val)}`, 'ok')
+        return
+
+      // ---- Mouse ----
+      case 'sensitivity':
+      case 'sens': {
+        if (arg1 === undefined) {
+          this.conPrint(`"sensitivity" is "${this.inputManager.getSensitivity()}"`)
+          return
+        }
+        const s = this.setSensitivity(val)
+        this.conPrint(`sensitivity ${s}`, 'ok')
+        return
+      }
+
+      // ---- Volume ----
+      case 'volume':
+        this.audioManager.setSfxVolume(val)
+        this.conPrint(`volume ${this.audioManager.getSfxVolume().toFixed(2)}`, 'ok')
+        return
+      case 'mp3volume':
+      case 'bgmvolume':
+        this.audioManager.setMusicVolume(val)
+        this.conPrint(`${cmd} ${this.audioManager.getMusicVolume().toFixed(2)}`, 'ok')
+        return
+      case 'voice_enable':
+      case 'voice_scale':
+      case 'hisound':
+      case 'suitvolume':
+        this.cvars.set(cmd, arg1 ?? '')
+        this.conPrint(`${cmd} ${arg1 ?? ''}`.trim(), 'ok')
+        return
+
+      // ---- Connection ----
+      case 'disconnect':
+        this.conPrint('Disconnecting...', 'ok')
+        this.returnToMenu()
+        return
+      case 'retry':
+      case 'reconnect':
+        if (this.lastMatchConfig) {
+          this.consoleResumeGameplay = false
+          this.commandConsole?.close()
+          this.conPrint('Reconnecting...', 'ok')
+          this.startBotMatch(this.lastMatchConfig)
+        } else {
+          this.conPrint('No previous session to reconnect to.', 'warn')
+        }
+        return
+      case 'connect':
+        this.conPrint(
+          arg1 ? `connect ${arg1}: online play is not available (local match only).` : 'usage: connect <ip:port>',
+          'warn',
+        )
+        return
+
+      // ---- FPS cap ----
+      case 'fps_max': {
+        const cap = this.setFpsCap(val)
+        this.conPrint(cap === 0 ? 'fps_max 0 (unlimited)' : `fps_max ${cap}`, 'ok')
+        return
+      }
+
+      // ---- Netcode cvars (stored, no local effect) ----
+      case 'fps_override':
+      case 'rate':
+      case 'cl_cmdrate':
+      case 'cl_updaterate':
+      case 'ex_interp':
+      case 'cl_lc':
+      case 'cl_lw':
+        this.cvars.set(cmd, arg1 ?? '')
+        this.conPrint(`${cmd} ${arg1 ?? ''}`.trim(), 'ok')
+        return
+
+      default:
+        // Unknown token: if it looks like "name value", store it as a cvar.
+        if (arg1 !== undefined) {
+          this.cvars.set(cmd, arg1)
+          this.conPrint(`${cmd} set to "${arg1}"`)
+        } else {
+          this.conPrint(`Unknown command: ${cmd}`, 'warn')
+        }
+        return
+    }
   }
 
   public isEditorTransformDragging(): boolean {
@@ -176,6 +424,8 @@ export class Game implements IUpdatable {
     this.editorWireframe = false
     this.editorAxes = true
     this.editorHitZonesOnly = false
+    this.editorPreviewAnim = 'Idle'
+    this.editorWeapon = 'Usp'
     TrainingBot.showHitboxes = false
     // Cursor free so the editor panel + gizmo work
     this.inputManager.gameplayEnabled = false
@@ -229,14 +479,19 @@ export class Game implements IUpdatable {
     this.trainingBots.push(bot)
     this.botRenderers.push(renderer)
     renderer.setAxesVisible(true)
+    // Default Idle on the CS terrorist (not the robot avatar)
+    renderer.previewAnim(this.editorPreviewAnim)
 
     this.renderer.hud?.showGameplay()
     this.renderer.hud?.setLockdown(null)
     this.renderer.hud?.setScoreboardVisible(false)
     this.renderer.hud?.setPauseMenuOpen(false)
 
+    this.editorBoneKey = ''
     this.setupEditorTools(renderer.getRoot())
-    this.ensureEditorMenu().show()
+    const menu = this.ensureEditorMenu()
+    menu.setBones(renderer.getEditableBones())
+    menu.show()
   }
 
   private ensureEditorMenu(): EditorMenu {
@@ -292,6 +547,32 @@ export class Game implements IUpdatable {
       },
       onSnapGround: () => this.editorSnapGround(),
       onResetPose: () => this.editorResetPose(),
+      onPreviewAnim: (clip) => {
+        this.editorPreviewAnim = clip
+        // Playing an animation exits bone-pose mode and re-grabs the whole bot
+        if (this.editorBoneKey) {
+          this.editorBoneKey = ''
+          const root = this.botRenderers[0]?.getRoot()
+          if (root) this.transformControls?.attach(root)
+          this.setEditorTool(this.editorTool === 'select' ? 'translate' : this.editorTool)
+        }
+        this.botRenderers[0]?.previewAnim(clip)
+      },
+      onSelectWeapon: (key) => {
+        this.editorWeapon = key
+        this.botRenderers[0]?.setWeapon(key)
+      },
+      onSelectBone: (boneKey) => this.selectEditorBone(boneKey),
+      onBoneRot: (x, y, z) => {
+        if (!this.editorBoneKey) return
+        this.botRenderers[0]?.setBoneOffsetDeg(this.editorBoneKey, x, y, z)
+      },
+      onResetBone: () => {
+        if (!this.editorBoneKey) return
+        this.botRenderers[0]?.resetBone(this.editorBoneKey)
+        this.editorMenu?.refresh()
+      },
+      getPoseText: () => this.botRenderers[0]?.getPoseEditsText() ?? '',
       onFpsLook: () => this.editorEnableFpsLook(),
       onEditCursor: () => this.editorEnableEditCursor(),
       onExit: () => this.returnToMenu(),
@@ -312,10 +593,47 @@ export class Game implements IUpdatable {
           },
           yawDeg: ((bot?.yaw ?? 0) * 180) / Math.PI,
           fpsLook: this.editorFpsLook,
+          previewAnim: this.editorPreviewAnim,
+          weapon: this.editorWeapon,
+          selectedBone: this.editorBoneKey,
+          boneRot: this.editorBoneKey
+            ? this.botRenderers[0]?.getBoneOffsetDeg(this.editorBoneKey) ?? { x: 0, y: 0, z: 0 }
+            : { x: 0, y: 0, z: 0 },
         }
       },
     })
     return this.editorMenu
+  }
+
+  /** Editor rig: attach the gizmo to a bone (rotate) or back to the whole bot. */
+  private selectEditorBone(boneKey: string): void {
+    const renderer = this.botRenderers[0]
+    const controls = this.transformControls
+    if (!renderer || !controls) return
+    const enteringRig = !!boneKey && !this.editorBoneKey
+    this.editorBoneKey = boneKey
+
+    if (!boneKey) {
+      renderer.setBoneEditMode(false)
+      controls.attach(renderer.getRoot())
+      this.setEditorTool(this.editorTool === 'select' ? 'translate' : this.editorTool)
+      this.editorMenu?.refresh()
+      return
+    }
+
+    const bone = renderer.getBoneByKey(boneKey)
+    if (!bone) return
+    // Stop the bot turning to face the player so the posed joint stays put
+    const bot = this.trainingBots[0]
+    if (bot) bot.lookAtPlayer = false
+    // First time entering rig mode: snap to bind so edits are clean offsets
+    if (enteringRig) renderer.beginBoneEdit()
+    else renderer.setBoneEditMode(true)
+    controls.attach(bone)
+    controls.setMode('rotate')
+    controls.enabled = true
+    controls.visible = true
+    this.editorMenu?.refresh()
   }
 
   private setupEditorTools(target: THREE.Object3D): void {
@@ -328,10 +646,11 @@ export class Game implements IUpdatable {
     controls.attach(target)
     controls.addEventListener('dragging-changed', (event: any) => {
       this.editorDragging = !!event.value
-      if (!this.editorDragging) this.syncBotFromMesh()
+      // Posing a bone must not write back to the bot's root transform
+      if (!this.editorDragging && !this.editorBoneKey) this.syncBotFromMesh()
     })
     controls.addEventListener('objectChange', () => {
-      this.syncBotFromMesh()
+      if (!this.editorBoneKey) this.syncBotFromMesh()
       this.editorMenu?.refresh()
     })
 
@@ -395,9 +714,13 @@ export class Game implements IUpdatable {
 
   private editorResetPose(): void {
     const bot = this.trainingBots[0]
-    const mesh = this.botRenderers[0]?.getRoot()
+    const renderer = this.botRenderers[0]
+    const mesh = renderer?.getRoot()
     const home = bot?.editorHome
     if (!bot || !mesh || !home) return
+    // Leave bone-pose mode and restore the animation on reset
+    this.editorBoneKey = ''
+    renderer?.previewAnim(this.editorPreviewAnim)
     bot.position.set(home.x, home.y, home.z)
     bot.spawnPosition.copy(bot.position)
     bot.yaw = home.yaw
@@ -407,10 +730,16 @@ export class Game implements IUpdatable {
     mesh.rotation.set(0, bot.yaw, 0)
     mesh.scale.setScalar(bot.visualScale)
     this.transformControls?.attach(mesh)
+    this.setEditorTool(this.editorTool === 'select' ? 'translate' : this.editorTool)
+    this.editorMenu?.refresh()
   }
 
   private editorEnableFpsLook(): void {
     this.editorFpsLook = true
+    // FPS look = roam and watch the dummy react, so make him track the player again.
+    // (Posing / nudging / rig editing turns this off; re-enable it here.)
+    const bot = this.trainingBots[0]
+    if (bot) bot.lookAtPlayer = true
     if (this.transformControls) {
       this.transformControls.enabled = false
       this.transformControls.visible = false
@@ -432,6 +761,7 @@ export class Game implements IUpdatable {
   }
 
   private teardownEditorTools(): void {
+    this.editorBoneKey = ''
     if (this.boundEditorKeys) {
       window.removeEventListener('keydown', this.boundEditorKeys)
       this.boundEditorKeys = null
@@ -458,6 +788,7 @@ export class Game implements IUpdatable {
   }
 
   public startBotMatch(config: BotMatchConfig): void {
+    this.lastMatchConfig = config
     this.clearBots()
     this.stats.reset()
     this.playerName = config.playerName || 'Player'
@@ -798,6 +1129,7 @@ export class Game implements IUpdatable {
     while (n < maxThisFrame && this.pendingBotSpawns.length > 0) {
       const p = this.pendingBotSpawns.shift()!
       const bot = new TrainingBot(p.pos, p.yaw, p.difficulty, p.name)
+      bot.visualModel = 'CsTerrorist'
       bot.addToWorld(this.physics)
       const renderer = new TrainingBotRenderer(bot)
       this.trainingBots.push(bot)
@@ -867,6 +1199,7 @@ export class Game implements IUpdatable {
     for (let i = 0; i < assignment.botPositions.length; i++) {
       const pos = assignment.botPositions[i]
       const bot = new TrainingBot(pos, Math.random() * Math.PI * 2, difficulty, names[i] || `BOT ${i + 1}`)
+      bot.visualModel = 'CsTerrorist'
       bot.addToWorld(this.physics)
       const renderer = new TrainingBotRenderer(bot)
       this.trainingBots.push(bot)
@@ -925,16 +1258,29 @@ export class Game implements IUpdatable {
     this.inputManager.setCurrentPlayer(this.currentPlayer)
   }
   public update() {
+    // Always queue the next animation frame first so early returns still loop.
+    requestAnimationFrame(this.update)
+
     const now: number = performance.now()
+
+    // fps_max: skip this frame if we're ahead of the target interval.
+    if (this.fpsCap > 0) {
+      const minInterval = 1000 / this.fpsCap
+      if (now - this.lastFrameTS < minInterval - 1) return
+    }
+    this.lastFrameTS = now
+
+    // Cap dt so physics stays stable; allow a bigger step when fps_max is low
+    // (otherwise a 24 fps cap would run the sim in slow motion).
+    const maxDt = this.fpsCap > 0 ? Math.min(0.1, 1 / this.fpsCap + 0.005) : 0.02
     let dt = (now - this.lastUpdateTS) / 1000
-    dt = Math.min(20 / 1000, dt)
+    dt = Math.min(maxDt, dt)
     this.currentPlayer.player.prestep(dt)
 
     if (this.matchStarted) {
       if (this.matchPaused) {
         this.renderer.update(0)
         this.lastUpdateTS = now
-        requestAnimationFrame(this.update)
         return
       }
 
@@ -978,7 +1324,6 @@ export class Game implements IUpdatable {
     this.physics.update(dt)
     this.renderer.update(dt)
     this.lastUpdateTS = now
-    requestAnimationFrame(this.update)
   }
   public startUpdateLoop() {
     this.lastUpdateTS = performance.now()

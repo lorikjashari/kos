@@ -21,6 +21,8 @@ async function main() {
       const game = Game.getInstance()
       game.inputManager.applyKeybinds(settings.keybinds)
       game.inputManager.setJumpWithScrollWheel(settings.jumpWithScrollWheel)
+      game.inputManager.setSensitivity(settings.sensitivity)
+      game.attachCrosshair(menu.getGameCrosshair(), settings)
     },
   })
 
@@ -41,6 +43,8 @@ async function main() {
     const settings = loadSettings()
     game.inputManager.applyKeybinds(settings.keybinds)
     game.inputManager.setJumpWithScrollWheel(settings.jumpWithScrollWheel)
+    game.inputManager.setSensitivity(settings.sensitivity)
+    game.attachCrosshair(menu.getGameCrosshair(), settings)
 
     menu.setLoadingProgress('Loading audio…', 40)
     await game.audioManager.loadPriority()

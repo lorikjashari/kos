@@ -82,6 +82,11 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     const bullet = new LoadableMesh('9mm2douille.glb', 'Bullet')
     await bullet.load()
     bullet.register(this.loadableMeshs)
+
+    // CS Source terrorist — used for the editor dummy AND the in-match bots
+    const csT = new LoadableMesh('models/cs_terrorist.glb', 'CsTerrorist')
+    await csT.load()
+    csT.register(this.loadableMeshs)
   }
   public async loadMapMesh(
     meshKey: string,

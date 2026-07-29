@@ -41,12 +41,59 @@ export class TrainingBotRenderer implements IUpdatable {
   private lastMoveAnim = ''
   private readonly _q = new THREE.Quaternion()
   private readonly _e = new THREE.Euler()
-  /** Static GLB character (editor CS model) — no RobotExpressive anims */
+  /** Static GLB character (editor CS model) — procedural Idle/Walk/Run on its skeleton */
   private staticModel = false
   private wireframeOn = false
   private hitZonesOnly = false
   private storedWire: Array<{ mesh: THREE.Mesh; value: boolean }> = []
   private axesHelper?: THREE.AxesHelper
+  /** Editor anim preview clip on the CS terrorist skeleton ('' = bind pose) */
+  private animPreviewActive = ''
+  private animPreviewTime = 0
+  private csSkinned?: THREE.SkinnedMesh
+  private csAnimBones: Record<string, THREE.Bone | undefined> = {}
+  private csAnimBaseQ = new Map<THREE.Object3D, THREE.Quaternion>()
+  private readonly _animQ = new THREE.Quaternion()
+  private readonly _animE = new THREE.Euler()
+  /** When true, procedural anim is paused so manual bone edits (editor rig) persist */
+  private boneEditFrozen = false
+  /**
+   * Per-weapon prop config. `align` (radians, measured via PCA of the baked
+   * verts) straightens the model to barrel +Z / slide +Y; `rot` seats it in the
+   * hand (roll+yaw 180° like the USP, plus aim tilt); `seat` is the hand offset;
+   * `len` is the third-person length in world units.
+   */
+  private static readonly GUN_DEFS: Record<
+    string,
+    { mesh: string; len: number; align: [number, number, number]; rot: [number, number, number]; seat: [number, number, number] }
+  > = {
+    Usp: {
+      mesh: 'Usp',
+      len: 0.62,
+      align: [-3.0434, -0.0173, 3.1104],
+      rot: [0.05, Math.PI, Math.PI],
+      seat: [0.23, 0.035, 0.22],
+    },
+    AK: {
+      mesh: 'AK47',
+      len: 1.5,
+      align: [3.1379, 0.0077, 3.0689],
+      rot: [0.05, Math.PI, Math.PI],
+      seat: [0.2, 0.05, 0.5],
+    },
+  }
+
+  /** Third-person weapon prop seated in the CS terrorist's right hand */
+  private csGun?: THREE.Group
+  /** Cached built weapon props by key ('Usp' | 'AK') */
+  private csGuns: Record<string, THREE.Group | undefined> = {}
+  /** Currently held weapon in the editor */
+  private csWeapon = 'Usp'
+  private readonly _gunPos = new THREE.Vector3()
+  /** True for AI match bots using the CS model (auto walk/idle from movement) */
+  private matchBot = false
+  private readonly _matchPrevPos = new THREE.Vector3()
+  private _stepAcc = Math.random() * 0.3
 
   constructor(bot: TrainingBot) {
     this.bot = bot
@@ -54,6 +101,13 @@ export class TrainingBotRenderer implements IUpdatable {
 
     if (bot.visualModel) {
       this.buildStaticModel(bot.visualModel)
+      // AI match bots drive their own walk/idle and carry their loadout weapon.
+      if (!bot.aiFrozen) {
+        this.matchBot = true
+        this._matchPrevPos.set(bot.position.x, bot.position.y, bot.position.z)
+        this.animPreviewActive = 'Idle'
+        this.setWeapon(bot.weaponKey === 'AK47' ? 'AK' : 'Usp')
+      }
       return
     }
 
@@ -143,10 +197,374 @@ export class TrainingBotRenderer implements IUpdatable {
     this.mesh = root
     this.mesh.position.copy(this.bot.position)
     this.mesh.rotation.y = this.bot.yaw
+    this.cacheCsAnimBones()
     this.tagBodyParts()
     this.collectHitMeshes()
     this.game.addToRenderer(this.mesh)
     this.mesh.updateMatrixWorld(true)
+  }
+
+  /** Cache CS Source terrorist bones from the skinned skeleton (not scene guesswork). */
+  private cacheCsAnimBones(): void {
+    let skinned: THREE.SkinnedMesh | undefined
+    this.mesh.traverse((child) => {
+      if (!skinned && (child as THREE.SkinnedMesh).isSkinnedMesh) {
+        skinned = child as THREE.SkinnedMesh
+      }
+    })
+    this.csSkinned = skinned
+
+    const bones = skinned?.skeleton?.bones ?? []
+    // Three.js GLTFLoader turns spaces into underscores ("leg left" → "leg_left")
+    const norm = (s: string) => s.toLowerCase().replace(/[\s_]+/g, '')
+    const byKey = new Map<string, THREE.Bone>()
+    for (const bone of bones) byKey.set(norm(bone.name), bone)
+
+    const find = (...needles: string[]): THREE.Bone | undefined => {
+      for (const needle of needles) {
+        const n = norm(needle)
+        for (const [key, bone] of byKey) {
+          if (key.includes(n)) return bone
+        }
+      }
+      return undefined
+    }
+
+    this.csAnimBones = {
+      hips: find('root hips'),
+      spineL: find('spine lower'),
+      spineU: find('spine upper 1', 'spine upper'),
+      neck: find('neck upper', 'neck lower'),
+      thighL: find('leg left thigh'),
+      kneeL: find('leg left knee'),
+      ankleL: find('leg left ankle'),
+      thighR: find('leg right thigh'),
+      kneeR: find('leg right knee'),
+      ankleR: find('leg right ankle'),
+      clavL: find('arm left shoulder 1'),
+      clavR: find('arm right shoulder 1'),
+      shoulderL: find('arm left shoulder 2'),
+      elbowL: find('arm left elbow'),
+      wristL: find('arm left wrist'),
+      shoulderR: find('arm right shoulder 2'),
+      elbowR: find('arm right elbow'),
+      wristR: find('arm right wrist'),
+    }
+
+    this.csAnimBaseQ.clear()
+    for (const bone of Object.values(this.csAnimBones)) {
+      if (!bone) continue
+      this.csAnimBaseQ.set(bone, bone.quaternion.clone())
+    }
+
+    if (this.csAnimBaseQ.size === 0) {
+      console.warn('[TrainingBot] CS skeleton bones not found — anim preview disabled')
+    }
+  }
+
+  private resetCsAnimBones(): void {
+    for (const [bone, base] of this.csAnimBaseQ) {
+      bone.quaternion.copy(base)
+    }
+  }
+
+  /** Local euler offset on top of bind quaternion (hands / legs / spine). */
+  private offsetBone(bone: THREE.Object3D | undefined, x: number, y: number, z: number): void {
+    if (!bone) return
+    this._animE.set(x, y, z, 'XYZ')
+    this._animQ.setFromEuler(this._animE)
+    bone.quaternion.multiply(this._animQ)
+  }
+
+  /**
+   * Seat the real USP pistol (same model the player uses) in the right hand.
+   * The viewmodel GLB bundles the gun under an "Armature" node and the FPS
+   * hands separately — we extract just the gun, drop the hands, and rescale
+   * it to third-person size. Falls back to a simple prop if the model is absent.
+   */
+  private buildCsGun(key: string): THREE.Group | undefined {
+    const existing = this.csGuns[key]
+    if (existing) return existing
+    const def = TrainingBotRenderer.GUN_DEFS[key]
+    if (!def) return undefined
+
+    const container = new THREE.Group()
+    container.name = `CsGun_${key}`
+    container.visible = false
+
+    let gun: THREE.Object3D | undefined
+    const source = this.game.globalLoadingManager.loadableMeshs.get(def.mesh)
+    if (source?.mesh) {
+      const full = source.cloneMesh() as unknown as THREE.Object3D
+      full.updateMatrixWorld(true)
+      let armature: THREE.Object3D | undefined
+      full.traverse((c) => {
+        if (!armature && c.name === 'Armature') armature = c
+      })
+      if (armature) {
+        // These are skinned first-person viewmodels: raw verts are ~0 size and
+        // the skeleton inflates them at draw time, so re-parenting + scaling
+        // collapses them. Bake the rest-pose skinning into a static mesh. Their
+        // textures are missing (white), so use a solid gunmetal material. The
+        // per-weapon `align` (measured via PCA) straightens the model's axes.
+        const gunGroup = new THREE.Group()
+        const gunMat = new THREE.MeshStandardMaterial({ color: 0x14171b, roughness: 0.45, metalness: 0.6 })
+        const v = new THREE.Vector3()
+        const align = new THREE.Quaternion().setFromEuler(new THREE.Euler(def.align[0], def.align[1], def.align[2], 'XYZ'))
+        armature.traverse((c) => {
+          const sm = c as THREE.SkinnedMesh
+          if (!sm.isSkinnedMesh) return
+          sm.updateWorldMatrix(true, false)
+          const srcPos = sm.geometry.attributes.position
+          const arr = new Float32Array(srcPos.count * 3)
+          for (let i = 0; i < srcPos.count; i++) {
+            v.fromBufferAttribute(srcPos, i)
+            sm.applyBoneTransform(i, v)
+            v.applyMatrix4(sm.matrixWorld)
+            v.applyQuaternion(align)
+            arr[i * 3] = v.x
+            arr[i * 3 + 1] = v.y
+            arr[i * 3 + 2] = v.z
+          }
+          const baked = new THREE.BufferGeometry()
+          baked.setAttribute('position', new THREE.BufferAttribute(arr, 3))
+          if (sm.geometry.index) baked.setIndex(sm.geometry.index.clone())
+          baked.computeVertexNormals()
+          const m = new THREE.Mesh(baked, gunMat)
+          m.castShadow = false
+          m.receiveShadow = false
+          m.frustumCulled = false
+          gunGroup.add(m)
+        })
+        if (gunGroup.children.length > 0) {
+          container.add(gunGroup)
+          container.updateMatrixWorld(true)
+          const box = new THREE.Box3().setFromObject(gunGroup)
+          const size = box.getSize(new THREE.Vector3())
+          const center = box.getCenter(new THREE.Vector3())
+          gunGroup.position.sub(center)
+          const longest = Math.max(size.x, size.y, size.z) || 1
+          container.scale.setScalar(def.len / longest)
+          gun = gunGroup
+        }
+      }
+    }
+
+    if (!gun) {
+      // Fallback: simple dark prop (barrel along +Z)
+      const fb = new THREE.Group()
+      const black = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.5, metalness: 0.45 })
+      const grey = new THREE.MeshStandardMaterial({ color: 0x2b2f35, roughness: 0.6, metalness: 0.35 })
+      const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, rx = 0) => {
+        const m = new THREE.Mesh(geo, mat)
+        m.position.set(x, y, z)
+        m.rotation.x = rx
+        m.castShadow = false
+        fb.add(m)
+      }
+      add(new THREE.BoxGeometry(0.11, 0.14, 0.34), black, 0, 0.02, 0.1)
+      add(new THREE.BoxGeometry(0.08, 0.09, 0.12), grey, 0, 0.02, 0.3)
+      add(new THREE.BoxGeometry(0.1, 0.24, 0.12), black, 0, -0.14, -0.02, 0.32)
+      container.add(fb)
+      gun = fb
+    }
+
+    // Mark the whole prop so editor display modes (X-ray / wireframe / hit-zones) skip it.
+    container.userData.isGun = true
+    container.traverse((c) => {
+      c.userData.isGun = true
+    })
+    this.mesh.add(container)
+    this.csGuns[key] = container
+    return container
+  }
+
+  /** Match bots: pick Idle / Walking / Running from their actual ground speed. */
+  private driveMatchClip(dt: number): void {
+    const p = this.bot.position
+    let clip = 'Idle'
+    if (this.bot.isMoving) {
+      const dx = p.x - this._matchPrevPos.x
+      const dz = p.z - this._matchPrevPos.z
+      const spd = Math.sqrt(dx * dx + dz * dz) / Math.max(dt, 1e-3)
+      clip = spd > 6.2 ? 'Running' : 'Walking'
+    }
+    this._matchPrevPos.set(p.x, p.y, p.z)
+    if (clip !== this.animPreviewActive) this.animPreviewActive = clip
+
+    // Footsteps timed to the gait cadence (run ~0.30s, walk ~0.58s per step).
+    if (clip === 'Idle') {
+      this._stepAcc = 0
+    } else {
+      this._stepAcc += dt
+      const interval = clip === 'Running' ? 0.3 : 0.58
+      if (this._stepAcc >= interval) {
+        this._stepAcc -= interval
+        this.emitFootstep(clip === 'Running')
+      }
+    }
+  }
+
+  /** Distance-culled spatial footstep (panner handles near/far volume). */
+  private emitFootstep(run: boolean): void {
+    const p = this.bot.position
+    const player = this.game.currentPlayer?.player
+    if (player) {
+      const dx = p.x - player.position.x
+      const dz = p.z - player.position.z
+      if (dx * dx + dz * dz > 62 * 62) return
+    }
+    void this.game.audioManager.playFootstepAt({ x: p.x, y: p.y + 0.1, z: p.z }, run ? 1 : 0.75)
+  }
+
+  /** Switch which weapon the dummy holds ('Usp' | 'AK'). */
+  public setWeapon(key: string): void {
+    if (!TrainingBotRenderer.GUN_DEFS[key]) return
+    this.csWeapon = key
+    const gun = this.buildCsGun(key)
+    for (const g of Object.values(this.csGuns)) if (g) g.visible = false
+    if (gun) gun.visible = true
+    this.csGun = gun
+  }
+
+  /** Seat the active weapon in the right hand each frame and aim it forward. */
+  private syncCsGun(): void {
+    const gun = this.csGun
+    if (!gun || !gun.visible) return
+    const wrist = this.csAnimBones.wristR
+    if (!wrist) return
+    const def = TrainingBotRenderer.GUN_DEFS[this.csWeapon]
+    if (!def) return
+    wrist.getWorldPosition(this._gunPos)
+    this.mesh.worldToLocal(this._gunPos)
+    // Gun is centered on its bbox — offset so the grip ends up in the palm.
+    gun.position.set(this._gunPos.x + def.seat[0], this._gunPos.y + def.seat[1], this._gunPos.z + def.seat[2])
+    // Models bake out upside-down and facing his body: roll 180° (Z) so the slide
+    // is up, yaw 180° (Y) so the muzzle points away from him, + slight aim tilt.
+    gun.rotation.set(def.rot[0], def.rot[1], def.rot[2])
+  }
+
+  /** Smooth 0..1 curve for gait accents */
+  private smooth01(x: number): number {
+    const t = Math.min(1, Math.max(0, x))
+    return t * t * (3 - 2 * t)
+  }
+
+  /**
+   * Two-handed pistol hold applied on top of any clip (idle / walk / run).
+   * Validated bind-relative: both hands meet at the chest centerline, arms
+   * forward, elbows out — the USP sits in the right hand. `bob` adds a tiny
+   * vertical accent so it reads alive without leaving the aim.
+   */
+  private applyGunHoldArms(bob: number): void {
+    const b = this.csAnimBones
+    this.offsetBone(b.clavL, 0.06, -0.04, -0.05)
+    this.offsetBone(b.clavR, 0.06, 0.04, 0.05)
+    if (this.csWeapon === 'AK') {
+      // Rifle: right hand on the grip near the chest, left hand forward on the handguard
+      this.offsetBone(b.shoulderR, -0.45 + bob, 0.95, 0)
+      this.offsetBone(b.elbowR, -1.3, 0.55, 0.5)
+      this.offsetBone(b.shoulderL, -0.5 + bob, -0.95, 0)
+      this.offsetBone(b.elbowL, -0.9, -0.9, -0.1)
+      this.offsetBone(b.wristR, 0.05, -0.1, 0)
+      this.offsetBone(b.wristL, 0.1, -0.1, 0)
+    } else {
+      // Pistol: both hands together at the chest centerline
+      this.offsetBone(b.shoulderL, -0.6 + bob, -1.2, 0)
+      this.offsetBone(b.shoulderR, -0.6 + bob, 1.2, 0)
+      this.offsetBone(b.elbowL, -0.8, -0.5, 0)
+      this.offsetBone(b.elbowR, -0.8, 0.5, 0)
+      this.offsetBone(b.wristL, 0.05, -0.15, 0)
+      this.offsetBone(b.wristR, 0.05, 0.15, 0)
+    }
+  }
+
+  /**
+   * Advanced human gait for CS terrorist skeleton.
+   * Shoulders + clavicles + elbows timed like a real walk/run (opposite arm/leg).
+   */
+  private updateCsProceduralAnim(dt: number): void {
+    if (this.csAnimBaseQ.size === 0) return
+
+    // Manual rig editing: leave bones wherever the user posed them, just refresh skin.
+    if (this.boneEditFrozen) {
+      if (this.csSkinned) {
+        this.csSkinned.skeleton.bones.forEach((bone) => bone.updateMatrixWorld(true))
+        this.csSkinned.skeleton.update()
+      }
+      return
+    }
+
+    this.resetCsAnimBones()
+    const clip = this.animPreviewActive
+    if (!clip) {
+      if (this.csSkinned) this.csSkinned.skeleton.update()
+      return
+    }
+
+    this.animPreviewTime += dt
+
+    const t = this.animPreviewTime
+    const b = this.csAnimBones
+
+    if (clip === 'Idle') {
+      const breath = Math.sin(t * 1.9) * 0.04
+      const sway = Math.sin(t * 1.15) * 0.028
+      const weight = Math.sin(t * 0.7) * 0.02
+      this.offsetBone(b.hips, 0, sway * 0.45 + weight, 0)
+      this.offsetBone(b.spineL, breath + 0.02, sway * 0.35, weight * 0.5)
+      this.offsetBone(b.spineU, breath * 0.7, -sway * 0.28, 0)
+      this.offsetBone(b.neck, breath * 0.3, sway * 0.7, breath * 0.35)
+      // Always holding the pistol two-handed, gentle breathing only
+      this.applyGunHoldArms(Math.sin(t * 1.8) * 0.012)
+    } else {
+      const run = clip === 'Running'
+      // Cadence + amplitudes tuned like real gait (run = bigger pump, more lean)
+      const speed = run ? 10.5 : 5.4
+      const legAmp = run ? 0.7 : 0.44
+      const kneeAmp = run ? 0.85 : 0.5
+      const phase = t * speed
+      const s1 = Math.sin(phase)
+      const s2 = Math.sin(phase * 2) // double for hip bob / arm accents
+      const c1 = Math.cos(phase)
+
+      // Leg phase: +1 = left forward
+      const swing = s1
+      const swingOpp = -s1
+      const liftL = this.smooth01(-swing)
+      const liftR = this.smooth01(swing)
+      const thighL = swing * legAmp
+      const thighR = swingOpp * legAmp
+      const kneeL = liftL * kneeAmp + (run ? 0.14 : 0.06)
+      const kneeR = liftR * kneeAmp + (run ? 0.14 : 0.06)
+
+      // —— Legs / core ——
+      this.offsetBone(
+        b.hips,
+        Math.abs(s2) * (run ? 0.045 : 0.02) - (run ? 0.07 : 0.02),
+        swing * (run ? 0.05 : 0.028),
+        c1 * (run ? 0.025 : 0.012)
+      )
+      this.offsetBone(b.spineL, (run ? 0.12 : 0.03) + s2 * 0.03, swingOpp * (run ? 0.05 : 0.032), c1 * 0.015)
+      this.offsetBone(b.spineU, run ? 0.08 : 0.02, swing * (run ? 0.04 : 0.025), 0)
+      this.offsetBone(b.neck, run ? 0.04 : 0.01, swing * 0.03, 0)
+
+      this.offsetBone(b.thighL, thighL, 0, 0)
+      this.offsetBone(b.thighR, thighR, 0, 0)
+      this.offsetBone(b.kneeL, kneeL, 0, 0)
+      this.offsetBone(b.kneeR, kneeR, 0, 0)
+      this.offsetBone(b.ankleL, -thighL * 0.32 - kneeL * 0.18 + liftL * 0.1, 0, 0)
+      this.offsetBone(b.ankleR, -thighR * 0.32 - kneeR * 0.18 + liftR * 0.1, 0, 0)
+
+      // —— Arms: keep the two-handed gun hold steady while the legs move ——
+      // Small vertical bob so it reads alive without leaving the aim.
+      this.applyGunHoldArms(s2 * (run ? 0.05 : 0.03))
+    }
+
+    if (this.csSkinned) {
+      this.csSkinned.skeleton.bones.forEach((bone) => bone.updateMatrixWorld(true))
+      this.csSkinned.skeleton.update()
+    }
   }
 
   /** Capsule-style hit boxes by height for single-mesh characters. */
@@ -415,6 +833,115 @@ export class TrainingBotRenderer implements IUpdatable {
     return this.mesh
   }
 
+  /**
+   * Play Idle / Walking / Running on the CS terrorist skeleton (no robot swap).
+   * Pass '' to freeze back to bind pose.
+   */
+  public previewAnim(clip: string): void {
+    // Starting an animation cancels manual rig editing
+    this.boneEditFrozen = false
+    this.animPreviewActive = clip
+    this.animPreviewTime = 0
+    this.resetCsAnimBones()
+    // A weapon is always held (Idle / Walking / Running)
+    this.setWeapon(this.csWeapon)
+    if (!clip) return
+    // Kick one frame so Idle isn't a frozen T-pose until the next update
+    this.updateCsProceduralAnim(0)
+  }
+
+  /** Pause/resume procedural anim so the editor can pose individual bones. */
+  public setBoneEditMode(on: boolean): void {
+    this.boneEditFrozen = on
+  }
+
+  /** Curated joints the editor rig menu can grab (CS terrorist skeleton). */
+  public getEditableBones(): Array<{ key: string; label: string }> {
+    const b = this.csAnimBones
+    const list: Array<[string, string]> = [
+      ['neck', 'Head / Neck'],
+      ['spineU', 'Chest'],
+      ['spineL', 'Waist'],
+      ['hips', 'Hips'],
+      ['clavL', 'Shoulder L'],
+      ['shoulderL', 'Upper arm L'],
+      ['elbowL', 'Elbow L'],
+      ['wristL', 'Wrist L'],
+      ['clavR', 'Shoulder R'],
+      ['shoulderR', 'Upper arm R'],
+      ['elbowR', 'Elbow R'],
+      ['wristR', 'Wrist R'],
+      ['thighL', 'Thigh L'],
+      ['kneeL', 'Knee L'],
+      ['ankleL', 'Ankle L'],
+      ['thighR', 'Thigh R'],
+      ['kneeR', 'Knee R'],
+      ['ankleR', 'Ankle R'],
+    ]
+    return list.filter(([key]) => !!b[key]).map(([key, label]) => ({ key, label }))
+  }
+
+  /** Resolve a rig-menu key to the actual bone object (for gizmo attach). */
+  public getBoneByKey(key: string): THREE.Object3D | undefined {
+    return this.csAnimBones[key]
+  }
+
+  /** Enter rig editing: pause anim and snap to bind so edits are clean offsets. */
+  public beginBoneEdit(): void {
+    this.resetCsAnimBones()
+    this.boneEditFrozen = true
+    this.csSkinned?.skeleton.update()
+  }
+
+  /** Local rotation offset of a bone from its bind pose, in degrees (XYZ). */
+  public getBoneOffsetDeg(key: string): { x: number; y: number; z: number } {
+    const bone = this.csAnimBones[key]
+    const base = bone ? this.csAnimBaseQ.get(bone) : undefined
+    if (!bone || !base) return { x: 0, y: 0, z: 0 }
+    this._animQ.copy(base).invert().multiply(bone.quaternion)
+    this._animE.setFromQuaternion(this._animQ, 'XYZ')
+    const d = 180 / Math.PI
+    return { x: this._animE.x * d, y: this._animE.y * d, z: this._animE.z * d }
+  }
+
+  /** Set a bone to bind + the given local euler offset (degrees, XYZ). */
+  public setBoneOffsetDeg(key: string, x: number, y: number, z: number): void {
+    const bone = this.csAnimBones[key]
+    const base = bone ? this.csAnimBaseQ.get(bone) : undefined
+    if (!bone || !base) return
+    const r = Math.PI / 180
+    this._animE.set(x * r, y * r, z * r, 'XYZ')
+    this._animQ.setFromEuler(this._animE)
+    bone.quaternion.copy(base).multiply(this._animQ)
+    this.csSkinned?.skeleton.update()
+  }
+
+  /** Reset one joint back to its bind pose. */
+  public resetBone(key: string): void {
+    const bone = this.csAnimBones[key]
+    const base = bone ? this.csAnimBaseQ.get(bone) : undefined
+    if (bone && base) {
+      bone.quaternion.copy(base)
+      this.csSkinned?.skeleton.update()
+    }
+  }
+
+  /** Human-readable summary of every joint the user rotated away from bind. */
+  public getPoseEditsText(): string {
+    const bones = this.getEditableBones()
+    const lines: string[] = []
+    for (const { key, label } of bones) {
+      const o = this.getBoneOffsetDeg(key)
+      if (Math.abs(o.x) < 0.5 && Math.abs(o.y) < 0.5 && Math.abs(o.z) < 0.5) continue
+      lines.push(`  ${key} (${label}): x=${o.x.toFixed(1)} y=${o.y.toFixed(1)} z=${o.z.toFixed(1)}`)
+    }
+    if (!lines.length) return 'POSE EDIT (cs_terrorist): no joints changed'
+    return (
+      'POSE EDIT (cs_terrorist) — local euler degrees, order XYZ, offset from bind pose:\n' +
+      lines.join('\n')
+    )
+  }
+
   public setAxesVisible(visible: boolean): void {
     if (visible) {
       if (!this.axesHelper) {
@@ -434,6 +961,7 @@ export class TrainingBotRenderer implements IUpdatable {
       this.storedWire = []
       this.mesh.traverse((child) => {
         if (!(child instanceof THREE.Mesh) || !child.material) return
+        if (child.userData?.isGun) return
         if (String(child.name).startsWith('HitZone_')) return
         if (child.name === 'EditorAxes') return
         const mats = Array.isArray(child.material) ? child.material : [child.material]
@@ -465,6 +993,7 @@ export class TrainingBotRenderer implements IUpdatable {
     this.hitZonesOnly = on
     this.mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
+      if (child.userData?.isGun) return
       if (String(child.name).startsWith('HitZone_')) {
         child.visible = true
         // Show zones when isolating
@@ -510,6 +1039,7 @@ export class TrainingBotRenderer implements IUpdatable {
     this.overlayOn = true
     this.mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh) || !child.material) return
+      if (child.userData?.isGun) return
       const part = (child.userData.bodyPart as BodyPart | undefined) ?? this.inferFromParent(child)
       this.storedMaterials.push({ mesh: child, original: child.material })
       child.material = new THREE.MeshBasicMaterial({
@@ -623,6 +1153,7 @@ export class TrainingBotRenderer implements IUpdatable {
       this.deathBaseY = this.bot.position.y
       if (this.overlayOn) this.clearHitboxOverlay()
       if (this.gunProp) this.gunProp.visible = false
+      if (this.csGun) this.csGun.visible = false
     }
 
     // Just respawned — wipe leftover blood stickers
@@ -634,6 +1165,7 @@ export class TrainingBotRenderer implements IUpdatable {
       this.lastMoveAnim = ''
       this.tpsMesh?.playAnimation('Idle', true, true)
       if (this.gunProp) this.gunProp.visible = true
+      if (this.csGun) this.csGun.visible = true
     }
     this.wasAlive = this.bot.isAlive
 
@@ -659,7 +1191,10 @@ export class TrainingBotRenderer implements IUpdatable {
     }
 
     if (this.staticModel) {
+      if (this.matchBot) this.driveMatchClip(dt)
+      this.updateCsProceduralAnim(dt)
       this.mesh.updateMatrixWorld(true)
+      this.syncCsGun()
       return
     }
 

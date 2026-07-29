@@ -7,6 +7,7 @@ import { Vector3D } from '../Core/Vector'
 import { PlayerRenderer } from '../View/Renderer/PlayerRenderer/PlayerRenderer'
 import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
 import { FPSCameraManager } from '../View/CameraManager/FPSCameraManager'
+import { CameraManager } from '../View/CameraManager/CameraManager'
 import { DEFAULT_KEYBINDS, type KeybindMap } from '../UI/SettingsStore'
 
 export class InputManager implements IUpdatable {
@@ -78,6 +79,14 @@ export class InputManager implements IUpdatable {
 
   public setJumpWithScrollWheel(enabled: boolean): void {
     this.jumpWithScrollWheel = !!enabled
+  }
+
+  public setSensitivity(value: number): void {
+    CameraManager.mouseSensitivity = Math.max(0.01, Math.min(20, value))
+  }
+
+  public getSensitivity(): number {
+    return CameraManager.mouseSensitivity
   }
 
   private normalizeKey(event: KeyboardEvent): string {
@@ -289,14 +298,19 @@ export class InputManager implements IUpdatable {
       return
     }
 
-    // Slash-command bar (works from menu or in-match)
-    if (event.key === '/' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    // CS-style console: backtick (`) toggles open/closed, slash also opens. Works from menu or in-match.
+    if (
+      (event.code === 'Backquote' || event.key === '`' || event.key === '~' || event.key === '/') &&
+      !event.repeat &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey
+    ) {
       const target = event.target as HTMLElement | null
       const tag = target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      if (Game.getInstance().isCommandConsoleOpen()) return
       event.preventDefault()
-      Game.getInstance().openCommandConsole()
+      Game.getInstance().toggleCommandConsole()
       return
     }
 
@@ -331,7 +345,7 @@ export class InputManager implements IUpdatable {
     if (target?.closest?.('#kos-editor')) return true
     if (target.nodeName === 'BODY' || target.nodeName === 'CANVAS') return false
     // Only treat interactive HUD chrome as blocking (pause button / panel)
-    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu, #kos-cmd, #kos-editor')
+    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu, #kos-con, #kos-editor')
   }
 
   onMouseDown(event: MouseEvent): void {

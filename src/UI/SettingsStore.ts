@@ -28,6 +28,14 @@ export interface PlayerSettings {
   keybinds: KeybindMap
   /** CS-style: mouse wheel up/down also jumps */
   jumpWithScrollWheel: boolean
+  /** Mouse look multiplier (1 = default). Console: sensitivity */
+  sensitivity: number
+}
+
+/** Clamp / sanitize mouse sensitivity (CS-style range). */
+export function clampSensitivity(v: number): number {
+  if (!Number.isFinite(v)) return 3
+  return Math.max(0.01, Math.min(20, Math.round(v * 100) / 100))
 }
 
 export const DEFAULT_CROSSHAIR: CrosshairSettings = {
@@ -80,6 +88,9 @@ export function loadSettings(): PlayerSettings {
       crosshair: { ...DEFAULT_CROSSHAIR, ...(parsed.crosshair || {}) },
       keybinds: { ...DEFAULT_KEYBINDS, ...(parsed.keybinds || {}) },
       jumpWithScrollWheel: parsed.jumpWithScrollWheel !== false,
+      sensitivity: clampSensitivity(
+        typeof parsed.sensitivity === 'number' ? parsed.sensitivity : 3
+      ),
     }
   } catch {
     return defaultSettings()
@@ -96,6 +107,7 @@ export function defaultSettings(): PlayerSettings {
     crosshair: { ...DEFAULT_CROSSHAIR },
     keybinds: { ...DEFAULT_KEYBINDS },
     jumpWithScrollWheel: true,
+    sensitivity: 3,
   }
 }
 

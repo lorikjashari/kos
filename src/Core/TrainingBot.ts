@@ -111,6 +111,10 @@ export class TrainingBot implements IUpdatable {
   private lastKnownTarget?: Vector3D
   private retargetTimer = 0
   private lockedTargetName?: string
+  /** Shots fired in the current sustained burst (recoil / spray bloom) */
+  private burstCount = 0
+  /** Target eye position last frame — used to gauge how fast it's moving */
+  private prevTargetEye?: Vector3D
 
   constructor(position: Vector3D, yaw = 0, difficulty: BotDifficulty = 'medium', name = 'BOT') {
     this.position = position.clone()
@@ -199,6 +203,8 @@ export class TrainingBot implements IUpdatable {
     this.lastKnownTarget = undefined
     this.lockedTargetName = undefined
     this.retargetTimer = 0
+    this.burstCount = 0
+    this.prevTargetEye = undefined
   }
 
   public update(dt: number): void {
@@ -297,10 +303,20 @@ export class TrainingBot implements IUpdatable {
     const toTarget = targetPos.clone().sub(myEye)
     const dist = toTarget.length()
 
+    // How fast the target is moving (units/sec) — strafers are harder to hit
+    let targetSpeed = 0
+    if (this.prevTargetEye) {
+      targetSpeed = Math.min(20, this.prevTargetEye.distanceTo(targetPos) / Math.max(dt, 1e-3))
+    }
+    this.prevTargetEye = targetPos.clone()
+
     // Chase across the whole map; shoot when LOS opens
     const hasLos = dist < tune.engageRange && this.hasLineOfSight(physics, myEye, targetPos)
     if (hasLos) this.seeTimer += dt
-    else this.seeTimer = Math.max(0, this.seeTimer - dt * 2)
+    else {
+      this.seeTimer = Math.max(0, this.seeTimer - dt * 2)
+      this.burstCount = 0
+    }
 
     this.faceToward(targetPos)
 
@@ -347,9 +363,9 @@ export class TrainingBot implements IUpdatable {
       else if (this.difficulty === 'easy' && dist < 4) react *= 0.85
       if (this.seeTimer >= react && this.fireCooldown <= 0) {
         if (aimAtBot && threat.bot) {
-          this.tryShootBot(threat.bot, myEye, targetPos, tune, physics, dist)
+          this.tryShootBot(threat.bot, myEye, targetPos, tune, physics, dist, targetSpeed)
         } else if (!player.isDead) {
-          this.tryShoot(player, myEye, targetPos, tune, physics, dist)
+          this.tryShoot(player, myEye, targetPos, tune, physics, dist, targetSpeed)
         }
       }
     }
@@ -601,22 +617,60 @@ export class TrainingBot implements IUpdatable {
     return Math.sqrt(dx * dx + dz * dz)
   }
 
+  /**
+   * Chance THIS bullet lands, like a real player rather than an aimbot:
+   * worse at range, against fast/strafing targets, while the bot itself is
+   * moving, right after acquiring the target (aim settle), and as a burst
+   * blooms (recoil). Never a guaranteed hit — even hard bots miss.
+   */
+  private hitChance(dist: number, targetSpeed: number, tune: DifficultyTuning): number {
+    const base = this.difficulty === 'hard' ? 0.6 : this.difficulty === 'medium' ? 0.46 : 0.3
+    let acc = base
+
+    // Distance falloff
+    if (dist < 6) acc *= 1.2
+    else if (dist < 14) acc *= 1.0
+    else if (dist < 24) acc *= 0.72
+    else if (dist < 36) acc *= 0.5
+    else acc *= 0.34
+
+    // Moving target — strafers are hard to track
+    acc -= Math.min(0.4, targetSpeed * 0.045)
+
+    // Shooting while running is inaccurate
+    if (this.isMoving) acc *= 0.6
+
+    // Aim settle: first ~0.8s after acquiring, shots are sloppy
+    const settle = Math.min(1, this.seeTimer / 0.8)
+    acc *= 0.45 + 0.55 * settle
+
+    // Recoil: sustained fire climbs off target
+    acc *= Math.max(0.4, 1 - this.burstCount * 0.09)
+
+    return Math.max(0.05, Math.min(0.9, acc))
+  }
+
+  /** Build a shot direction — near the target on a hit, visibly off on a miss. */
+  private aimDir(from: Vector3D, target: Vector3D, willHit: boolean, tune: DifficultyTuning): Vector3D {
+    const dir = target.clone().sub(from).normalize()
+    const spread = willHit ? tune.aimSpread * 0.55 : tune.aimSpread * 6 + 0.06
+    dir.x += (Math.random() - 0.5) * spread * 2
+    dir.y += (Math.random() - 0.5) * spread * 1.4
+    dir.z += (Math.random() - 0.5) * spread * 2
+    return dir.normalize()
+  }
+
   private tryShoot(
     player: Player,
     from: Vector3D,
     target: Vector3D,
     tune: DifficultyTuning,
     physics: Physics,
-    dist: number
+    dist: number,
+    targetSpeed: number
   ): void {
-    // Tighter aim up close; looser at range
-    const rangeT = Math.min(1, Math.max(0, (dist - 4) / Math.max(8, tune.engageRange - 4)))
-    const spread = tune.aimSpread * (0.35 + rangeT * 1.4)
-    const dir = target.clone().sub(from).normalize()
-    dir.x += (Math.random() - 0.5) * spread * 2
-    dir.y += (Math.random() - 0.5) * spread * 1.2
-    dir.z += (Math.random() - 0.5) * spread * 2
-    dir.normalize()
+    const willHit = Math.random() < this.hitChance(dist, targetSpeed, tune)
+    const dir = this.aimDir(from, target, willHit, tune)
     this.lastShotDir.copy(dir)
 
     // Close range: player capsule often blocks eye→eye rays — skip wall check under ~5m
@@ -630,17 +684,14 @@ export class TrainingBot implements IUpdatable {
       }
     }
 
-    const aimError = Math.acos(Math.min(1, Math.max(-1, dir.dot(target.clone().sub(from).normalize()))))
-    const aimOk = aimError < spread * (close ? 4.5 : 2.8)
-    const hitPlayer = !blockedByWall && aimOk && dist < tune.engageRange
-
     const game = Game.getInstance()
     void game.audioManager.playShot(this.weaponKey, from)
     game.renderer?.projectileManager.spawn(from, dir, undefined, 850)
     game.renderer?.muzzleFlashManager.spawn(from.clone().add(dir.clone().multiplyScalar(0.4)), dir)
     this.shootFlash = 0.14
+    this.burstCount++
 
-    if (hitPlayer && player.isAlive) {
+    if (willHit && !blockedByWall && player.isAlive && dist < tune.engageRange) {
       // Close = deadly, far = chip damage
       const falloff = this.damageFalloff(dist, tune)
       const result = player.takeDamage(falloff, this.name)
@@ -660,15 +711,11 @@ export class TrainingBot implements IUpdatable {
     target: Vector3D,
     tune: DifficultyTuning,
     physics: Physics,
-    dist: number
+    dist: number,
+    targetSpeed: number
   ): void {
-    const rangeT = Math.min(1, Math.max(0, (dist - 4) / Math.max(8, tune.engageRange - 4)))
-    const spread = tune.aimSpread * (0.35 + rangeT * 1.4)
-    const dir = target.clone().sub(from).normalize()
-    dir.x += (Math.random() - 0.5) * spread * 2
-    dir.y += (Math.random() - 0.5) * spread * 1.2
-    dir.z += (Math.random() - 0.5) * spread * 2
-    dir.normalize()
+    const willHit = Math.random() < this.hitChance(dist, targetSpeed, tune)
+    const dir = this.aimDir(from, target, willHit, tune)
     this.lastShotDir.copy(dir)
 
     const close = dist < 5.5
@@ -681,17 +728,14 @@ export class TrainingBot implements IUpdatable {
       }
     }
 
-    const aimError = Math.acos(Math.min(1, Math.max(-1, dir.dot(target.clone().sub(from).normalize()))))
-    const aimOk = aimError < spread * (close ? 4.5 : 2.8)
-    const hit = !blockedByWall && aimOk && dist < tune.engageRange
-
     const game = Game.getInstance()
     void game.audioManager.playShot(this.weaponKey, from)
     game.renderer?.projectileManager.spawn(from, dir, undefined, 850)
     game.renderer?.muzzleFlashManager.spawn(from.clone().add(dir.clone().multiplyScalar(0.4)), dir)
     this.shootFlash = 0.14
+    this.burstCount++
 
-    if (hit && victim.isAlive) {
+    if (willHit && !blockedByWall && victim.isAlive && dist < tune.engageRange) {
       const falloff = this.damageFalloff(dist, tune)
       const result = victim.takeBotDamage(falloff, this.name)
       if (result.killed) {
