@@ -18,5 +18,10 @@ export function damageForBodyPart(part: BodyPart, weaponKey: string): number {
     // Same 1/2/3 tap profile as AK for the training bot
     return base
   }
+  if (weaponKey === 'AWP') {
+    if (part === 'head') return 100
+    if (part === 'body') return 100
+    return 85
+  }
   return base
 }

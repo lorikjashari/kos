@@ -1112,6 +1112,7 @@ export class MainMenu {
         opacity: 0; visibility: hidden;
       }
       #game-crosshair.is-on { opacity: 1; visibility: visible; }
+      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; }
 
       @media (max-width: 900px) {
         .kos-shell-main {

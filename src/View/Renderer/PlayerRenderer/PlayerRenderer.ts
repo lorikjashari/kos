@@ -220,7 +220,9 @@ export abstract class PlayerRenderer implements IUpdatable {
 
   abstract addToRenderer(): void
   public setFov(fov: number): void {
-    ;(<THREE.PerspectiveCamera>this.camera).fov = fov
+    const cam = this.camera as THREE.PerspectiveCamera
+    cam.fov = fov
+    cam.updateProjectionMatrix()
   }
   public showVariables() {
     const debugUI = Game.getInstance().renderer.debugUI

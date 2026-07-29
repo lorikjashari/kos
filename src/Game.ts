@@ -37,7 +37,14 @@ import { EditorMenu, type EditorTool } from './UI/EditorMenu'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import type { CrosshairRenderer } from './UI/CrosshairRenderer'
 import type { PlayerSettings } from './UI/SettingsStore'
-import { clampSensitivity, loadSettings, saveSettings } from './UI/SettingsStore'
+import {
+  clampSensitivity,
+  clampVolume,
+  clampZoomSensitivity,
+  loadSettings,
+  saveSettings,
+} from './UI/SettingsStore'
+import { CameraManager } from './View/CameraManager/CameraManager'
 
 export class Game implements IUpdatable {
   public static game: Game
@@ -71,6 +78,8 @@ export class Game implements IUpdatable {
   private botSpawnAcc = 0
   private effectsWarmed = false
   private combatLive = false
+  /** Waiting for AWP+USP / AK+USP pick before lockdown */
+  private awaitingLoadout = false
   public stats = new MatchStats()
   private nameQueue: string[] = []
   private onReturnToMenu: (() => void) | null = null
@@ -125,13 +134,58 @@ export class Game implements IUpdatable {
     return !!this.commandConsole?.isOpen()
   }
 
+  /** Known console commands for CS-style autocomplete. */
+  public static readonly CONSOLE_COMMANDS: string[] = [
+    'help',
+    'cmdlist',
+    'clear',
+    'cls',
+    'echo',
+    'toggleconsole',
+    'crosshair',
+    'cl_crosshair_size',
+    'cl_crosshair_color',
+    'cl_dynamiccrosshair',
+    'cl_observercrosshair',
+    'cl_showfps',
+    'net_graph',
+    'net_graphpos',
+    'net_graphwidth',
+    'volume',
+    'mp3volume',
+    'bgmvolume',
+    'sensitivity',
+    'sens',
+    'zoom_sensitivity',
+    'zoom_sensitivity_ratio',
+    'fps_max',
+    'fps_override',
+    'rate',
+    'cl_cmdrate',
+    'cl_updaterate',
+    'ex_interp',
+    'cl_lc',
+    'cl_lw',
+    'voice_enable',
+    'voice_scale',
+    'hisound',
+    'suitvolume',
+    'disconnect',
+    'retry',
+    'reconnect',
+    'connect',
+  ]
+
   /** Press ` (backtick) in-game or on the menu to open the CS-style console. */
   public openCommandConsole(): void {
     if (!this.commandConsole) {
       this.commandConsole = new CommandConsole({
         onCommand: (line) => void this.runCommand(line),
         onClose: () => this.onCommandConsoleClosed(),
+        commands: Game.CONSOLE_COMMANDS,
       })
+    } else {
+      this.commandConsole.setCommands(Game.CONSOLE_COMMANDS)
     }
     if (this.commandConsole.isOpen()) return
     this.consoleResumeGameplay = this.matchStarted && !this.matchPaused && this.inputManager.gameplayEnabled
@@ -162,18 +216,41 @@ export class Game implements IUpdatable {
     this.crosshairRenderer = renderer
     this.crosshairSettings = settings.crosshair
     this.playerSettings = settings
-    this.inputManager.setSensitivity(settings.sensitivity)
+    this.applyPersistedSettings(settings)
+  }
+
+  /** Apply saved console/settings values (sens, zoom sens, volumes, fps_max). */
+  public applyPersistedSettings(settings?: PlayerSettings): void {
+    const s = settings ?? loadSettings()
+    this.playerSettings = s
+    this.inputManager.setSensitivity(s.sensitivity)
+    CameraManager.zoomSensitivity = clampZoomSensitivity(s.zoomSensitivity)
+    this.audioManager.setSfxVolume(clampVolume(s.volume))
+    this.audioManager.setMusicVolume(clampVolume(s.musicVolume))
+    this.setFpsCap(s.fpsMax)
+  }
+
+  private persistSettingsPatch(patch: Partial<PlayerSettings>): void {
+    const stored = loadSettings()
+    Object.assign(stored, patch)
+    if (this.playerSettings) Object.assign(this.playerSettings, patch)
+    saveSettings(stored)
   }
 
   /** Apply mouse look sensitivity (settings + console). Persists to localStorage. */
   public setSensitivity(value: number): number {
     const s = clampSensitivity(value)
     this.inputManager.setSensitivity(s)
-    if (this.playerSettings) this.playerSettings.sensitivity = s
-    const stored = loadSettings()
-    stored.sensitivity = s
-    saveSettings(stored)
+    this.persistSettingsPatch({ sensitivity: s })
     return s
+  }
+
+  /** Scoped sensitivity ratio (console: zoom_sensitivity). Persists. */
+  public setZoomSensitivity(value: number): number {
+    const z = clampZoomSensitivity(value)
+    CameraManager.zoomSensitivity = z
+    this.persistSettingsPatch({ zoomSensitivity: z })
+    return z
   }
 
   private conPrint(msg: string, kind: '' | 'echo' | 'warn' | 'ok' = ''): void {
@@ -246,7 +323,9 @@ export class Game implements IUpdatable {
       case 'cmdlist':
         this.conPrint('Commands: crosshair, cl_crosshair_size, cl_crosshair_color,')
         this.conPrint('  cl_showfps, net_graph, volume, MP3Volume, bgmvolume, fps_max,')
-        this.conPrint('  sensitivity, disconnect, retry, reconnect, connect, toggleconsole, clear')
+        this.conPrint('  sensitivity, zoom_sensitivity, disconnect, retry, reconnect,')
+        this.conPrint('  connect, toggleconsole, clear')
+        this.conPrint('Tip: type a few letters — matches show under the input. Tab / ↓ fills.')
         return
 
       // ---- FPS / perf ----
@@ -316,17 +395,41 @@ export class Game implements IUpdatable {
         this.conPrint(`sensitivity ${s}`, 'ok')
         return
       }
+      case 'zoom_sensitivity':
+      case 'zoom_sensitivity_ratio': {
+        if (arg1 === undefined) {
+          this.conPrint(`"zoom_sensitivity" is "${CameraManager.zoomSensitivity}"`)
+          return
+        }
+        const z = this.setZoomSensitivity(val)
+        this.conPrint(`zoom_sensitivity ${z}`, 'ok')
+        return
+      }
 
-      // ---- Volume ----
-      case 'volume':
-        this.audioManager.setSfxVolume(val)
-        this.conPrint(`volume ${this.audioManager.getSfxVolume().toFixed(2)}`, 'ok')
+      // ---- Volume (persisted across refresh) ----
+      case 'volume': {
+        if (arg1 === undefined) {
+          this.conPrint(`"volume" is "${this.audioManager.getSfxVolume().toFixed(2)}"`)
+          return
+        }
+        const v = clampVolume(val)
+        this.audioManager.setSfxVolume(v)
+        this.persistSettingsPatch({ volume: v })
+        this.conPrint(`volume ${v.toFixed(2)}`, 'ok')
         return
+      }
       case 'mp3volume':
-      case 'bgmvolume':
-        this.audioManager.setMusicVolume(val)
-        this.conPrint(`${cmd} ${this.audioManager.getMusicVolume().toFixed(2)}`, 'ok')
+      case 'bgmvolume': {
+        if (arg1 === undefined) {
+          this.conPrint(`"${cmd}" is "${this.audioManager.getMusicVolume().toFixed(2)}"`)
+          return
+        }
+        const v = clampVolume(val)
+        this.audioManager.setMusicVolume(v)
+        this.persistSettingsPatch({ musicVolume: v })
+        this.conPrint(`${cmd} ${v.toFixed(2)}`, 'ok')
         return
+      }
       case 'voice_enable':
       case 'voice_scale':
       case 'hisound':
@@ -358,9 +461,14 @@ export class Game implements IUpdatable {
         )
         return
 
-      // ---- FPS cap ----
+      // ---- FPS cap (persisted) ----
       case 'fps_max': {
+        if (arg1 === undefined) {
+          this.conPrint(`"fps_max" is "${this.fpsCap}"`)
+          return
+        }
         const cap = this.setFpsCap(val)
+        this.persistSettingsPatch({ fpsMax: cap })
         this.conPrint(cap === 0 ? 'fps_max 0 (unlimited)' : `fps_max ${cap}`, 'ok')
         return
       }
@@ -744,6 +852,15 @@ export class Game implements IUpdatable {
       this.transformControls.enabled = false
       this.transformControls.visible = false
     }
+    // Equip AWP on the player's hands for editor FPS look
+    const player = this.currentPlayer?.player
+    const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+    if (player?.setWeapon('AWP')) {
+      fps?.equipWeaponMesh('AWP')
+      void this.audioManager.playSwitch('AWP')
+    } else {
+      fps?.equipWeaponMesh('AWP')
+    }
     this.inputManager.gameplayEnabled = true
     setTimeout(() => this.inputManager.onLock(), 40)
     this.editorMenu?.refresh()
@@ -796,7 +913,8 @@ export class Game implements IUpdatable {
     this.matchStarted = true
     this.matchPaused = false
     this.combatLive = false
-    this.lockdownTimer = this.lockdownDuration
+    this.awaitingLoadout = true
+    this.lockdownTimer = 0
     this.inputManager.gameplayEnabled = true
     this.applyMapMoveSpeed(this.activeMapId)
 
@@ -804,7 +922,6 @@ export class Game implements IUpdatable {
     const assignment = this.assignMatchSpawns(config.botCount)
     if (this.currentPlayer) {
       this.currentPlayer.player.teleportToSpawn(assignment.playerPos)
-      this.currentPlayer.player.equipSpawnLoadout()
     }
 
     this.nameQueue = pickBotNames(config.botCount)
@@ -818,13 +935,29 @@ export class Game implements IUpdatable {
     this.flushPendingBots(2)
 
     this.renderer.hud?.showGameplay()
-    this.renderer.hud?.setLockdown(this.lockdownTimer)
+    this.renderer.hud?.setLockdown(null)
     this.renderer.hud?.setScoreboardVisible(false)
     this.renderer.hud?.setPauseMenuOpen(false)
+    this.renderer.hud?.showLoadoutPicker((primary) => this.confirmMatchLoadout(primary))
 
+    // Keep cursor free so the loadout boxes are clickable
+    this.inputManager.unlock()
     // Warm already kicked off from menu click; keep a background pass too
     void this.warmCombatSystems()
-    setTimeout(() => this.inputManager.onLock(), 80)
+  }
+
+  /** After loadout pick: equip guns and start the pre-round countdown */
+  public confirmMatchLoadout(primary: 'AK47' | 'AWP'): void {
+    if (!this.awaitingLoadout || !this.matchStarted) return
+    this.awaitingLoadout = false
+    this.currentPlayer?.player.equipSpawnLoadout(primary)
+    this.lockdownTimer = this.lockdownDuration
+    this.combatLive = false
+    this.renderer.hud?.hideLoadoutPicker()
+    this.renderer.hud?.setLockdown(this.lockdownTimer)
+    void this.audioManager.playSwitch(primary)
+    // Lock look for countdown + match
+    setTimeout(() => this.inputManager.onLock(), 40)
   }
 
   /** Load / swap map before match start (Pool Day or Dust II). */
@@ -963,6 +1096,7 @@ export class Game implements IUpdatable {
     this.matchPaused = false
     this.matchStarted = false
     this.combatLive = false
+    this.awaitingLoadout = false
     this.lockdownTimer = 0
     this.clearBots()
     this.stats.reset()
@@ -970,10 +1104,12 @@ export class Game implements IUpdatable {
     this.inputManager.unlock()
     this.renderer.hud?.setPauseMenuOpen(false)
     this.renderer.hud?.setLockdown(null)
+    this.renderer.hud?.hideLoadoutPicker()
     this.renderer.hud?.setScoreboardVisible(false)
     const hudRoot = document.getElementById('game-hud')
     if (hudRoot) hudRoot.style.display = 'none'
-    document.getElementById('game-crosshair')?.classList.remove('is-on')
+    document.getElementById('game-crosshair')?.classList.remove('is-on', 'is-awp-hidden')
+    document.getElementById('awp-scope')?.classList.remove('is-on')
     this.onReturnToMenu?.()
   }
 
@@ -1125,11 +1261,13 @@ export class Game implements IUpdatable {
   }
 
   private flushPendingBots(maxThisFrame: number): void {
+    const botGuns = ['AK47', 'Usp', 'AWP'] as const
     let n = 0
     while (n < maxThisFrame && this.pendingBotSpawns.length > 0) {
       const p = this.pendingBotSpawns.shift()!
       const bot = new TrainingBot(p.pos, p.yaw, p.difficulty, p.name)
       bot.visualModel = 'CsTerrorist'
+      bot.weaponKey = botGuns[Math.floor(Math.random() * botGuns.length)]
       bot.addToWorld(this.physics)
       const renderer = new TrainingBotRenderer(bot)
       this.trainingBots.push(bot)
@@ -1293,7 +1431,7 @@ export class Game implements IUpdatable {
         this.flushPendingBots(Math.min(3, budget))
       }
 
-      if (this.lockdownTimer > 0) {
+      if (!this.awaitingLoadout && this.lockdownTimer > 0) {
         this.lockdownTimer = Math.max(0, this.lockdownTimer - dt)
         this.renderer.hud?.setLockdown(this.lockdownTimer > 0 ? this.lockdownTimer : null)
         if (this.lockdownTimer <= 0) {

@@ -53,6 +53,10 @@ export class TrainingBotRenderer implements IUpdatable {
   private csSkinned?: THREE.SkinnedMesh
   private csAnimBones: Record<string, THREE.Bone | undefined> = {}
   private csAnimBaseQ = new Map<THREE.Object3D, THREE.Quaternion>()
+  /** Invisible hit capsules — synced to skeleton so aim matches the silhouette */
+  private hitZoneByPart: Partial<Record<BodyPart | string, THREE.Mesh>> = {}
+  private readonly _hzWorld = new THREE.Vector3()
+  private targetHitHeight = 3.8
   private readonly _animQ = new THREE.Quaternion()
   private readonly _animE = new THREE.Euler()
   /** When true, procedural anim is paused so manual bone edits (editor rig) persist */
@@ -81,6 +85,20 @@ export class TrainingBotRenderer implements IUpdatable {
       rot: [0.05, Math.PI, Math.PI],
       seat: [0.2, 0.05, 0.5],
     },
+    AWP: {
+      mesh: 'AwpRaw',
+      len: 1.9,
+      align: [0, Math.PI, 0],
+      rot: [0.08, Math.PI, Math.PI],
+      seat: [0.22, 0.04, 0.62],
+    },
+  }
+
+  /** Map logic weapon keys to third-person prop keys */
+  private static visualWeaponFor(weaponKey: string): string {
+    if (weaponKey === 'AK47') return 'AK'
+    if (weaponKey === 'AWP') return 'AWP'
+    return 'Usp'
   }
 
   /** Third-person weapon prop seated in the CS terrorist's right hand */
@@ -106,7 +124,7 @@ export class TrainingBotRenderer implements IUpdatable {
         this.matchBot = true
         this._matchPrevPos.set(bot.position.x, bot.position.y, bot.position.z)
         this.animPreviewActive = 'Idle'
-        this.setWeapon(bot.weaponKey === 'AK47' ? 'AK' : 'Usp')
+        this.setWeapon(TrainingBotRenderer.visualWeaponFor(bot.weaponKey))
       }
       return
     }
@@ -191,7 +209,8 @@ export class TrainingBotRenderer implements IUpdatable {
     model.position.x -= center.x
     model.position.z -= center.z
 
-    // Invisible hit zones (single skinned mesh has no named head/body parts)
+    // Invisible hit zones sized for the CS silhouette (not pencil capsules)
+    this.targetHitHeight = targetH
     this.attachHeightHitZones(root, targetH)
 
     this.mesh = root
@@ -200,8 +219,9 @@ export class TrainingBotRenderer implements IUpdatable {
     this.cacheCsAnimBones()
     this.tagBodyParts()
     this.collectHitMeshes()
-    this.game.addToRenderer(this.mesh)
     this.mesh.updateMatrixWorld(true)
+    this.syncHitZonesToBones()
+    this.game.addToRenderer(this.mesh)
   }
 
   /** Cache CS Source terrorist bones from the skinned skeleton (not scene guesswork). */
@@ -277,10 +297,10 @@ export class TrainingBotRenderer implements IUpdatable {
   }
 
   /**
-   * Seat the real USP pistol (same model the player uses) in the right hand.
-   * The viewmodel GLB bundles the gun under an "Armature" node and the FPS
-   * hands separately — we extract just the gun, drop the hands, and rescale
-   * it to third-person size. Falls back to a simple prop if the model is absent.
+   * Seat a third-person weapon prop in the right hand.
+   * FPS viewmodels (USP/AK) live under an "Armature" node and need rest-pose
+   * baking. The CS2 AWP is also skinned but has no Armature name — we bake any
+   * SkinnedMesh found. Falls back to a simple prop if the model is absent.
    */
   private buildCsGun(key: string): THREE.Group | undefined {
     const existing = this.csGuns[key]
@@ -297,23 +317,29 @@ export class TrainingBotRenderer implements IUpdatable {
     if (source?.mesh) {
       const full = source.cloneMesh() as unknown as THREE.Object3D
       full.updateMatrixWorld(true)
-      let armature: THREE.Object3D | undefined
+
+      // Prefer the FPS "Armature" subtree when present; otherwise bake whole tree.
+      let bakeRoot: THREE.Object3D = full
       full.traverse((c) => {
-        if (!armature && c.name === 'Armature') armature = c
+        if (c.name === 'Armature') bakeRoot = c
       })
-      if (armature) {
-        // These are skinned first-person viewmodels: raw verts are ~0 size and
-        // the skeleton inflates them at draw time, so re-parenting + scaling
-        // collapses them. Bake the rest-pose skinning into a static mesh. Their
-        // textures are missing (white), so use a solid gunmetal material. The
-        // per-weapon `align` (measured via PCA) straightens the model's axes.
+
+      const skinned: THREE.SkinnedMesh[] = []
+      bakeRoot.traverse((c) => {
+        if ((c as THREE.SkinnedMesh).isSkinnedMesh) skinned.push(c as THREE.SkinnedMesh)
+      })
+
+      if (skinned.length > 0) {
+        // Skinned verts are often near-zero until bone transform — bake rest pose.
+        // Textures are often missing on FPS packs (white), so use gunmetal unless
+        // a map is present (AWP keeps its CS2 materials).
         const gunGroup = new THREE.Group()
-        const gunMat = new THREE.MeshStandardMaterial({ color: 0x14171b, roughness: 0.45, metalness: 0.6 })
+        const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x14171b, roughness: 0.45, metalness: 0.6 })
         const v = new THREE.Vector3()
-        const align = new THREE.Quaternion().setFromEuler(new THREE.Euler(def.align[0], def.align[1], def.align[2], 'XYZ'))
-        armature.traverse((c) => {
-          const sm = c as THREE.SkinnedMesh
-          if (!sm.isSkinnedMesh) return
+        const align = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(def.align[0], def.align[1], def.align[2], 'XYZ')
+        )
+        for (const sm of skinned) {
           sm.updateWorldMatrix(true, false)
           const srcPos = sm.geometry.attributes.position
           const arr = new Float32Array(srcPos.count * 3)
@@ -329,13 +355,36 @@ export class TrainingBotRenderer implements IUpdatable {
           const baked = new THREE.BufferGeometry()
           baked.setAttribute('position', new THREE.BufferAttribute(arr, 3))
           if (sm.geometry.index) baked.setIndex(sm.geometry.index.clone())
+          if (sm.geometry.attributes.uv) baked.setAttribute('uv', sm.geometry.attributes.uv.clone())
           baked.computeVertexNormals()
-          const m = new THREE.Mesh(baked, gunMat)
+
+          let mat: THREE.Material | THREE.Material[] = fallbackMat
+          if (sm.material) {
+            const srcMats = Array.isArray(sm.material) ? sm.material : [sm.material]
+            const hasMap = srcMats.some((m) => !!(m as THREE.MeshStandardMaterial).map)
+            if (hasMap) {
+              mat = Array.isArray(sm.material)
+                ? sm.material.map((m) => {
+                    const c = m.clone()
+                    const mm = c as THREE.MeshStandardMaterial
+                    if (mm.map) mm.map.colorSpace = THREE.SRGBColorSpace
+                    return c
+                  })
+                : (() => {
+                    const c = sm.material.clone()
+                    const mm = c as THREE.MeshStandardMaterial
+                    if (mm.map) mm.map.colorSpace = THREE.SRGBColorSpace
+                    return c
+                  })()
+            }
+          }
+
+          const m = new THREE.Mesh(baked, mat)
           m.castShadow = false
           m.receiveShadow = false
           m.frustumCulled = false
           gunGroup.add(m)
-        })
+        }
         if (gunGroup.children.length > 0) {
           container.add(gunGroup)
           container.updateMatrixWorld(true)
@@ -460,8 +509,8 @@ export class TrainingBotRenderer implements IUpdatable {
     const b = this.csAnimBones
     this.offsetBone(b.clavL, 0.06, -0.04, -0.05)
     this.offsetBone(b.clavR, 0.06, 0.04, 0.05)
-    if (this.csWeapon === 'AK') {
-      // Rifle: right hand on the grip near the chest, left hand forward on the handguard
+    if (this.csWeapon === 'AK' || this.csWeapon === 'AWP') {
+      // Rifle / sniper: right hand on the grip near the chest, left on the handguard
       this.offsetBone(b.shoulderR, -0.45 + bob, 0.95, 0)
       this.offsetBone(b.elbowR, -1.3, 0.55, 0.5)
       this.offsetBone(b.shoulderL, -0.5 + bob, -0.95, 0)
@@ -567,28 +616,90 @@ export class TrainingBotRenderer implements IUpdatable {
     }
   }
 
-  /** Capsule-style hit boxes by height for single-mesh characters. */
+  /**
+   * Capsule hit volumes for the CS terrorist.
+   * Sized to cover the visual silhouette (previous radii were ~half as wide —
+   * shots that looked on-target often missed). Skinned mesh raycasts bind-pose
+   * geometry, so we keep dedicated zones and lock them to bones each frame.
+   */
   private attachHeightHitZones(root: THREE.Object3D, height: number): void {
-    const mk = (part: BodyPart, y: number, h: number, r: number) => {
+    this.hitZoneByPart = {}
+    const mk = (id: string, part: BodyPart, y: number, h: number, r: number) => {
       const geo = new THREE.CapsuleGeometry(r, Math.max(0.05, h - r * 2), 4, 8)
-      const mat = new THREE.MeshBasicMaterial({ visible: false })
+      const mat = new THREE.MeshBasicMaterial({
+        visible: false,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
       const mesh = new THREE.Mesh(geo, mat)
-      mesh.name = `HitZone_${part}`
+      mesh.name = `HitZone_${id}`
       mesh.userData.bodyPart = part
       mesh.position.set(0, y, 0)
+      mesh.frustumCulled = false
       root.add(mesh)
+      this.hitZoneByPart[id] = mesh
+      return mesh
     }
-    // Legs / body / head fractions of full height
-    mk('legs', height * 0.22, height * 0.44, 0.22)
-    mk('body', height * 0.58, height * 0.42, 0.28)
-    mk('head', height * 0.92, height * 0.22, 0.16)
 
-    // Don't raycast the decorative skin — hit zones only
+    // Wider than the old 0.22 / 0.28 / 0.16 — match ~CS player width at height 3.8
+    mk('legs', 'legs', height * 0.22, height * 0.48, 0.42)
+    mk('body', 'body', height * 0.58, height * 0.48, 0.62)
+    mk('head', 'head', height * 0.9, height * 0.28, 0.34)
+    // Shoulder / upper-arm volumes so arms aren't dead space
+    mk('armL', 'body', height * 0.62, height * 0.28, 0.26).position.x = -0.55
+    mk('armR', 'body', height * 0.62, height * 0.28, 0.26).position.x = 0.55
+
+    // Decorative skin is not raycastable (bind-pose verts ≠ animated pose)
     root.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
       if (String(child.name).startsWith('HitZone_')) return
       child.raycast = () => {}
     })
+  }
+
+  /** Keep hit capsules on the animated skeleton so walking bots stay hittable. */
+  private syncHitZonesToBones(): void {
+    if (!this.staticModel || Object.keys(this.hitZoneByPart).length === 0) return
+    const b = this.csAnimBones
+    const h = this.targetHitHeight
+
+    const place = (id: string, bone: THREE.Bone | undefined, ox: number, oy: number, oz: number) => {
+      const zone = this.hitZoneByPart[id]
+      if (!zone || !bone) return false
+      bone.getWorldPosition(this._hzWorld)
+      this.mesh.worldToLocal(this._hzWorld)
+      zone.position.set(this._hzWorld.x + ox, this._hzWorld.y + oy, this._hzWorld.z + oz)
+      return true
+    }
+
+    // Head sits above the neck
+    if (!place('head', b.neck || b.spineU, 0, h * 0.06, 0.02)) {
+      const zone = this.hitZoneByPart.head
+      if (zone) zone.position.set(0, h * 0.9, 0)
+    }
+
+    // Torso on upper spine
+    if (!place('body', b.spineU || b.spineL || b.hips, 0, h * 0.02, 0.04)) {
+      const zone = this.hitZoneByPart.body
+      if (zone) zone.position.set(0, h * 0.58, 0)
+    }
+
+    // Legs / pelvis
+    if (!place('legs', b.hips, 0, -h * 0.12, 0)) {
+      const zone = this.hitZoneByPart.legs
+      if (zone) zone.position.set(0, h * 0.22, 0)
+    }
+
+    // Arms follow shoulders so gun-hold pose stays covered
+    const armOffY = -h * 0.02
+    if (!place('armL', b.shoulderL || b.clavL, -0.12, armOffY, 0.08)) {
+      const zone = this.hitZoneByPart.armL
+      if (zone) zone.position.set(-0.55, h * 0.62, 0)
+    }
+    if (!place('armR', b.shoulderR || b.clavR, 0.12, armOffY, 0.08)) {
+      const zone = this.hitZoneByPart.armR
+      if (zone) zone.position.set(0.55, h * 0.62, 0)
+    }
   }
 
   /** Clone materials so opacity/emissive edits never leak to other bots */
@@ -1193,6 +1304,8 @@ export class TrainingBotRenderer implements IUpdatable {
     if (this.staticModel) {
       if (this.matchBot) this.driveMatchClip(dt)
       this.updateCsProceduralAnim(dt)
+      this.mesh.updateMatrixWorld(true)
+      this.syncHitZonesToBones()
       this.mesh.updateMatrixWorld(true)
       this.syncCsGun()
       return

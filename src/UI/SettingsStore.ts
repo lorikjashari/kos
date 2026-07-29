@@ -30,12 +30,30 @@ export interface PlayerSettings {
   jumpWithScrollWheel: boolean
   /** Mouse look multiplier (1 = default). Console: sensitivity */
   sensitivity: number
+  /** Scoped look scale vs hipfire (console: zoom_sensitivity). CS default 1 */
+  zoomSensitivity: number
+  /** Master SFX 0..1 (console: volume) */
+  volume: number
+  /** Menu / background music 0..1 (console: MP3Volume / bgmvolume) */
+  musicVolume: number
+  /** fps_max — 0 = unlimited */
+  fpsMax: number
 }
 
 /** Clamp / sanitize mouse sensitivity (CS-style range). */
 export function clampSensitivity(v: number): number {
   if (!Number.isFinite(v)) return 3
   return Math.max(0.01, Math.min(20, Math.round(v * 100) / 100))
+}
+
+export function clampZoomSensitivity(v: number): number {
+  if (!Number.isFinite(v)) return 1
+  return Math.max(0.01, Math.min(5, Math.round(v * 1000) / 1000))
+}
+
+export function clampVolume(v: number): number {
+  if (!Number.isFinite(v)) return 1
+  return Math.max(0, Math.min(1, Math.round(v * 100) / 100))
 }
 
 export const DEFAULT_CROSSHAIR: CrosshairSettings = {
@@ -91,6 +109,17 @@ export function loadSettings(): PlayerSettings {
       sensitivity: clampSensitivity(
         typeof parsed.sensitivity === 'number' ? parsed.sensitivity : 3
       ),
+      zoomSensitivity: clampZoomSensitivity(
+        typeof parsed.zoomSensitivity === 'number' ? parsed.zoomSensitivity : 1
+      ),
+      volume: clampVolume(typeof parsed.volume === 'number' ? parsed.volume : 1),
+      musicVolume: clampVolume(
+        typeof parsed.musicVolume === 'number' ? parsed.musicVolume : 0.38
+      ),
+      fpsMax:
+        typeof parsed.fpsMax === 'number' && Number.isFinite(parsed.fpsMax)
+          ? Math.max(0, Math.min(999, Math.floor(parsed.fpsMax)))
+          : 0,
     }
   } catch {
     return defaultSettings()
@@ -108,6 +137,10 @@ export function defaultSettings(): PlayerSettings {
     keybinds: { ...DEFAULT_KEYBINDS },
     jumpWithScrollWheel: true,
     sensitivity: 3,
+    zoomSensitivity: 1,
+    volume: 1,
+    musicVolume: 0.38,
+    fpsMax: 0,
   }
 }
 
@@ -135,6 +168,6 @@ export const REBINDABLE_ACTIONS: Array<{ key: Key; label: string }> = [
   { key: Key.Two, label: 'Secondary Weapon' },
   { key: Key.Three, label: 'Knife' },
   { key: Key.Left_Click, label: 'Fire' },
-  { key: Key.Right_Click, label: 'Zoom / ADS' },
+  { key: Key.Right_Click, label: 'AWP Scope' },
   { key: Key.SwitchHands, label: 'Toggle Switch Hands' },
 ]

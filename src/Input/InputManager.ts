@@ -200,10 +200,12 @@ export class InputManager implements IUpdatable {
       this.playerWrapper.cameraManager.setLeanDirection(leanDirection)
     }
 
+    // 1 = match primary (AK or AWP), 2 = USP, 3 = knife
     if (this.keys.get(Key.One)?.justReleased) {
-      if (player.setWeapon('AK47')) {
-        ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('AK47')
-        void Game.getInstance().audioManager.playSwitch('AK47')
+      const primary = player.primaryWeaponKey
+      if (player.setWeapon(primary)) {
+        ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh(primary)
+        void Game.getInstance().audioManager.playSwitch(primary)
       }
     }
     if (this.keys.get(Key.Two)?.justReleased) {
@@ -217,18 +219,6 @@ export class InputManager implements IUpdatable {
       if (player.setWeapon('Knife')) {
         ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('Knife')
         void Game.getInstance().audioManager.playSwitch('Knife')
-      }
-    }
-
-    // Key.Four kept for optional FPS re-focus (no TPS)
-    if (this.keys.get(Key.Four)?.justReleased) {
-      if (this.playerWrapper.switchToFpsView()) {
-        this.playerWrapper.cameraManager = new FPSCameraManager(
-          this.playerWrapper.player,
-          this.playerWrapper.renderer!.camera
-        )
-        Game.getInstance().renderer.setCamera(this.playerWrapper.cameraManager!.camera)
-        this.playerWrapper.renderer?.setCameraManager(this.playerWrapper.cameraManager)
       }
     }
 
@@ -269,7 +259,9 @@ export class InputManager implements IUpdatable {
     }
 
     if (this.keys.get(Key.Right_Click)?.justReleased) {
-      playerRenderer?.handleZoom()
+      if (player.currentWeapon.key === 'AWP') {
+        playerRenderer?.handleZoom()
+      }
     }
 
     if (this.keys.get(Key.SwitchHands)?.justReleased) {

@@ -121,6 +121,33 @@ export const WEAPONS: Record<string, WeaponConfig> = {
     recoilPattern: [{ pitch: 0.008, yaw: 0 }],
     firstShotMultiplier: 1,
   },
+  AWP: {
+    key: 'AWP',
+    displayName: 'AWP',
+    fireMode: 'semi',
+    rateOfFire: 1450,
+    maxRange: 10000,
+    impulseScale: 40,
+    spawnsProjectile: true,
+    playsGunshot: true,
+    muzzleFlash: true,
+    magazineSize: 10,
+    reloadTime: 3.2,
+    bulletSpeed: 1200,
+    recoilPattern: [
+      { pitch: 0.055, yaw: 0.0 },
+      { pitch: 0.048, yaw: 0.006 },
+      { pitch: 0.042, yaw: -0.005 },
+      { pitch: 0.038, yaw: 0.004 },
+      { pitch: 0.034, yaw: -0.003 },
+      { pitch: 0.03, yaw: 0.002 },
+      { pitch: 0.026, yaw: -0.002 },
+      { pitch: 0.022, yaw: 0.001 },
+      { pitch: 0.02, yaw: 0.0 },
+      { pitch: 0.018, yaw: 0.0 },
+    ],
+    firstShotMultiplier: 1,
+  },
 }
 
 export function getWeaponConfig(key: string): WeaponConfig {

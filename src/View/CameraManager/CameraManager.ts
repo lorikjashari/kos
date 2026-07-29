@@ -8,6 +8,8 @@ export abstract class CameraManager implements IUpdatable {
   public static readonly BASE_MOUSE_SCALE = 0.0015
   /** Live mouse look multiplier (driven by settings / console). */
   public static mouseSensitivity = 3
+  /** Scoped look scale vs hipfire (console: zoom_sensitivity). */
+  public static zoomSensitivity = 1
 
   public camera: THREE.PerspectiveCamera
   public player: Player
@@ -20,9 +22,10 @@ export abstract class CameraManager implements IUpdatable {
     this.camera = camera
   }
 
-  /** Effective mouse look scale for this frame. */
-  public static getMouseScale(): number {
-    return CameraManager.BASE_MOUSE_SCALE * CameraManager.mouseSensitivity
+  /** Effective mouse look scale for this frame. Pass zoomed=true while AWP scoped. */
+  public static getMouseScale(zoomed = false): number {
+    const zoom = zoomed ? CameraManager.zoomSensitivity : 1
+    return CameraManager.BASE_MOUSE_SCALE * CameraManager.mouseSensitivity * zoom
   }
   private updateRotationState(dt: number): void {
     if (this.isRotating) {

@@ -87,7 +87,134 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     const csT = new LoadableMesh('models/cs_terrorist.glb', 'CsTerrorist')
     await csT.load()
     csT.register(this.loadableMeshs)
+
+    // CS2 AWP mesh — composed with AK hands into an FPS viewmodel
+    const awpRaw = new LoadableMesh('models/awp.glb', 'AwpRaw')
+    await awpRaw.load()
+    awpRaw.register(this.loadableMeshs)
+    this.registerAwpViewmodel(ak)
   }
+
+  /**
+   * FPS AWP base: AK hands + animations. Keep the Armature node (seat for the
+   * AWP prop) but hide the Galil gun meshes.
+   */
+  private registerAwpViewmodel(akSource: FPSMesh): void {
+    const awpFps = akSource.clone()
+    awpFps.key = 'AWP'
+
+    const root = awpFps.mesh as unknown as THREE.Object3D
+    root.traverse((c) => {
+      // Hide Galil gun meshes; keep Armature transform as the AWP seat
+      if (c.name === 'Torus' || c.name === 'Torus_1' || c.name === 'Torus001') {
+        c.visible = false
+      }
+      if ((c as THREE.Mesh).isMesh && c.parent?.name === 'Armature') {
+        c.visible = false
+      }
+    })
+
+    awpFps.register(this.loadableMeshs)
+  }
+
+  /** Bake a fresh AWP prop for attaching onto the FPS Armature seat. */
+  public createAwpViewProp(): THREE.Group | undefined {
+    const awpRaw = this.loadableMeshs.get('AwpRaw')
+    if (!awpRaw) return undefined
+    return this.bakeAwpProp(awpRaw)
+  }
+
+  private bakeAwpProp(awpRaw: LoadableMesh): THREE.Group | undefined {
+    const full = awpRaw.cloneMesh() as unknown as THREE.Object3D
+    full.updateMatrixWorld(true)
+
+    let grip = new THREE.Vector3()
+    let foundGrip = false
+    full.traverse((c) => {
+      if (!foundGrip && c.name === 'weapon_hand_r_4') {
+        c.getWorldPosition(grip)
+        foundGrip = true
+      }
+    })
+
+    const group = new THREE.Group()
+    // BasicMaterial: always visible under the viewmodel camera (Physical/Standard
+    // without maps/envmap often reads as pure black / "missing").
+    const fallbackMat = new THREE.MeshBasicMaterial({
+      color: 0x2c3238,
+      side: THREE.DoubleSide,
+    })
+    const v = new THREE.Vector3()
+    const align = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.0029, -0.0013, 0.0033, 'XYZ'))
+
+    let bakedAny = false
+    full.traverse((c) => {
+      const sm = c as THREE.SkinnedMesh
+      if (!sm.isSkinnedMesh) return
+      sm.updateWorldMatrix(true, false)
+      if (!foundGrip) {
+        const box = new THREE.Box3().setFromObject(sm)
+        grip = box.getCenter(new THREE.Vector3())
+        foundGrip = true
+      }
+      const srcPos = sm.geometry.attributes.position
+      const arr = new Float32Array(srcPos.count * 3)
+      for (let i = 0; i < srcPos.count; i++) {
+        v.fromBufferAttribute(srcPos, i)
+        sm.applyBoneTransform(i, v)
+        v.applyMatrix4(sm.matrixWorld)
+        v.sub(grip)
+        v.applyQuaternion(align)
+        arr[i * 3] = v.x
+        arr[i * 3 + 1] = v.y
+        arr[i * 3 + 2] = v.z
+      }
+      const baked = new THREE.BufferGeometry()
+      baked.setAttribute('position', new THREE.BufferAttribute(arr, 3))
+      if (sm.geometry.index) baked.setIndex(sm.geometry.index.clone())
+      if (sm.geometry.attributes.uv) baked.setAttribute('uv', sm.geometry.attributes.uv.clone())
+      baked.computeVertexNormals()
+
+      // Prefer textured materials when maps loaded; otherwise solid visible gray
+      let mat: THREE.Material | THREE.Material[] = fallbackMat
+      if (sm.material) {
+        const srcMats = Array.isArray(sm.material) ? sm.material : [sm.material]
+        const hasMap = srcMats.some((m) => !!(m as THREE.MeshStandardMaterial).map)
+        if (hasMap) {
+          mat = srcMats.map((m) => {
+            const src = m as THREE.MeshStandardMaterial
+            const basic = new THREE.MeshBasicMaterial({
+              map: src.map,
+              color: 0xffffff,
+              side: THREE.DoubleSide,
+            })
+            if (basic.map) basic.map.colorSpace = THREE.SRGBColorSpace
+            return basic
+          })
+          mat = mat.length === 1 ? mat[0] : mat
+        }
+      }
+
+      const mesh = new THREE.Mesh(baked, mat)
+      mesh.castShadow = false
+      mesh.receiveShadow = false
+      mesh.frustumCulled = false
+      group.add(mesh)
+      bakedAny = true
+    })
+
+    if (!bakedAny) return undefined
+
+    // Center on bbox so seating is predictable
+    group.updateMatrixWorld(true)
+    const box = new THREE.Box3().setFromObject(group)
+    const center = box.getCenter(new THREE.Vector3())
+    for (const child of group.children) {
+      child.position.sub(center)
+    }
+    return group
+  }
+
   public async loadMapMesh(
     meshKey: string,
     glbPath: string,

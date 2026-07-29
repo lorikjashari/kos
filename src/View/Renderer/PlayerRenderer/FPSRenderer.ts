@@ -49,6 +49,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     }
   }
   show(): void {
+    if (this.scopeLevel > 0) return
     this.fpsMesh.mesh.visible = true
   }
   hide(): void {
@@ -78,13 +79,33 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
     }
+    const rel = this.fpsMesh.animations.get('Reload')
+    if (rel?.Start && rel?.End && this.fpsMesh.animations.has('Idle')) {
+      const durSec = Math.max(0.2, (rel.End.time - Math.abs(rel.Start.time)) / 1.5)
+      window.setTimeout(() => {
+        if (this.fpsMesh?.animations.has('Idle')) {
+          this.fpsMesh.playAnimation('Idle', true, true)
+        }
+      }, durSec * 1000 + 40)
+    }
   }
 
   public handleWeaponSwitch(): void {
+    this.clearScope(false)
     this.switchVelocity = 0.05
     this.fpsMesh.playAnimation('Switch')
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
+    }
+    // After the draw clip, settle into looping Idle (hands + AWP bone seat)
+    const sw = this.fpsMesh.animations.get('Switch')
+    if (sw?.Start && sw?.End && this.fpsMesh.animations.has('Idle')) {
+      const durSec = Math.max(0.2, (sw.End.time - Math.abs(sw.Start.time)) / 1.5)
+      window.setTimeout(() => {
+        if (this.fpsMesh?.animations.has('Idle')) {
+          this.fpsMesh.playAnimation('Idle', true, true)
+        }
+      }, durSec * 1000 + 40)
     }
   }
   private switchVelocity = 0
@@ -92,6 +113,14 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   public fpsMesh!: FPSMesh
   private recoilEffect = 0
   private idleSwayTime = 0
+  /** 0 hipfire, 1 first zoom, 2 second zoom — AWP only */
+  private scopeLevel = 0
+  private scopeOverlay: HTMLElement | null = null
+  private static readonly SCOPE_FOVS = [40, 15] as const
+
+  public isScoped(): boolean {
+    return this.scopeLevel > 0
+  }
 
   private bobbingAmount = 0.0008
   private bobbingRestitutionSpeed = 15
@@ -146,11 +175,16 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   /** Get or create a fully-inited viewmodel for a weapon key */
   private getOrCreateWeaponMesh(key: string): FPSMesh | null {
     const cached = this.weaponCache.get(key)
-    if (cached) return cached
+    if (cached) {
+      // Hot reload / older cache may be missing the AWP prop — ensure it's seated
+      if (key === 'AWP') this.attachAwpProp(cached)
+      return cached
+    }
     const source = Game.getInstance().globalLoadingManager.loadableMeshs.get(key)
     if (!source) return null
     const mesh = source.clone() as FPSMesh
     mesh.init()
+    if (key === 'AWP') this.attachAwpProp(mesh)
     // Touch every clipAction once so first Shoot/Reload/Switch never allocates
     for (const animName of ['Shoot', 'Reload', 'Switch']) {
       if (mesh.animations.has(animName)) {
@@ -160,6 +194,57 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     mesh.mixer?.stopAllAction()
     this.weaponCache.set(key, mesh)
     return mesh
+  }
+
+  /**
+   * Seat the baked CS2 AWP using the tuned idle pose, then reparent onto the
+   * Galil Armature Root bone so Switch / Shoot / Reload animations carry it.
+   * Object3D.attach() keeps the world pose while parenting.
+   */
+  private attachAwpProp(fps: FPSMesh): void {
+    const root = fps.mesh as unknown as THREE.Object3D
+
+    // Drop any previous seat so tweaks always apply (cache-safe)
+    const stale: THREE.Object3D[] = []
+    root.traverse((c) => {
+      if (c.name === 'AwpViewProp') stale.push(c)
+    })
+    for (const c of stale) c.parent?.remove(c)
+
+    const prop = Game.getInstance().globalLoadingManager.createAwpViewProp()
+    if (!prop) {
+      console.warn('[AWP] createAwpViewProp failed — is models/awp.glb loaded?')
+      return
+    }
+    prop.name = 'AwpViewProp'
+    prop.frustumCulled = false
+    prop.visible = true
+    prop.traverse((c) => {
+      c.frustumCulled = false
+      c.visible = true
+    })
+
+    // Tuned idle seat (root-local, under scale -1,-1,-1)
+    prop.position.set(0.39, -0.25, -1.62)
+    prop.rotation.set(0, Math.PI, 0)
+    prop.scale.setScalar(3.7 / 1.36)
+    root.add(prop)
+    root.updateMatrixWorld(true)
+
+    // Prefer Armature/Root so draw / fire / reload clips move the rifle with the hands
+    let seat: THREE.Object3D | undefined
+    root.traverse((c) => {
+      if (seat) return
+      if (c.name === 'Root' && c.parent?.name === 'Armature') seat = c
+    })
+    if (!seat) {
+      root.traverse((c) => {
+        if (!seat && c.name === 'Armature') seat = c
+      })
+    }
+    if (seat) {
+      seat.attach(prop)
+    }
   }
 
   /**
@@ -179,7 +264,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
 
   /** Pre-init AK / USP / Knife + compile viewmodel shaders before combat */
   public warmWeapons(renderer: THREE.WebGLRenderer): void {
-    const keys = ['AK47', 'Usp', 'Knife']
+    const keys = ['AK47', 'Usp', 'Knife', 'AWP']
     const meshes: THREE.Object3D[] = []
     for (const key of keys) {
       const mesh = this.getOrCreateWeaponMesh(key)
@@ -229,6 +314,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   public setMesh(mesh: LoadableMesh, playSwitchAnim = true): void {
+    this.clearScope(false)
     this.removeMesh()
     this.fpsMesh = mesh as FPSMesh
     // Cached / already-inited weapons skip the expensive material bleach pass
@@ -269,19 +355,23 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   update(dt: number): void {
     super.update(dt)
 
-    // Keep overlay camera matched to player look / FOV
+    // Keep overlay camera matched to player look; keep hip FOV while scoped (gun hidden)
     this.viewmodelCamera.quaternion.copy(this.camera.quaternion)
-    this.viewmodelCamera.fov = (this.camera as THREE.PerspectiveCamera).fov
+    this.viewmodelCamera.fov =
+      this.scopeLevel > 0 ? this.baseFov : (this.camera as THREE.PerspectiveCamera).fov
     this.viewmodelCamera.updateProjectionMatrix()
 
     // Drop the gun out of view while dead (POV is on the ground)
     if (this.player.isDead) {
+      this.clearScope(false)
       this.hide()
       return
     }
-    this.show()
+    if (this.scopeLevel === 0) this.show()
+    else this.hide()
 
     if (!this.game.renderer.renderingConfig.updateViewmodel) return
+    if (this.scopeLevel > 0) return
 
     this.fpsMesh.update(dt)
     this.idleSwayTime += dt
@@ -377,18 +467,101 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.game.renderer.particleManager.addParticleEmitter(this.tempEmitter)
   }
 
+  /** AWP scope cycle: hip → zoom1 → zoom2 → hip */
   public handleZoom(): void {
-    let fov: number = (<THREE.PerspectiveCamera>this.camera).fov
-    const zoom: Array<number> = [20, 50]
-    if (fov === zoom[0]) {
-      fov = this.baseFov
-    } else if (fov === zoom[1]) {
-      fov = zoom[0]
-    } else {
-      fov = zoom[1]
-    }
+    if (this.player.currentWeapon.key !== 'AWP' || this.player.isDead) return
+    this.scopeLevel = (this.scopeLevel + 1) % 3
+    this.applyScope()
+    void this.game.audioManager.playZoom()
+  }
+
+  public clearScope(playSound = false): void {
+    if (this.scopeLevel === 0 && !this.scopeOverlay?.classList.contains('is-on')) return
+    this.scopeLevel = 0
+    this.applyScope()
+    if (playSound) void this.game.audioManager.playZoom()
+  }
+
+  private applyScope(): void {
+    const fov =
+      this.scopeLevel === 0
+        ? this.baseFov
+        : FPSRenderer.SCOPE_FOVS[this.scopeLevel - 1] ?? this.baseFov
     this.setFov(fov)
-    this.viewmodelCamera.fov = fov
+    this.viewmodelCamera.fov = this.baseFov
+    this.viewmodelCamera.updateProjectionMatrix()
+
+    const overlay = this.ensureScopeOverlay()
+    if (this.scopeLevel > 0) {
+      this.hide()
+      overlay.classList.add('is-on')
+    } else {
+      overlay.classList.remove('is-on')
+      if (this.fpsMesh?.mesh) this.fpsMesh.mesh.visible = true
+    }
+  }
+
+  private ensureScopeOverlay(): HTMLElement {
+    if (this.scopeOverlay) return this.scopeOverlay
+    let el = document.getElementById('awp-scope')
+    if (!el) {
+      el = document.createElement('div')
+      el.id = 'awp-scope'
+      el.innerHTML = `
+        <div class="awp-scope-vignette"></div>
+        <div class="awp-scope-lens">
+          <div class="awp-scope-cross-h"></div>
+          <div class="awp-scope-cross-v"></div>
+          <div class="awp-scope-dot"></div>
+        </div>
+      `
+      document.body.appendChild(el)
+      if (!document.getElementById('awp-scope-styles')) {
+        const style = document.createElement('style')
+        style.id = 'awp-scope-styles'
+        style.textContent = `
+          #awp-scope {
+            position: fixed; inset: 0; z-index: 7; pointer-events: none;
+            opacity: 0; visibility: hidden; transition: opacity 0.08s linear;
+          }
+          #awp-scope.is-on { opacity: 1; visibility: visible; }
+          .awp-scope-vignette {
+            position: absolute; inset: 0;
+            background: radial-gradient(circle at center,
+              transparent 0%, transparent 22%,
+              rgba(0,0,0,0.55) 38%, #000 52%);
+          }
+          .awp-scope-lens {
+            position: absolute; left: 50%; top: 50%;
+            width: min(92vmin, 920px); height: min(92vmin, 920px);
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            box-shadow: 0 0 0 9999px #000;
+            background: radial-gradient(circle at 42% 38%,
+              rgba(255,255,255,0.04), transparent 55%);
+          }
+          .awp-scope-cross-h, .awp-scope-cross-v {
+            position: absolute; background: rgba(0,0,0,0.85);
+          }
+          .awp-scope-cross-h {
+            left: 8%; right: 8%; top: 50%; height: 1px;
+            transform: translateY(-50%);
+          }
+          .awp-scope-cross-v {
+            top: 8%; bottom: 8%; left: 50%; width: 1px;
+            transform: translateX(-50%);
+          }
+          .awp-scope-dot {
+            position: absolute; left: 50%; top: 50%;
+            width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
+            border-radius: 50%; background: #111;
+          }
+        `
+        document.head.appendChild(style)
+      }
+    }
+    this.scopeOverlay = el
+    return el
   }
 
   addToRenderer(): void {

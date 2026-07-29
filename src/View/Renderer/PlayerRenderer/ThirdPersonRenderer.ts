@@ -37,16 +37,7 @@ export class ThirdPersonRenderer extends PlayerRenderer {
     private tpsMesh!: ThirdPersonMesh;
 
     public handleZoom(): void {
-        let fov: number = (<THREE.PerspectiveCamera>this.playerCameraManager.camera).fov;
-        const zoom: Array<number> = [20, 50]
-        if (fov === zoom[0]) {
-            fov = this.baseFov;
-        } else if (fov === zoom[1]) {
-            fov = zoom[0];
-        } else {
-            fov = zoom[1];
-        }
-        this.setFov(fov);
+        // Scope zoom is FPS AWP only
     }
     public handleShoot(hitscanResult): void {
         super.handleShoot(hitscanResult)

@@ -2,21 +2,33 @@
  * Counter-Strike 1.6 style developer console.
  * Toggle with the backtick (`) key. Type a command + Enter (or Submit) to run.
  * Output is echoed CS-style with a leading "] ".
+ * Partial typing shows matching commands underneath; Tab / Down completes.
  */
 export class CommandConsole {
   private root: HTMLDivElement
   private input: HTMLInputElement
   private log: HTMLDivElement
+  private suggestEl: HTMLDivElement
   private open = false
   private seeded = false
   private history: string[] = []
   private historyIdx = -1
+  private commands: string[] = []
+  private matches: string[] = []
+  private matchIdx = 0
+  /** Prefix from the last typed fragment — used so Tab cycles siblings */
+  private suggestRoot = ''
   private onCommand: (line: string) => void | Promise<void>
   private onClose: () => void
 
-  constructor(handlers: { onCommand: (line: string) => void | Promise<void>; onClose: () => void }) {
+  constructor(handlers: {
+    onCommand: (line: string) => void | Promise<void>
+    onClose: () => void
+    commands?: string[]
+  }) {
     this.onCommand = handlers.onCommand
     this.onClose = handlers.onClose
+    this.commands = (handlers.commands ?? []).map((c) => c.toLowerCase())
 
     this.root = document.createElement('div')
     this.root.id = 'kos-con'
@@ -29,7 +41,10 @@ export class CommandConsole {
         </div>
         <div class="kos-con-log" id="kos-con-log"></div>
         <div class="kos-con-bottom">
-          <input id="kos-con-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" />
+          <div class="kos-con-input-wrap">
+            <input id="kos-con-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" />
+            <div class="kos-con-suggest" id="kos-con-suggest" aria-hidden="true"></div>
+          </div>
           <button type="button" class="kos-con-submit" id="kos-con-submit">Submit</button>
         </div>
       </div>
@@ -117,9 +132,18 @@ export class CommandConsole {
         padding: 6px;
         background: #16181b;
         border-top: 1px solid #000;
+        align-items: flex-start;
+      }
+      .kos-con-input-wrap {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
       }
       #kos-con-input {
-        flex: 1;
+        width: 100%;
+        box-sizing: border-box;
         background: #050506;
         border: 1px solid #3a3f45;
         outline: none;
@@ -127,6 +151,24 @@ export class CommandConsole {
         font-family: inherit;
         font-size: 12.5px;
         padding: 4px 6px;
+      }
+      .kos-con-suggest {
+        min-height: 0;
+        max-height: 88px;
+        overflow-y: auto;
+        padding: 0 6px;
+        color: #7a9a7a;
+        font-size: 12px;
+        line-height: 1.35;
+        white-space: pre-wrap;
+      }
+      .kos-con-suggest:empty { display: none; }
+      .kos-con-suggest .hit {
+        color: #b8e0b8;
+      }
+      .kos-con-suggest .hit.is-on {
+        color: #e8ffe8;
+        background: rgba(80, 120, 80, 0.35);
       }
       .kos-con-submit {
         min-width: 74px;
@@ -138,6 +180,7 @@ export class CommandConsole {
         font-family: inherit;
         font-size: 12px;
         padding: 4px 10px;
+        margin-top: 0;
       }
       .kos-con-submit:active { background: linear-gradient(#333940, #4a5159); }
     `
@@ -146,6 +189,7 @@ export class CommandConsole {
 
     this.input = this.root.querySelector('#kos-con-input') as HTMLInputElement
     this.log = this.root.querySelector('#kos-con-log') as HTMLDivElement
+    this.suggestEl = this.root.querySelector('#kos-con-suggest') as HTMLDivElement
 
     this.root.querySelector('.kos-con-x')?.addEventListener('click', () => this.close())
     this.root.querySelector('#kos-con-submit')?.addEventListener('click', () => this.submit())
@@ -158,6 +202,7 @@ export class CommandConsole {
       }
     })
 
+    this.input.addEventListener('input', () => this.refreshSuggest())
     this.input.addEventListener('keydown', (e) => {
       e.stopPropagation()
       // Backtick closes the console (CS 1.6 behaviour) and never types the char
@@ -176,16 +221,37 @@ export class CommandConsole {
         this.submit()
         return
       }
-      if (e.key === 'ArrowUp') {
+      if (e.key === 'Tab') {
         e.preventDefault()
-        this.recall(-1)
+        this.acceptSuggest(e.shiftKey ? -1 : 1)
         return
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        this.recall(1)
+        // With matches: cycle / accept like CS autocomplete. Else: history.
+        if (this.matches.length > 0) {
+          this.acceptSuggest(1)
+        } else {
+          this.recall(1)
+        }
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (this.matches.length > 1) {
+          this.acceptSuggest(-1)
+        } else {
+          this.recall(-1)
+        }
+        return
       }
     })
+  }
+
+  /** Update the list of known commands for autocomplete. */
+  public setCommands(commands: string[]): void {
+    this.commands = commands.map((c) => c.toLowerCase())
+    this.refreshSuggest()
   }
 
   private seed(): void {
@@ -198,15 +264,79 @@ export class CommandConsole {
       'Protocol version 48',
       'Exe version 1.1.2.6/2.0.0.0 (cstrike)',
       "Type a command and press Enter. Press ` to close.",
-      "Type 'help' for a list of commands.",
+      "Type 'help' for a list of commands. Tab / ↓ autocompletes.",
       '',
     ]
     for (const l of lines) this.print(l)
   }
 
+  private refreshSuggest(): void {
+    const raw = this.input.value
+    // Only autocomplete the first token while typing a command name
+    if (/\s/.test(raw.trimStart()) || raw.trim().length === 0) {
+      this.matches = []
+      this.matchIdx = 0
+      this.suggestRoot = ''
+      this.suggestEl.innerHTML = ''
+      return
+    }
+    const prefix = raw.trim().toLowerCase()
+    this.suggestRoot = prefix
+    this.matches = this.commands.filter((c) => c.startsWith(prefix))
+    // Prefer shortest / alphabetical CS-style ordering
+    this.matches.sort((a, b) => a.length - b.length || a.localeCompare(b))
+    this.matchIdx = 0
+    // Exact-only (fully typed) — hide the list
+    if (this.matches.length === 1 && this.matches[0] === prefix) {
+      this.matches = []
+      this.suggestEl.innerHTML = ''
+      return
+    }
+    this.renderSuggest()
+  }
+
+  private renderSuggest(): void {
+    if (this.matches.length === 0) {
+      this.suggestEl.innerHTML = ''
+      return
+    }
+    // Show up to 8 matches under the input; highlight the active one
+    const shown = this.matches.slice(0, 8)
+    this.suggestEl.innerHTML = shown
+      .map((c, i) => `<div class="hit${i === this.matchIdx ? ' is-on' : ''}">${c}</div>`)
+      .join('')
+  }
+
+  /** Tab / Down: fill the active match into the input. */
+  private acceptSuggest(dir: number): void {
+    if (this.matches.length === 0) {
+      // Rebuild from root if user already filled once
+      if (this.suggestRoot) {
+        this.matches = this.commands
+          .filter((c) => c.startsWith(this.suggestRoot))
+          .sort((a, b) => a.length - b.length || a.localeCompare(b))
+      }
+      if (this.matches.length === 0) return
+    }
+    const current = this.input.value.trim().toLowerCase()
+    if (dir !== 0 && this.matches.length > 1 && current === this.matches[this.matchIdx]) {
+      this.matchIdx = (this.matchIdx + dir + this.matches.length) % this.matches.length
+    }
+    const pick = this.matches[this.matchIdx] ?? this.matches[0]
+    if (!pick) return
+    this.input.value = pick
+    this.renderSuggest()
+    requestAnimationFrame(() => {
+      const n = this.input.value.length
+      this.input.setSelectionRange(n, n)
+    })
+  }
+
   private submit(): void {
     const raw = this.input.value.trim()
     this.input.value = ''
+    this.matches = []
+    this.suggestEl.innerHTML = ''
     if (!raw) return
     this.history.push(raw)
     if (this.history.length > 50) this.history.shift()
@@ -219,6 +349,7 @@ export class CommandConsole {
     if (this.history.length === 0) return
     this.historyIdx = Math.max(0, Math.min(this.history.length, this.historyIdx + dir))
     this.input.value = this.history[this.historyIdx] ?? ''
+    this.refreshSuggest()
     requestAnimationFrame(() => {
       const n = this.input.value.length
       this.input.setSelectionRange(n, n)
@@ -247,6 +378,7 @@ export class CommandConsole {
     this.open = true
     this.root.classList.add('is-open')
     this.input.value = prefill
+    this.refreshSuggest()
     requestAnimationFrame(() => {
       this.input.focus()
       this.input.select()

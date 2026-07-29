@@ -12,6 +12,17 @@ type SoundId =
   | 'usp_clipin'
   | 'usp_slideback'
   | 'usp_sliderelease'
+  | 'awp_shot'
+  | 'awp_shot2'
+  | 'awp_shot3'
+  | 'awp_shot_distant'
+  | 'awp_draw'
+  | 'awp_clipout'
+  | 'awp_clipin'
+  | 'awp_cliphit'
+  | 'awp_boltback'
+  | 'awp_boltforward'
+  | 'awp_zoom'
   | 'knife_slash'
   | 'knife_slash2'
   | 'knife_deploy'
@@ -52,6 +63,17 @@ const SOUND_FILES: Record<SoundId, string> = {
   usp_clipin: 'weapons/usp/usp_clipin.wav',
   usp_slideback: 'weapons/usp/usp_slideback.wav',
   usp_sliderelease: 'weapons/usp/usp_sliderelease.wav',
+  awp_shot: 'weapons/awp/awp1.wav',
+  awp_shot2: 'weapons/awp/awp_01.wav',
+  awp_shot3: 'weapons/awp/awp_02.wav',
+  awp_shot_distant: 'weapons/awp/awp1-distant.wav',
+  awp_draw: 'weapons/awp/awp_draw.wav',
+  awp_clipout: 'weapons/awp/awp_clipout.wav',
+  awp_clipin: 'weapons/awp/awp_clipin.wav',
+  awp_cliphit: 'weapons/awp/awp_cliphit.wav',
+  awp_boltback: 'weapons/awp/awp_boltback.wav',
+  awp_boltforward: 'weapons/awp/awp_boltforward.wav',
+  awp_zoom: 'weapons/awp/zoom.wav',
   knife_slash: 'weapons/knife/knife_slash1.wav',
   knife_slash2: 'weapons/knife/knife_slash2.wav',
   knife_deploy: 'weapons/knife/knife_deploy1.wav',
@@ -288,6 +310,9 @@ export class AudioManager extends THREE.AudioListener {
     if (id.startsWith('foot_')) return 0.38
     if (id === 'ak_shot') return 0.55
     if (id === 'usp_shot') return 0.6
+    if (id.startsWith('awp_shot')) return 0.72
+    if (id === 'awp_zoom') return 0.45
+    if (id.startsWith('awp_')) return 0.55
     if (id.startsWith('knife_')) return 0.5
     if (id.startsWith('empty_')) return 0.45
     if (id === 'jump') return 0.32
@@ -419,7 +444,16 @@ export class AudioManager extends THREE.AudioListener {
       this.playKnife()
       return Promise.resolve()
     }
-    const id: SoundId = weaponKey === 'Usp' ? 'usp_shot' : 'ak_shot'
+    let id: SoundId
+    if (weaponKey === 'Usp') {
+      id = 'usp_shot'
+    } else if (weaponKey === 'AWP') {
+      id = worldPos
+        ? 'awp_shot_distant'
+        : this.pick(['awp_shot', 'awp_shot2', 'awp_shot3'])
+    } else {
+      id = 'ak_shot'
+    }
     // Slightly quieter when spatial so close shots don't clip vs own fire
     const scale = worldPos ? 0.92 : 1
     void this.unlock()
@@ -470,6 +504,16 @@ export class AudioManager extends THREE.AudioListener {
       return Promise.resolve()
     }
     if (weaponKey === 'Knife') return Promise.resolve()
+    if (weaponKey === 'AWP') {
+      this.playId('awp_clipout')
+      this.reloadTimers.push(
+        window.setTimeout(() => this.playId('awp_clipin'), 600),
+        window.setTimeout(() => this.playId('awp_cliphit'), 950),
+        window.setTimeout(() => this.playId('awp_boltback'), 1600),
+        window.setTimeout(() => this.playId('awp_boltforward'), 2000)
+      )
+      return Promise.resolve()
+    }
     this.playId('ak_clipout')
     this.reloadTimers.push(
       window.setTimeout(() => this.playId('ak_clipin'), 550),
@@ -483,7 +527,13 @@ export class AudioManager extends THREE.AudioListener {
     this.playId('weapon_select', 0.7)
     if (weaponKey === 'Usp') this.playId('usp_draw')
     else if (weaponKey === 'Knife') this.playId('knife_deploy')
+    else if (weaponKey === 'AWP') this.playId('awp_draw')
     else this.playId('ak_draw')
+    return Promise.resolve()
+  }
+
+  public playZoom(): Promise<void> {
+    this.playId('awp_zoom')
     return Promise.resolve()
   }
 

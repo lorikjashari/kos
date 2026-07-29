@@ -4,6 +4,7 @@ import { Vector3D } from '../../Core/Vector'
 import { lerp } from '../../Core/MathUtils'
 import { getRecoilKick } from '../../Core/Weapon'
 import { Game } from '../../Game'
+import { FPSRenderer } from '../Renderer/PlayerRenderer/FPSRenderer'
 import { CameraManager } from './CameraManager'
 
 const PI_2 = Math.PI / 2
@@ -178,7 +179,9 @@ export class FPSCameraManager extends CameraManager {
     var movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0
     var movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0
 
-    const scale = CameraManager.getMouseScale()
+    const renderer = Game.getInstance().currentPlayer?.renderer
+    const zoomed = renderer instanceof FPSRenderer && renderer.isScoped()
+    const scale = CameraManager.getMouseScale(zoomed)
     this.aimYaw -= movementX * scale
     this.aimPitch -= movementY * scale
     this.aimPitch = Math.max(PI_2 - maxPolarAngle, Math.min(PI_2 - minPolarAngle, this.aimPitch))

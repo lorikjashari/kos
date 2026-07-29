@@ -35,6 +35,8 @@ export class GameHUD {
   private lockdownEl!: HTMLElement
   private lockdownNumEl!: HTMLElement
   private lockdownLabelEl!: HTMLElement
+  private loadoutEl!: HTMLElement
+  private loadoutPickHandler: ((primary: 'AK47' | 'AWP') => void) | null = null
   private killFeedEl!: HTMLElement
   private scoreboardEl!: HTMLElement
   private sbRowsEl!: HTMLElement
@@ -110,6 +112,31 @@ export class GameHUD {
         <div class="cs-lockdown-label" id="hud-lockdown-label">Get ready</div>
       </div>
 
+      <div class="cs-loadout" id="hud-loadout" aria-hidden="true">
+        <div class="cs-loadout-title">Choose loadout</div>
+        <div class="cs-loadout-sub">Primary on <kbd>1</kbd> · USP on <kbd>2</kbd></div>
+        <div class="cs-loadout-row">
+          <button type="button" class="cs-loadout-box" data-primary="AWP">
+            <div class="cs-loadout-guns">
+              <img class="cs-loadout-icon" data-icon="AWP" alt="" />
+              <span class="cs-loadout-plus">+</span>
+              <img class="cs-loadout-icon is-side" data-icon="Usp" alt="" />
+            </div>
+            <div class="cs-loadout-name">AWP + USP</div>
+            <div class="cs-loadout-hint">Sniper rifle</div>
+          </button>
+          <button type="button" class="cs-loadout-box" data-primary="AK47">
+            <div class="cs-loadout-guns">
+              <img class="cs-loadout-icon" data-icon="AK47" alt="" />
+              <span class="cs-loadout-plus">+</span>
+              <img class="cs-loadout-icon is-side" data-icon="Usp" alt="" />
+            </div>
+            <div class="cs-loadout-name">AK + USP</div>
+            <div class="cs-loadout-hint">Assault rifle</div>
+          </button>
+        </div>
+      </div>
+
       <div class="cs-hitmarker" id="hud-hitmarker" aria-hidden="true"></div>
       <div class="cs-damage-flash" id="hud-damage-flash" aria-hidden="true"></div>
       <div class="cs-death" id="hud-death" aria-hidden="true">
@@ -160,7 +187,19 @@ export class GameHUD {
     this.lockdownEl = document.getElementById('hud-lockdown')!
     this.lockdownNumEl = document.getElementById('hud-lockdown-num')!
     this.lockdownLabelEl = document.getElementById('hud-lockdown-label')!
+    this.loadoutEl = document.getElementById('hud-loadout')!
     this.killFeedEl = document.getElementById('hud-killfeed')!
+    this.loadoutEl.querySelectorAll('[data-primary]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const primary = (btn as HTMLElement).getAttribute('data-primary')
+        if (primary !== 'AK47' && primary !== 'AWP') return
+        const handler = this.loadoutPickHandler
+        this.loadoutPickHandler = null
+        handler?.(primary)
+      })
+    })
     this.scoreboardEl = document.getElementById('hud-scoreboard')!
     this.sbRowsEl = document.getElementById('hud-sb-rows')!
     this.pauseMenuEl = document.getElementById('hud-pause')!
@@ -277,6 +316,30 @@ export class GameHUD {
     }
   }
 
+  /** Pre-countdown loadout: AWP+USP or AK+USP */
+  public showLoadoutPicker(onPick: (primary: 'AK47' | 'AWP') => void): void {
+    if (!this.loadoutEl) return
+    this.loadoutPickHandler = onPick
+    this.bakeIcons()
+    this.loadoutEl.querySelectorAll<HTMLImageElement>('[data-icon]').forEach((img) => {
+      const key = img.getAttribute('data-icon') || ''
+      const src = this.iconRenderer.getIcon(key)
+      if (src) img.src = src
+    })
+    this.loadoutEl.classList.add('is-on')
+    this.loadoutEl.setAttribute('aria-hidden', 'false')
+    document.getElementById('game-crosshair')?.classList.add('is-awp-hidden')
+  }
+
+  public hideLoadoutPicker(): void {
+    this.loadoutPickHandler = null
+    if (!this.loadoutEl) return
+    this.loadoutEl.classList.remove('is-on')
+    this.loadoutEl.setAttribute('aria-hidden', 'true')
+    // Crosshair visibility follows equipped weapon again in update()
+    document.getElementById('game-crosshair')?.classList.remove('is-awp-hidden')
+  }
+
   public showHitMarker(isHead = false): void {
     if (!this.hitmarkerEl) return
     this.hitmarkerEl.classList.toggle('is-head', isHead)
@@ -335,6 +398,7 @@ export class GameHUD {
     const ak = this.iconRenderer.getIcon('AK47')
     const usp = this.iconRenderer.getIcon('Usp')
     const knife = this.iconRenderer.getIcon('Knife')
+    void this.iconRenderer.getIcon('AWP')
     if (ak) this.weaponIconEl.src = ak
     // Touch USP so first pistol equip never bakes mid-match
     void usp
@@ -604,6 +668,119 @@ export class GameHUD {
         transition: opacity 60ms linear;
       }
       .cs-damage-flash.is-on { opacity: 1; }
+
+      .cs-loadout {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        pointer-events: none;
+        opacity: 0;
+        visibility: hidden;
+        background:
+          radial-gradient(ellipse at center, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.72) 100%);
+        transition: opacity 160ms ease, visibility 160ms ease;
+        z-index: 9;
+      }
+      .cs-loadout.is-on {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+      .cs-loadout-title {
+        font-size: clamp(22px, 3.4vw, 34px);
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #fff;
+      }
+      .cs-loadout-sub {
+        margin-top: -8px;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.55);
+      }
+      .cs-loadout-sub kbd {
+        display: inline-block;
+        min-width: 1.4em;
+        padding: 1px 6px;
+        margin: 0 2px;
+        border: 1px solid rgba(255,255,255,0.25);
+        background: rgba(255,255,255,0.08);
+        font: inherit;
+        text-align: center;
+      }
+      .cs-loadout-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        justify-content: center;
+        padding: 8px 20px 0;
+      }
+      .cs-loadout-box {
+        width: min(280px, 42vw);
+        min-width: 200px;
+        padding: 22px 20px 18px;
+        border: 1px solid rgba(255,255,255,0.16);
+        background: linear-gradient(180deg, rgba(28,32,40,0.92), rgba(12,14,18,0.94));
+        color: #fff;
+        cursor: pointer;
+        text-align: center;
+        pointer-events: auto;
+        transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+      }
+      .cs-loadout-box:hover {
+        border-color: rgba(232, 196, 84, 0.7);
+        transform: translateY(-2px);
+        background: linear-gradient(180deg, rgba(40,36,24,0.95), rgba(16,14,10,0.96));
+      }
+      .cs-loadout-box:focus-visible {
+        outline: 2px solid #e8c454;
+        outline-offset: 3px;
+      }
+      .cs-loadout-guns {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        min-height: 72px;
+        margin-bottom: 14px;
+      }
+      .cs-loadout-icon {
+        width: 140px;
+        height: 56px;
+        object-fit: contain;
+        filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55));
+      }
+      .cs-loadout-icon.is-side {
+        width: 72px;
+        height: 40px;
+        opacity: 0.9;
+      }
+      .cs-loadout-plus {
+        font-size: 22px;
+        font-weight: 700;
+        color: rgba(255,255,255,0.45);
+      }
+      .cs-loadout-name {
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .cs-loadout-hint {
+        margin-top: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.45);
+      }
 
       .cs-lockdown {
         position: absolute;
@@ -1029,6 +1206,9 @@ export class GameHUD {
 
     const weapon = player.currentWeapon
     const isMelee = weapon.fireMode === 'melee'
+
+    // AWP uses the scope reticle — hide the normal crosshair while equipped
+    document.getElementById('game-crosshair')?.classList.toggle('is-awp-hidden', weapon.key === 'AWP')
 
     this.healthText.textContent = String(Math.round(player.health))
     this.healthFill.style.transform = `scaleX(${Math.max(0, Math.min(1, player.health / 100))})`

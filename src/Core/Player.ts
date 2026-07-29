@@ -33,6 +33,8 @@ export class Player extends Pawn implements IUpdatable {
   private maxSpeed = 100
   public rateOfFire = 100
   public currentWeapon: WeaponConfig = getWeaponConfig('AK47')
+  /** Match primary from loadout picker — bound to key 1 */
+  public primaryWeaponKey: 'AK47' | 'AWP' = 'AK47'
   public ammoInMag = 30
   public isReloading = false
   private reloadTimer = 0
@@ -41,6 +43,7 @@ export class Player extends Pawn implements IUpdatable {
     AK47: 30,
     Usp: 12,
     Knife: 0,
+    AWP: 10,
   }
   public health = 100
   public armor = 0
@@ -606,8 +609,11 @@ export class Player extends Pawn implements IUpdatable {
     }
 
     const meshDist = meshHit?.distance ?? Number.POSITIVE_INFINITY
+    // Prefer bot hits slightly over world — Pool Day railings/frames often sit
+    // a few cm in front of the visual silhouette and stole otherwise-clean shots.
+    const botHitBias = 0.4
 
-    if (meshHit && meshDist <= worldDist) {
+    if (meshHit && meshDist <= worldDist + botHitBias) {
       hitScanResult.hasHit = true
       hitScanResult.hitPosition = Vector3D.fromThree(meshHit.point)
       hitScanResult.hitNormal = Vector3D.fromThree(meshHit.normal)
@@ -658,14 +664,17 @@ export class Player extends Pawn implements IUpdatable {
     this.reloadTimer = 0
   }
 
-  /** Always AR + full mags (death respawn / match start) */
-  public equipSpawnLoadout(): void {
-    this.currentWeapon = getWeaponConfig('AK47')
+  /** Primary + USP (+ knife) — death respawn / match start after loadout pick */
+  public equipSpawnLoadout(primary?: 'AK47' | 'AWP'): void {
+    if (primary) this.primaryWeaponKey = primary
+    const primaryKey = this.primaryWeaponKey
+    this.currentWeapon = getWeaponConfig(primaryKey)
     this.rateOfFire = this.currentWeapon.rateOfFire
     this.ammoByWeapon = {
-      AK47: getWeaponConfig('AK47').magazineSize,
+      AK47: primaryKey === 'AK47' ? getWeaponConfig('AK47').magazineSize : 0,
       Usp: getWeaponConfig('Usp').magazineSize,
       Knife: 0,
+      AWP: primaryKey === 'AWP' ? getWeaponConfig('AWP').magazineSize : 0,
     }
     this.ammoInMag = this.currentWeapon.magazineSize
     this.isReloading = false
@@ -675,10 +684,10 @@ export class Player extends Pawn implements IUpdatable {
     const game = Game.getInstance()
     const renderer = game.currentPlayer?.renderer
     if (renderer instanceof FPSRenderer) {
-      renderer.equipWeaponMesh('AK47', false)
+      renderer.equipWeaponMesh(primaryKey, false)
     } else if (renderer) {
-      const ak = game.globalLoadingManager.loadableMeshs.get('AK47')
-      if (ak) renderer.setMesh(ak.clone() as FPSMesh, false)
+      const mesh = game.globalLoadingManager.loadableMeshs.get(primaryKey)
+      if (mesh) renderer.setMesh(mesh.clone() as FPSMesh, false)
     }
   }
 
