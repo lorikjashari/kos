@@ -28,6 +28,41 @@ export class Player extends Pawn implements IUpdatable {
   public deceleration = new Vector3D(0.95, 1, 0.95)
   public airDeceleration = new Vector3D(0.98, 1, 0.98)
 
+  // --- Movement tuning ---
+  private readonly groundFriction = 6
+  /** Friction floor so low speeds still stop quickly (CS sv_stopspeed) */
+  private readonly stopSpeed = 2
+  private readonly groundAccel = 14
+  private readonly airAccel = 14
+  /** Air control is capped low so jumps preserve momentum instead of being steered */
+  private readonly airSpeedCapFactor = 0.3
+  /** Horizontal speed ceiling as a multiple of base run speed */
+  private readonly maxSpeedFactor = 2.4
+  /** No ground friction for this long after touchdown (bunny hop window) */
+  private readonly landingFrictionGrace = 70
+  private landingGraceMs = 0
+  /** Gravity on top of the world's, kept for the punchy jump arc */
+  private readonly extraGravity = 9.81 * 0.5
+
+  // --- Ground follow tuning ---
+  /** Steepest walkable surface (~53°); anything steeper is not ground */
+  private readonly minWalkableNy = 0.6
+  /** How far below the feet we still consider ourselves standing (and snap down) */
+  private readonly groundSnapDown = 0.6
+  /** Rises bigger than this are left to tryStepUp */
+  private readonly maxSnapUp = 0.35
+  private readonly groundSkin = 0.02
+  /** Blocks the down-snap right after a step-up so the climb isn't cancelled */
+  private noSnapDownMs = 0
+  private readonly stepUpSnapBlock = 90
+  /** Vertical offset the camera lags behind by, so steps don't pop the view */
+  public viewOffsetY = 0
+  private readonly maxViewOffset = 1.2
+  private readonly viewSmoothRate = 16
+  /** Collision capsule dimensions (crouching only changes the eye height) */
+  private readonly shapeRadius: number
+  private readonly shapeHalfCyl: number
+
   private moveDirection: Vector3D = Vector3D.ZERO()
   public speed = 100
   private maxSpeed = 100
@@ -72,10 +107,15 @@ export class Player extends Pawn implements IUpdatable {
   private standEyeOffset = (2 * 2.5) / 3
   private crouchEyeOffset = 0.95
   private world!: Ammo.btDynamicsWorld
+  private worldGravityVec?: Ammo.btVector3
+  private zeroGravityVec?: Ammo.btVector3
+  private bodyGravityEnabled = true
   public eyeOffsetY = (this.capsuleDimension.y * 2.5) / 3
   constructor(position: Vector3D) {
     super(position, Vector3D.ZERO())
     this.spawnPoint = position.clone()
+    this.shapeRadius = this.capsuleDimension.x
+    this.shapeHalfCyl = this.capsuleDimension.y * 0.5
     const shape = this.createShape(
       new Vector3D(this.capsuleDimension.x, this.capsuleDimension.y, this.capsuleDimension.x)
     )
@@ -118,156 +158,221 @@ export class Player extends Pawn implements IUpdatable {
     return body
   }
   public getGroundRaycastProperties(): GroundRaycastProperty {
-    // Do 4 and only update it once jump is pressed
     return {
-      initialLocalPos: new Vector3D(0, -this.capsuleDimension.y / 2, 0),
-      size: 1.5,
+      initialLocalPos: new Vector3D(0, -(this.shapeHalfCyl + this.shapeRadius), 0),
+      size: this.groundSnapDown,
     }
   }
   addToWorld(physics: Physics) {
     this.world = physics.world
     physics.add(this.body)
+    // addRigidBody() overwrites the body gravity with the world's — capture it so we
+    // can toggle gravity off while grounded (we drive vertical motion ourselves there)
+    const g = physics.world.getGravity()
+    this.worldGravityVec = new AmmoInstance!.btVector3(g.x(), g.y(), g.z())
+    this.zeroGravityVec = new AmmoInstance!.btVector3(0, 0, 0)
+  }
+
+  /**
+   * While standing, gravity would pull the capsule a fraction into the floor every
+   * step and the solver would push it back out — a constant micro-bounce on slopes.
+   */
+  private setBodyGravityEnabled(enabled: boolean): void {
+    if (!this.worldGravityVec || !this.zeroGravityVec) return
+    if (enabled === this.bodyGravityEnabled) return
+    this.body.setGravity(enabled ? this.worldGravityVec : this.zeroGravityVec)
+    this.bodyGravityEnabled = enabled
   }
   prestep(dt: number) {
     this.moveDirection = Vector3D.ZERO()
   }
-  private raycastToGround(): void {
+
+  /**
+   * Read the body's authoritative transform. Actor.update() goes through the motion
+   * state, which Bullet extrapolates by a fixed step — mixing that with the manual
+   * transform writes below reads back positions we never set.
+   */
+  private syncPositionFromBody(): void {
+    const origin = this.body.getWorldTransform().getOrigin()
+    this.position.set(origin.x(), origin.y(), origin.z())
+  }
+
+  /** World Y of the capsule's lowest point. */
+  private getFeetY(): number {
+    return this.position.y - this.shapeHalfCyl - this.shapeRadius
+  }
+
+  /** Height of the capsule above where it would rest on the given surface. */
+  private groundGap(hitY: number, hitNy: number): number {
+    const ny = Math.max(hitNy, this.minWalkableNy)
+    return this.position.y - (hitY + this.shapeHalfCyl + this.shapeRadius / ny)
+  }
+
+  /**
+   * Ground probe: one ray under the capsule axis (drives slope following) plus four
+   * offset rays that only widen the grounded test so ledges/edges don't flicker.
+   */
+  private updateGroundState(): void {
     // Sticky ground ray still hits mid-jump — force airborne for a short window
     if (this.jumpIgnoreGroundMs > 0) {
       this.isOnGround = false
+      this.hasGroundPlane = false
       this.hasLeftGroundSinceJump = true
+      this.groundNx = 0
+      this.groundNy = 1
+      this.groundNz = 0
       return
     }
 
-    let { initialLocalPos, size } = this.getGroundRaycastProperties()
+    // Reach further down while already walking so ramps / steps down are followed
+    const probe = this.isOnGround ? this.groundSnapDown : 0.12
+    const startY = this.position.y
+    // A capsule rests radius/n.y above the point below it, so a steep ramp sits much
+    // lower than the nominal feet — the ray has to allow for the worst walkable slope
+    const endY =
+      this.position.y - this.shapeHalfCyl - this.shapeRadius / this.minWalkableNy - probe
 
-    const from: Ammo.btVector3 = this.position
-      .clone()
-      .add(new Vector3D(initialLocalPos.x, initialLocalPos.y, initialLocalPos.z))
-      .toAmmo()
-    const to: Ammo.btVector3 = this.position
-      .clone()
-      .add(new Vector3D(initialLocalPos.x, initialLocalPos.y - size, initialLocalPos.z))
-      .toAmmo()
+    const center = this.ammoRayHitFull(
+      new Vector3D(this.position.x, startY, this.position.z),
+      new Vector3D(this.position.x, endY, this.position.z)
+    )
 
-    const rayCallBack = new AmmoInstance!.ClosestRayResultCallback(from, to)
-    this.world.rayTest(from, to, rayCallBack)
-    if (!this.isOnGround && rayCallBack.hasHit()) this.velocityPreserveAcc = 0
-    const grounded = rayCallBack.hasHit()
+    let grounded = false
+    this.hasGroundPlane = false
+
+    if (center.hit && center.ny >= this.minWalkableNy && this.groundGap(center.y, center.ny) <= probe) {
+      grounded = true
+      this.hasGroundPlane = true
+      this.groundY = center.y
+      this.groundNx = center.nx
+      this.groundNy = center.ny
+      this.groundNz = center.nz
+    } else {
+      const r = this.shapeRadius * 0.55
+      const offsets: Array<[number, number]> = [
+        [r, 0],
+        [-r, 0],
+        [0, r],
+        [0, -r],
+      ]
+      for (const [ox, oz] of offsets) {
+        const hit = this.ammoRayHitFull(
+          new Vector3D(this.position.x + ox, startY, this.position.z + oz),
+          new Vector3D(this.position.x + ox, endY, this.position.z + oz)
+        )
+        if (!hit.hit || hit.ny < this.minWalkableNy) continue
+        if (hit.y < this.getFeetY() - probe) continue
+        // Standing on an edge: keep control, but never snap to a plane we're not centred on
+        grounded = true
+        this.groundNx = 0
+        this.groundNy = 1
+        this.groundNz = 0
+        break
+      }
+    }
+
     if (!grounded) {
       this.hasLeftGroundSinceJump = true
+      this.groundNx = 0
+      this.groundNy = 1
+      this.groundNz = 0
     }
     this.isOnGround = grounded
-    AmmoInstance!.destroy(from)
-    AmmoInstance!.destroy(to)
-    AmmoInstance!.destroy(rayCallBack)
   }
 
   private ammoRayHit(
     from: Vector3D,
     to: Vector3D
   ): { hit: boolean; y: number } {
+    const full = this.ammoRayHitFull(from, to)
+    return { hit: full.hit, y: full.y }
+  }
+
+  private ammoRayHitFull(
+    from: Vector3D,
+    to: Vector3D
+  ): { hit: boolean; y: number; nx: number; ny: number; nz: number } {
     const fromAmmo = from.toAmmo()
     const toAmmo = to.toAmmo()
     const cb = new AmmoInstance!.ClosestRayResultCallback(fromAmmo, toAmmo)
     this.world.rayTest(fromAmmo, toAmmo, cb)
     const hit = cb.hasHit()
     let y = 0
+    let nx = 0
+    let ny = 1
+    let nz = 0
     if (hit) {
       const p = cb.get_m_hitPointWorld()
       y = p.y()
+      const n = cb.get_m_hitNormalWorld()
+      nx = n.x()
+      ny = n.y()
+      nz = n.z()
     }
     AmmoInstance!.destroy(fromAmmo)
     AmmoInstance!.destroy(toAmmo)
     AmmoInstance!.destroy(cb)
-    return { hit, y }
+    return { hit, y, nx, ny, nz }
   }
 
   /**
-   * Smoothly stick to sloping ground (ramps) — no stair-snap stutter.
+   * Sit the capsule exactly where it geometrically rests on the surface under it.
+   * A sphere of radius r on a plane whose normal is n has its centre r/n.y above the
+   * point straight below it — using r instead sinks into ramps and the solver then
+   * fights back, which is what made slopes stutter.
    */
-  private smoothGroundFollow(): void {
-    if (!this.isOnGround || this.jumpIgnoreGroundMs > 0) return
+  private snapToGround(): void {
+    if (!this.isOnGround || !this.hasGroundPlane || this.jumpIgnoreGroundMs > 0) return
 
-    const radius = this.capsuleDimension.x
-    const halfCyl = this.capsuleDimension.y * 0.5
-    const bottomOffset = halfCyl + radius
-    const maxLift = Math.max(2.2, 1.1 * this.mapSpeedScale)
-
-    const under = this.ammoRayHit(
-      new Vector3D(this.position.x, this.position.y + 0.4, this.position.z),
-      new Vector3D(this.position.x, this.position.y - bottomOffset - 1.8, this.position.z)
-    )
-    if (!under.hit) return
-
-    let targetFeetY = under.y
-    let isSmoothRamp = false
-
-    const mx = this.moveDirection.x
-    const mz = this.moveDirection.z
-    const moveLenSq = mx * mx + mz * mz
-    if (moveLenSq > 1e-4) {
-      const inv = 1 / Math.sqrt(moveLenSq)
-      const dirX = mx * inv
-      const dirZ = mz * inv
-      const aheadDist = radius * 0.55 + 0.35
-      const ahead = this.ammoRayHit(
-        new Vector3D(
-          this.position.x + dirX * aheadDist,
-          this.position.y + maxLift,
-          this.position.z + dirZ * aheadDist
-        ),
-        new Vector3D(
-          this.position.x + dirX * aheadDist,
-          this.position.y - bottomOffset - 1.2,
-          this.position.z + dirZ * aheadDist
-        )
-      )
-      if (ahead.hit) {
-        const rise = ahead.y - under.y
-        const slope = rise / aheadDist
-        // Only treat as smooth ramp if there's no shin blocker (real stairs have risers)
-        const shin = this.ammoRayHit(
-          new Vector3D(this.position.x, under.y + 0.12, this.position.z),
-          new Vector3D(
-            this.position.x + dirX * aheadDist,
-            under.y + 0.12,
-            this.position.z + dirZ * aheadDist
-          )
-        )
-        if (!shin.hit && slope > -1.3 && slope < 1.15) {
-          isSmoothRamp = true
-          targetFeetY = under.y * 0.25 + ahead.y * 0.75
-        }
-      }
-    }
-
-    if (!isSmoothRamp && Math.abs(targetFeetY - under.y) < 0.001) {
-      // Still stick to ground under feet so we don't float
-      targetFeetY = under.y
-    }
-
-    const targetCenterY = targetFeetY + bottomOffset + 0.04
+    const ny = Math.max(this.groundNy, this.minWalkableNy)
+    const targetCenterY = this.groundY + this.shapeHalfCyl + this.shapeRadius / ny + this.groundSkin
     const dy = targetCenterY - this.position.y
-    if (dy < -0.9 || dy > maxLift) return
-    if (!isSmoothRamp && dy > 0.12) return // leave discrete climbs to tryStepUp
 
-    const apply = dy > 0 ? Math.min(dy, maxLift) * (isSmoothRamp ? 0.92 : 0.7) : dy * 0.55
-    if (Math.abs(apply) < 0.001) return
+    // Bigger rises belong to tryStepUp; bigger drops mean we're really airborne
+    if (dy > this.maxSnapUp || dy < -this.groundSnapDown) return
+    if (Math.abs(dy) < 1e-4) return
+    // Just stepped onto a riser: the probe still sees the tread below us, so pulling
+    // down here would undo the climb and stutter on every stair
+    if (dy < 0 && this.noSnapDownMs > 0) return
 
-    const ny = this.position.y + apply
-    this.setPosition(new Vector3D(this.position.x, ny, this.position.z))
-    this.position.y = ny
-    const lv = this.body.getLinearVelocity()
-    if (dy > 0.02 && lv.y() < 0) lv.setY(0)
-    if (dy > 0.02) this.velocity.y = Math.max(0, this.velocity.y)
+    this.shiftVertically(dy)
   }
 
   /**
-   * Climb stair risers (Dust II start stairs, crates, ledges).
+   * Teleport the body vertically and hand the delta to the view so the camera eases
+   * into the new height instead of popping (stairs / curbs).
+   */
+  private shiftVertically(dy: number): void {
+    const newY = this.position.y + dy
+    this.setPosition(new Vector3D(this.position.x, newY, this.position.z))
+    this.position.y = newY
+    this.viewOffsetY = Math.max(-this.maxViewOffset, Math.min(this.maxViewOffset, this.viewOffsetY - dy))
+  }
+
+  /** Ease the stair-smoothing offset back to zero. */
+  private decayViewOffset(dt: number): void {
+    if (this.viewOffsetY === 0) return
+    const keep = Math.exp(-this.viewSmoothRate * Math.max(dt, 1 / 240))
+    this.viewOffsetY *= keep
+    if (Math.abs(this.viewOffsetY) < 0.001) this.viewOffsetY = 0
+  }
+
+  /** Vertical speed that keeps XZ motion on the ground plane (strafe-safe). */
+  private slopeAlignedY(vx: number, vz: number): number {
+    if (!this.isOnGround || !this.hasGroundPlane) return 0
+    const ny = this.groundNy
+    if (ny >= 0.9999 || ny < this.minWalkableNy) return 0
+    return (-this.groundNx * vx - this.groundNz * vz) / ny
+  }
+
+  /**
+   * Climb stair risers / curbs. Disabled on slopes so it never fights ramp following.
    */
   private tryStepUp(): boolean {
     if (!this.isOnGround || this.jumpIgnoreGroundMs > 0) return false
+    // On a real slope the ground follow already carries us up
+    if (this.groundNy < 0.94) return false
+
     const mx = this.moveDirection.x
     const mz = this.moveDirection.z
     const moveLenSq = mx * mx + mz * mz
@@ -277,17 +382,17 @@ export class Player extends Pawn implements IUpdatable {
     const dirX = mx * inv
     const dirZ = mz * inv
 
-    const radius = this.capsuleDimension.x
-    const halfCyl = this.capsuleDimension.y * 0.5
-    const feetY = this.position.y - halfCyl - radius
-    const maxStep = Math.max(2.8, 1.35 * this.mapSpeedScale)
+    const radius = this.shapeRadius
+    const halfCyl = this.shapeHalfCyl
+    const feetY = this.getFeetY()
+    const maxStep = 2.0
     const distances = [0.35, 0.55, 0.8, 1.05, 1.35]
 
     for (const forward of distances) {
       const ax = this.position.x + dirX * forward
       const az = this.position.z + dirZ * forward
 
-      const down = this.ammoRayHit(
+      const down = this.ammoRayHitFull(
         new Vector3D(ax, feetY + maxStep + 0.25, az),
         new Vector3D(ax, feetY - 0.4, az)
       )
@@ -295,14 +400,29 @@ export class Player extends Pawn implements IUpdatable {
 
       const stepH = down.y - feetY
       if (stepH < 0.03 || stepH > maxStep) continue
+      // Must land on a tread (flat). Sloped landings are ramps — ignore.
+      if (down.ny < 0.9) continue
 
-      // Stair riser or low wall in front at shin height
       const shin = this.ammoRayHit(
         new Vector3D(this.position.x, feetY + 0.08, this.position.z),
         new Vector3D(ax, feetY + 0.08, az)
       )
-      // Allow step without shin hit if clearly higher ground ahead (shallow stair tops)
-      if (!shin.hit && stepH < 0.1) continue
+      // No riser + shallow rise = ramp sampling, not a stair
+      if (!shin.hit) {
+        if (stepH < 0.1) continue
+        const slope = stepH / Math.max(forward, 0.01)
+        if (slope < 0.65) continue
+      }
+
+      if (stepH > 1.65) {
+        const fx = ax + dirX * 1.2
+        const fz = az + dirZ * 1.2
+        const flat = this.ammoRayHit(
+          new Vector3D(fx, down.y + 0.75, fz),
+          new Vector3D(fx, down.y - 0.4, fz)
+        )
+        if (flat.hit && Math.abs(flat.y - down.y) < 0.25) continue
+      }
 
       const wall = this.ammoRayHit(
         new Vector3D(
@@ -321,24 +441,30 @@ export class Player extends Pawn implements IUpdatable {
       )
       if (ceiling.hit) continue
 
-      const newY = this.position.y + stepH + 0.05
-      const nudge = Math.min(0.16, forward * 0.2)
+      const nudge = Math.min(0.12, forward * 0.18)
       const nx = this.position.x + dirX * nudge
       const nz = this.position.z + dirZ * nudge
-      this.setPosition(new Vector3D(nx, newY, nz))
-      this.position.set(nx, newY, nz)
+      this.setPosition(new Vector3D(nx, this.position.y, nz))
+      this.position.x = nx
+      this.position.z = nz
+      this.shiftVertically(stepH + 0.05)
+      this.noSnapDownMs = this.stepUpSnapBlock
       const lv = this.body.getLinearVelocity()
       if (lv.y() < 0) lv.setY(0)
       this.velocity.y = Math.max(0, this.velocity.y)
       this.isOnGround = true
+      this.groundY = down.y
+      this.groundNx = 0
+      this.groundNy = 1
+      this.groundNz = 0
+      this.hasGroundPlane = true
       return true
     }
     return false
   }
 
   private tryStepUpCascade(): void {
-    // Climb several shallow stair treads in one frame
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       if (!this.tryStepUp()) break
     }
   }
@@ -351,99 +477,133 @@ export class Player extends Pawn implements IUpdatable {
     }
   }
 
+  /**
+   * Quake/CS acceleration: only add speed along the wish direction, and only up to
+   * `speedCap` measured along that direction. In the air the cap is small, which is
+   * what lets air-strafing keep (and slightly grow) the speed carried off a jump.
+   */
   private Accelerate(
     accelDir: Vector3D,
-    prevVelocity: Vector3D,
+    velocity: Vector3D,
     wishSpeed: number,
-    airAccel: number,
-    dt: number
-  ): Vector3D {
-    let wishSpd = wishSpeed
-    const currentSpeed = prevVelocity.dot(accelDir)
-    const addSpeed = wishSpd - currentSpeed
-    if (addSpeed <= 0) {
-      return prevVelocity
-    }
+    accel: number,
+    dt: number,
+    speedCap = wishSpeed
+  ): void {
+    const dirLenSq = accelDir.x * accelDir.x + accelDir.z * accelDir.z
+    if (dirLenSq < 1e-6) return
 
-    let accelSpeed = wishSpeed * airAccel * dt
-    if (accelSpeed > addSpeed) {
-      accelSpeed = addSpeed
-    }
-    const vel = prevVelocity.clone()
-    vel.x += accelSpeed * accelDir.x
-    vel.y += accelSpeed * accelDir.y
-    vel.z += accelSpeed * accelDir.z
-    return vel
+    const currentSpeed = velocity.x * accelDir.x + velocity.z * accelDir.z
+    const addSpeed = speedCap - currentSpeed
+    if (addSpeed <= 0) return
+
+    const accelSpeed = Math.min(accel * wishSpeed * dt, addSpeed)
+    velocity.x += accelSpeed * accelDir.x
+    velocity.z += accelSpeed * accelDir.z
   }
 
   private getWishSpeed(): number {
     return 10 * this.wishSpeedScale * this.mapSpeedScale
   }
 
-  private MoveGround(accelDir: Vector3D, prevVelocity: Vector3D, dt: number): Vector3D {
-    const friction = 1
-    const speed = Math.pow(prevVelocity.x, 2) + Math.pow(prevVelocity.z, 2)
-    if (speed != 0) {
-      const drop = speed * friction * dt
-      prevVelocity.multiplyScalar((this.deceleration.x * Math.max(speed - drop, 0)) / speed)
-    }
-    return this.Accelerate(accelDir, prevVelocity, this.getWishSpeed(), 200, dt)
+  /** Ceiling on horizontal speed — bhop chains may exceed run speed, but not forever. */
+  private getSpeedLimit(): number {
+    return 10 * this.mapSpeedScale * this.maxSpeedFactor
   }
 
-  private Decelerate(prevVelocity: Vector3D, dt: number, deceleration: number) {
-    const friction = 1
-    const speed = Math.pow(prevVelocity.x, 2) + Math.pow(prevVelocity.z, 2)
-    if (speed != 0) {
-      const drop = speed * friction * dt
-      prevVelocity.multiplyScalar((this.deceleration.x * Math.max(speed - drop, 0)) / speed)
+  /**
+   * Ground friction (CS model). Skipped for a few ms after touchdown so a jump timed
+   * on landing keeps the speed you came in with — that's what bunny hopping needs.
+   */
+  private applyGroundFriction(dt: number): void {
+    if (this.landingGraceMs > 0) return
+    const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z)
+    if (speed < 0.05) {
+      this.velocity.x = 0
+      this.velocity.z = 0
+      return
     }
+    const control = Math.max(speed, this.stopSpeed)
+    const drop = control * this.groundFriction * dt
+    const scale = Math.max(0, speed - drop) / speed
+    this.velocity.x *= scale
+    this.velocity.z *= scale
   }
-  private velocityPreserveAcc = 0
-  private velocityPreserveDelay = 100
+
   public currentSpeedMagnitude = 0
+  private groundNx = 0
+  private groundNy = 1
+  private groundNz = 0
+  /** World Y of the surface directly under the capsule axis */
+  private groundY = 0
+  /** True when the centre probe found a surface we can align to */
+  private hasGroundPlane = false
+
   update(dt: number): void {
-    super.update(dt, true, false) // Only update the position
-    const linearVelocity: Ammo.btVector3 = this.body.getLinearVelocity()
+    this.syncPositionFromBody()
 
-    let colWithAnything = false
-    this.raycastToGround()
+    const wasOnGround = this.isOnGround
+    this.updateGroundState()
+    if (this.isOnGround && !wasOnGround) this.landingGraceMs = this.landingFrictionGrace
+    this.setBodyGravityEnabled(!(this.isOnGround && this.hasGroundPlane))
 
-    const resultCallback = new AmmoInstance!.ConcreteContactResultCallback()
-    resultCallback.addSingleResult = function (
-      manifoldPoint,
-      collisionObjectA,
-      id0,
-      index0,
-      collisionObjectB,
-      id1,
-      index1
-    ) {
-      colWithAnything = true
-      /*             var manifold = (Ammo as any).wrapPointer(manifoldPoint.ptr, Ammo.btManifoldPoint);
-                        var localPointA = manifold.get_m_localPointA();
-                        var localPointB = manifold.get_m_localPointB(); */
-      return 0
-    }
-
-    this.world.contactTest(this.body, resultCallback)
-    AmmoInstance!.destroy(resultCallback)
-    const y = linearVelocity.y()
-    this.currentSpeedMagnitude = Math.pow(linearVelocity.x(), 2) + Math.pow(linearVelocity.z(), 2)
-
-    if (colWithAnything && this.velocityPreserveAcc > this.velocityPreserveDelay) {
-      this.velocity = this.MoveGround(this.moveDirection, this.velocity, dt)
+    const wishSpeed = this.getWishSpeed()
+    if (this.isOnGround) {
+      this.applyGroundFriction(dt)
+      this.Accelerate(this.moveDirection, this.velocity, wishSpeed, this.groundAccel, dt)
     } else {
-      this.velocity = this.Accelerate(this.moveDirection, this.velocity, this.getWishSpeed() / 2, 200 / 2, dt)
-      this.velocityPreserveAcc += dt * 1000
+      this.Accelerate(
+        this.moveDirection,
+        this.velocity,
+        wishSpeed,
+        this.airAccel,
+        dt,
+        wishSpeed * this.airSpeedCapFactor
+      )
     }
+    this.clampHorizontalSpeed(this.getSpeedLimit())
 
+    // Sit exactly on the surface, then move along it (a flat floor gives slope Y = 0)
+    this.snapToGround()
+
+    const linearVelocity: Ammo.btVector3 = this.body.getLinearVelocity()
+    // Supported by a plane we can align to → ride it; otherwise let gravity/solver decide
+    const y =
+      this.isOnGround && this.hasGroundPlane
+        ? this.slopeAlignedY(this.velocity.x, this.velocity.z)
+        : linearVelocity.y() - this.extraGravity * dt
     linearVelocity.setValue(this.velocity.x, y, this.velocity.z)
     this.velocity.y = y
-    this.smoothGroundFollow()
+
     this.tryStepUpCascade()
+
+    this.currentSpeedMagnitude = Math.sqrt(
+      this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z
+    )
+    if (this.landingGraceMs > 0) this.landingGraceMs = Math.max(0, this.landingGraceMs - dt * 1000)
+    if (this.noSnapDownMs > 0) this.noSnapDownMs = Math.max(0, this.noSnapDownMs - dt * 1000)
     this.updateJumpRechargeTime(dt)
     this.updateReload(dt)
-    this.addHalfGravity(dt)
+    this.decayViewOffset(dt)
+  }
+
+  /** After the physics step: re-probe and re-seat on the ground so the frame the
+   * camera renders is the frame the body is actually standing on. */
+  public postPhysics(dt: number): void {
+    this.syncPositionFromBody()
+
+    const wasOnGround = this.isOnGround
+    this.updateGroundState()
+    if (this.isOnGround && !wasOnGround) this.landingGraceMs = this.landingFrictionGrace
+    if (!this.isOnGround) return
+
+    this.clampHorizontalSpeed(this.getSpeedLimit())
+    this.snapToGround()
+
+    if (!this.hasGroundPlane) return
+    const slopeY = this.slopeAlignedY(this.velocity.x, this.velocity.z)
+    this.body.getLinearVelocity().setY(slopeY)
+    this.velocity.y = slopeY
   }
 
   private updateReload(dt: number): void {
@@ -495,11 +655,6 @@ export class Player extends Pawn implements IUpdatable {
     if (this.ammoInMag > 0 || this.isReloading) return false
     return this.startReload()
   }
-  private addHalfGravity(dt: number) {
-    const velY = this.body.getLinearVelocity().y()
-    this.body.getLinearVelocity().setY(velY - 9.81 * 0.5 * dt)
-  }
-
   private copyVelocity() {
     const vel = this.body.getLinearVelocity()
     this.velocity.setFromAmmo(vel)
@@ -706,35 +861,38 @@ export class Player extends Pawn implements IUpdatable {
   public jump(): void {
     const vec3 = new AmmoInstance!.btVector3(0, this.jumpVelocity, 0)
     const linearVel = this.body.getLinearVelocity()
-    const vy = linearVel.y()
-    if (vy > 0) linearVel.setY(0)
+    if (linearVel.y() > 0) linearVel.setY(0)
     this.body.applyCentralImpulse(vec3)
     this.isOnGround = false
+    this.hasGroundPlane = false
     this.hasLeftGroundSinceJump = false
     this.jumpIgnoreGroundMs = this.jumpIgnoreGroundDuration
     this.jumpRechargeTimer = 0
+    this.landingGraceMs = 0
+    // linearVel points at the body's own vector — destroying it would free live memory
     AmmoInstance!.destroy(vec3)
-    AmmoInstance!.destroy(linearVel)
 
     const jumpYOffset = 0.11
     const previousY = this.getY()
     this.setY(previousY + jumpYOffset)
+    this.position.y += jumpYOffset
 
-    this.clampHorizontalSpeed(this.getWishSpeed() * 1.75)
+    // Horizontal speed is deliberately untouched: that's what carries a bhop chain
+    this.clampHorizontalSpeed(this.getSpeedLimit())
   }
 
   private clampHorizontalSpeed(maxSpeed: number): void {
-    const lv = this.body.getLinearVelocity()
-    const hx = lv.x()
-    const hz = lv.z()
+    const hx = this.velocity.x
+    const hz = this.velocity.z
     const mag = Math.sqrt(hx * hx + hz * hz)
     if (mag > maxSpeed && mag > 0.001) {
       const s = maxSpeed / mag
-      lv.setX(hx * s)
-      lv.setZ(hz * s)
       this.velocity.x = hx * s
       this.velocity.z = hz * s
     }
+    const lv = this.body.getLinearVelocity()
+    lv.setX(this.velocity.x)
+    lv.setZ(this.velocity.z)
   }
 
   public respawn(position?: Vector3D): void {
@@ -742,7 +900,9 @@ export class Player extends Pawn implements IUpdatable {
     const pos = position ?? game.pickRespawnPosition(this.position)
     this.spawnPoint.copy(pos)
     this.setPosition(pos)
+    this.position.copy(pos)
     this.setVelocity(Vector3D.ZERO())
+    this.viewOffsetY = 0
     this.isOnGround = true
     this.hasLeftGroundSinceJump = true
     this.jumpIgnoreGroundMs = 0
@@ -760,7 +920,9 @@ export class Player extends Pawn implements IUpdatable {
   public teleportToSpawn(position: Vector3D): void {
     this.spawnPoint.copy(position)
     this.setPosition(position)
+    this.position.copy(position)
     this.setVelocity(Vector3D.ZERO())
+    this.viewOffsetY = 0
     this.isOnGround = true
     this.hasLeftGroundSinceJump = true
     this.jumpIgnoreGroundMs = 0

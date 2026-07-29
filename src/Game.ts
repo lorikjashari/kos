@@ -1468,6 +1468,7 @@ export class Game implements IUpdatable {
     this.currentPlayer.player.update(dt)
     this.currentPlayer.player.updateDeath(dt)
     this.physics.update(dt)
+    this.currentPlayer.player.postPhysics(dt)
     this.renderer.update(dt)
     this.lastUpdateTS = now
   }

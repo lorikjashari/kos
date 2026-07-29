@@ -145,9 +145,10 @@ export class FPSCameraManager extends CameraManager {
     const targetRoll = this.leanDirection * LEAN_ANGLE
     this.roll = lerp(this.roll, targetRoll, Math.min(1, dt * 10))
 
+    // viewOffsetY lags behind vertical teleports (steps, ground snaps) so the view eases
     this.camera.position.set(
       this.player.position.x,
-      this.player.position.y + this.player.eyeOffsetY,
+      this.player.position.y + this.player.eyeOffsetY + this.player.viewOffsetY,
       this.player.position.z
     )
 

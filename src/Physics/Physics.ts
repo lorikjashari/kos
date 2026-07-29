@@ -61,6 +61,10 @@ export class Physics implements IUpdatable {
   }
 
   update(dt: number): void {
-    this.world.stepSimulation(dt)
+    // One substep of exactly dt: with the default 1/60 fixed step, frames shorter than
+    // 1/60 simulate nothing at all and Bullet hands back an extrapolated motion state,
+    // which shows up as stutter at high refresh rates.
+    const step = Math.min(1 / 30, Math.max(1 / 300, dt))
+    this.world.stepSimulation(step, 1, step)
   }
 }

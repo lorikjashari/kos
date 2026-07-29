@@ -33,6 +33,9 @@ export class InputManager implements IUpdatable {
   private emptyClickCooldown = 0
   /** Scroll ticks queued so wheel jumps apply on the next input update */
   private pendingScrollJumps = 0
+  /** Time left on a queued jump press, so landing frames aren't missed */
+  private jumpBufferMs = 0
+  private readonly jumpBufferDuration = 130
   /** event.key (lower) or mouseN → Key */
   private codeToAction = new Map<string, Key>()
 
@@ -167,9 +170,14 @@ export class InputManager implements IUpdatable {
     player.setCrouching(!!this.keys.get(Key.Crouch)?.isPressed)
     this.updateFootsteps(dt)
 
-    // One jump per key press — no hold-space auto-bhop
+    // One jump per key press — no hold-space auto-bhop. A press is buffered briefly so
+    // hitting jump just before touching down still fires on the landing frame (bhop).
     if (this.keys.get(Key.Jump)?.justPressed) {
-      this.tryJump()
+      this.jumpBufferMs = this.jumpBufferDuration
+    }
+    if (this.jumpBufferMs > 0) {
+      if (this.tryJump()) this.jumpBufferMs = 0
+      else this.jumpBufferMs = Math.max(0, this.jumpBufferMs - dt * 1000)
     }
     // Scroll-wheel jump (mwheelup / mwheeldown)
     while (this.pendingScrollJumps > 0) {
