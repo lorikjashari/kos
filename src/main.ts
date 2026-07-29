@@ -12,6 +12,7 @@ async function main() {
       // Warm audio + VFX on the user gesture so first shot/hit never hitchs
       void (async () => {
         await game.audioManager.unlock()
+        await game.ensureMap(config.mapId || 'pool_day')
         await game.prepareCombat()
         game.startBotMatch(config)
       })()
@@ -19,6 +20,7 @@ async function main() {
     onSettingsChanged: (settings) => {
       const game = Game.getInstance()
       game.inputManager.applyKeybinds(settings.keybinds)
+      game.inputManager.setJumpWithScrollWheel(settings.jumpWithScrollWheel)
     },
   })
 
@@ -32,8 +34,13 @@ async function main() {
       void game.audioManager.startMenuMusic()
       menu.show()
     })
+    game.setHideMenuHandler(() => {
+      game.audioManager.stopMenuMusic()
+      menu.hide()
+    })
     const settings = loadSettings()
     game.inputManager.applyKeybinds(settings.keybinds)
+    game.inputManager.setJumpWithScrollWheel(settings.jumpWithScrollWheel)
 
     menu.setLoadingProgress('Loading audio…', 40)
     await game.audioManager.loadPriority()

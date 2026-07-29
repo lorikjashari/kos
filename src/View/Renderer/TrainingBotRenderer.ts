@@ -14,7 +14,7 @@ interface StoredMaterial {
 export class TrainingBotRenderer implements IUpdatable {
   public bot: TrainingBot
   public mesh!: THREE.Object3D
-  private tpsMesh!: ThirdPersonMesh
+  private tpsMesh?: ThirdPersonMesh
   private game: Game
   private storedMaterials: StoredMaterial[] = []
   private overlayOn = false
@@ -41,10 +41,21 @@ export class TrainingBotRenderer implements IUpdatable {
   private lastMoveAnim = ''
   private readonly _q = new THREE.Quaternion()
   private readonly _e = new THREE.Euler()
+  /** Static GLB character (editor CS model) — no RobotExpressive anims */
+  private staticModel = false
+  private wireframeOn = false
+  private hitZonesOnly = false
+  private storedWire: Array<{ mesh: THREE.Mesh; value: boolean }> = []
+  private axesHelper?: THREE.AxesHelper
 
   constructor(bot: TrainingBot) {
     this.bot = bot
     this.game = Game.getInstance()
+
+    if (bot.visualModel) {
+      this.buildStaticModel(bot.visualModel)
+      return
+    }
 
     const source = this.game.globalLoadingManager.loadableMeshs.get('ThirdPersonMesh') as ThirdPersonMesh | undefined
     if (!source) {
@@ -72,6 +83,94 @@ export class TrainingBotRenderer implements IUpdatable {
     this.mesh.updateMatrixWorld(true)
     this.syncHumanHead()
     this.syncGunInHand()
+  }
+
+  /** CS / Sketchfab character: normalize to player-scale height, feet on ground. */
+  private buildStaticModel(meshKey: string): void {
+    this.staticModel = true
+    const source = this.game.globalLoadingManager.loadableMeshs.get(meshKey)
+    if (!source?.mesh) {
+      console.warn(`[TrainingBot] visual model "${meshKey}" not loaded`)
+      this.mesh = new THREE.Group()
+      return
+    }
+
+    const root = new THREE.Group()
+    root.name = 'BotStaticRoot'
+    const model = source.cloneMesh() as unknown as THREE.Object3D
+    model.name = meshKey
+
+    // Unique materials so death fade doesn't leak
+    model.traverse((child) => {
+      if (!(child instanceof THREE.Mesh) || !child.material) return
+      if (Array.isArray(child.material)) child.material = child.material.map((m) => m.clone())
+      else child.material = child.material.clone()
+      child.castShadow = true
+      child.receiveShadow = true
+      // Sketchfab CS skins often need double-side + correct color space
+      const mats = Array.isArray(child.material) ? child.material : [child.material]
+      for (const m of mats) {
+        const mat = m as THREE.MeshStandardMaterial
+        mat.side = THREE.DoubleSide
+        if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace
+      }
+    })
+
+    root.add(model)
+    // Measure raw size. Player capsule is ~4u tall — match that, not "1.85m".
+    root.updateMatrixWorld(true)
+    const box = new THREE.Box3().setFromObject(root)
+    const size = new THREE.Vector3()
+    box.getSize(size)
+    const targetH = 3.8
+    const s = targetH / Math.max(size.y, 0.0001)
+    model.scale.setScalar(s)
+    // Native +Z faces the look direction used by bot.yaw (atan2) — do not flip 180°
+    model.rotation.y = 0
+    model.updateMatrixWorld(true)
+    const box2 = new THREE.Box3().setFromObject(root)
+    // Sit feet on y=0 of root
+    model.position.y -= box2.min.y
+    // Recenter XZ so the character stands on the root origin
+    const box3 = new THREE.Box3().setFromObject(root)
+    const center = box3.getCenter(new THREE.Vector3())
+    model.position.x -= center.x
+    model.position.z -= center.z
+
+    // Invisible hit zones (single skinned mesh has no named head/body parts)
+    this.attachHeightHitZones(root, targetH)
+
+    this.mesh = root
+    this.mesh.position.copy(this.bot.position)
+    this.mesh.rotation.y = this.bot.yaw
+    this.tagBodyParts()
+    this.collectHitMeshes()
+    this.game.addToRenderer(this.mesh)
+    this.mesh.updateMatrixWorld(true)
+  }
+
+  /** Capsule-style hit boxes by height for single-mesh characters. */
+  private attachHeightHitZones(root: THREE.Object3D, height: number): void {
+    const mk = (part: BodyPart, y: number, h: number, r: number) => {
+      const geo = new THREE.CapsuleGeometry(r, Math.max(0.05, h - r * 2), 4, 8)
+      const mat = new THREE.MeshBasicMaterial({ visible: false })
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.name = `HitZone_${part}`
+      mesh.userData.bodyPart = part
+      mesh.position.set(0, y, 0)
+      root.add(mesh)
+    }
+    // Legs / body / head fractions of full height
+    mk('legs', height * 0.22, height * 0.44, 0.22)
+    mk('body', height * 0.58, height * 0.42, 0.28)
+    mk('head', height * 0.92, height * 0.22, 0.16)
+
+    // Don't raycast the decorative skin — hit zones only
+    root.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return
+      if (String(child.name).startsWith('HitZone_')) return
+      child.raycast = () => {}
+    })
   }
 
   /** Clone materials so opacity/emissive edits never leak to other bots */
@@ -316,6 +415,83 @@ export class TrainingBotRenderer implements IUpdatable {
     return this.mesh
   }
 
+  public setAxesVisible(visible: boolean): void {
+    if (visible) {
+      if (!this.axesHelper) {
+        this.axesHelper = new THREE.AxesHelper(2.2)
+        this.axesHelper.name = 'EditorAxes'
+        this.mesh.add(this.axesHelper)
+      }
+      this.axesHelper.visible = true
+    } else if (this.axesHelper) {
+      this.axesHelper.visible = false
+    }
+  }
+
+  public setWireframe(on: boolean): void {
+    if (on === this.wireframeOn) return
+    if (on) {
+      this.storedWire = []
+      this.mesh.traverse((child) => {
+        if (!(child instanceof THREE.Mesh) || !child.material) return
+        if (String(child.name).startsWith('HitZone_')) return
+        if (child.name === 'EditorAxes') return
+        const mats = Array.isArray(child.material) ? child.material : [child.material]
+        // Store once per mesh using first material's wireframe flag
+        const first = mats[0] as THREE.MeshStandardMaterial
+        if (!first || !('wireframe' in first)) return
+        this.storedWire.push({ mesh: child, value: !!first.wireframe })
+        for (const m of mats) {
+          const mat = m as THREE.MeshStandardMaterial
+          if ('wireframe' in mat) mat.wireframe = true
+        }
+      })
+      this.wireframeOn = true
+    } else {
+      for (const entry of this.storedWire) {
+        const mats = Array.isArray(entry.mesh.material) ? entry.mesh.material : [entry.mesh.material]
+        for (const m of mats) {
+          const mat = m as THREE.MeshStandardMaterial
+          if ('wireframe' in mat) mat.wireframe = entry.value
+        }
+      }
+      this.storedWire = []
+      this.wireframeOn = false
+    }
+  }
+
+  /** Hide decorative skin, leave hit capsules (useful with xray). */
+  public setHitZonesOnly(on: boolean): void {
+    this.hitZonesOnly = on
+    this.mesh.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return
+      if (String(child.name).startsWith('HitZone_')) {
+        child.visible = true
+        // Show zones when isolating
+        if (on) {
+          const mat = child.material as THREE.MeshBasicMaterial
+          if (mat) {
+            mat.visible = true
+            mat.wireframe = true
+            mat.transparent = true
+            mat.opacity = 0.55
+            const part = child.userData.bodyPart as BodyPart | undefined
+            if (part) mat.color.setHex(MESH_HIT_COLORS[part])
+          }
+        } else {
+          const mat = child.material as THREE.MeshBasicMaterial
+          if (mat) {
+            mat.visible = false
+            mat.opacity = 1
+          }
+        }
+        return
+      }
+      if (child.name === 'EditorAxes') return
+      child.visible = !on
+    })
+  }
+
   public setHitboxVisible(visible: boolean): void {
     if (visible === this.overlayOn) return
     if (visible) this.applyHitboxOverlay()
@@ -431,11 +607,12 @@ export class TrainingBotRenderer implements IUpdatable {
       this.setMeshOpacity(opacity)
     }
 
-    this.tpsMesh.update(1 / 60)
+    this.tpsMesh?.update(1 / 60)
   }
 
   public update(dt: number): void {
-    if (!this.tpsMesh) return
+    if (!this.mesh) return
+    if (!this.staticModel && !this.tpsMesh) return
 
     const want = TrainingBot.showHitboxes && this.bot.isAlive
     if (want !== this.overlayOn) this.setHitboxVisible(want)
@@ -455,7 +632,7 @@ export class TrainingBotRenderer implements IUpdatable {
       this.mesh.visible = true
       this.mesh.rotation.set(0, this.bot.yaw, 0)
       this.lastMoveAnim = ''
-      this.tpsMesh.playAnimation('Idle', true, true)
+      this.tpsMesh?.playAnimation('Idle', true, true)
       if (this.gunProp) this.gunProp.visible = true
     }
     this.wasAlive = this.bot.isAlive
@@ -468,21 +645,33 @@ export class TrainingBotRenderer implements IUpdatable {
     }
 
     this.mesh.visible = true
-    this.mesh.position.set(this.bot.position.x, this.bot.position.y, this.bot.position.z)
-    this.mesh.rotation.order = 'YXZ'
-    this.mesh.rotation.y = this.bot.yaw
-    this.mesh.rotation.x = 0
-    this.mesh.rotation.z = 0
+    // While editor gizmo is dragging, Game owns the mesh transform
+    if (!this.game.isEditorTransformDragging()) {
+      this.mesh.position.set(this.bot.position.x, this.bot.position.y, this.bot.position.z)
+      this.mesh.rotation.order = 'YXZ'
+      this.mesh.rotation.y = this.bot.yaw
+      this.mesh.rotation.x = 0
+      this.mesh.rotation.z = 0
+      const vs = this.bot.visualScale || 1
+      if (this.staticModel) {
+        this.mesh.scale.setScalar(vs)
+      }
+    }
+
+    if (this.staticModel) {
+      this.mesh.updateMatrixWorld(true)
+      return
+    }
 
     // Legs-only locomotion so arms stay in ADS rifle pose
     const anim = this.bot.isMoving ? 'Walking' : 'Idle'
     if (anim !== this.lastMoveAnim) {
-      this.tpsMesh.playAnimation(anim, true, true)
+      this.tpsMesh!.playAnimation(anim, true, true)
       this.lastMoveAnim = anim
     }
 
     if (this.gunProp) this.gunProp.visible = true
-    this.tpsMesh.update(dt)
+    this.tpsMesh!.update(dt)
     this.applyRiflePose(this.bot.shootFlash > 0 ? 1 : 0)
     this.mesh.updateMatrixWorld(true)
     this.syncHumanHead()

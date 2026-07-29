@@ -97,6 +97,17 @@ export class TrainingBot implements IUpdatable {
   private readonly stepProbe = 0.95
   private repathTimer = 0
   private huntBias = Math.random() < 0.6 ? 'player' : 'any'
+  /** Editor mannequin — no move / shoot AI */
+  public aiFrozen = false
+  /** When true (editor), yaw tracks the local player each frame */
+  public lookAtPlayer = false
+  /** Uniform visual scale (editor) */
+  public visualScale = 1
+  /** Optional visual key in GlobalLoadingManager (e.g. CsTerrorist) */
+  public visualModel?: string
+  /** Home pose for editor Reset */
+  public editorHome?: { x: number; y: number; z: number; yaw: number; scale: number }
+
   private lastKnownTarget?: Vector3D
   private retargetTimer = 0
   private lockedTargetName?: string
@@ -167,7 +178,8 @@ export class TrainingBot implements IUpdatable {
 
   public respawn(): void {
     const game = Game.getInstance()
-    const pos = game.pickRespawnPosition(this.position, true)
+    // Frozen editor bots always return to their fixed spot
+    const pos = this.aiFrozen ? this.spawnPosition.clone() : game.pickRespawnPosition(this.position, true)
     this.health = 100
     this.isAlive = true
     this.deathAge = 0
@@ -176,7 +188,9 @@ export class TrainingBot implements IUpdatable {
     this.spawnPosition.copy(pos)
     this.position.copy(pos)
     this.lastPos.copy(pos)
-    this.yaw = Math.random() * Math.PI * 2
+    if (!this.aiFrozen) {
+      this.yaw = Math.random() * Math.PI * 2
+    }
     this.fireCooldown = 0.5 + Math.random()
     this.seeTimer = 0
     this.isMoving = false
@@ -193,6 +207,20 @@ export class TrainingBot implements IUpdatable {
       if (this.deathAge >= this.deathDuration) {
         this.respawn()
       }
+      return
+    }
+
+    // Editor dummy — stay planted; optional face-player; no move / shoot
+    if (this.aiFrozen) {
+      this.isMoving = false
+      if (this.lookAtPlayer) {
+        const game = Game.getInstance()
+        const player = game.currentPlayer?.player
+        if (player && !player.isDead) {
+          this.faceToward(player.position)
+        }
+      }
+      if (this.shootFlash > 0) this.shootFlash = Math.max(0, this.shootFlash - dt)
       return
     }
 

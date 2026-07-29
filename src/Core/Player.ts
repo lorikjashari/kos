@@ -18,8 +18,13 @@ export class Player extends Pawn implements IUpdatable {
   public velocity: Vector3D = new Vector3D(0, 0, 0)
   public lookingDirection: Vector3D = Vector3D.ZERO()
   public lastShootTimeStamp = new Date()
-  private jumpRechargeTime = 100
+  private jumpRechargeTime = 100 // ms — half previous delay
   private jumpRechargeTimer = 0
+  /** After jumping, ignore ground ray briefly so sticky rays don't cancel the jump */
+  private jumpIgnoreGroundMs = 0
+  private readonly jumpIgnoreGroundDuration = 42
+  /** Must leave the ground after a jump before another is allowed (stops slope micro-jumps) */
+  private hasLeftGroundSinceJump = true
   public deceleration = new Vector3D(0.95, 1, 0.95)
   public airDeceleration = new Vector3D(0.98, 1, 0.98)
 
@@ -44,6 +49,8 @@ export class Player extends Pawn implements IUpdatable {
   public isCrouching = false
   public recoilIndex = 0
   public wishSpeedScale = 1
+  /** Per-map multiplier (Dust II is large — needs higher base speed) */
+  public mapSpeedScale = 1
   public isCurrentPlayer = false
   public isOnGround = false
   public isDead = false
@@ -122,6 +129,13 @@ export class Player extends Pawn implements IUpdatable {
     this.moveDirection = Vector3D.ZERO()
   }
   private raycastToGround(): void {
+    // Sticky ground ray still hits mid-jump — force airborne for a short window
+    if (this.jumpIgnoreGroundMs > 0) {
+      this.isOnGround = false
+      this.hasLeftGroundSinceJump = true
+      return
+    }
+
     let { initialLocalPos, size } = this.getGroundRaycastProperties()
 
     const from: Ammo.btVector3 = this.position
@@ -136,12 +150,199 @@ export class Player extends Pawn implements IUpdatable {
     const rayCallBack = new AmmoInstance!.ClosestRayResultCallback(from, to)
     this.world.rayTest(from, to, rayCallBack)
     if (!this.isOnGround && rayCallBack.hasHit()) this.velocityPreserveAcc = 0
-    this.isOnGround = rayCallBack.hasHit()
+    const grounded = rayCallBack.hasHit()
+    if (!grounded) {
+      this.hasLeftGroundSinceJump = true
+    }
+    this.isOnGround = grounded
     AmmoInstance!.destroy(from)
     AmmoInstance!.destroy(to)
     AmmoInstance!.destroy(rayCallBack)
   }
+
+  private ammoRayHit(
+    from: Vector3D,
+    to: Vector3D
+  ): { hit: boolean; y: number } {
+    const fromAmmo = from.toAmmo()
+    const toAmmo = to.toAmmo()
+    const cb = new AmmoInstance!.ClosestRayResultCallback(fromAmmo, toAmmo)
+    this.world.rayTest(fromAmmo, toAmmo, cb)
+    const hit = cb.hasHit()
+    let y = 0
+    if (hit) {
+      const p = cb.get_m_hitPointWorld()
+      y = p.y()
+    }
+    AmmoInstance!.destroy(fromAmmo)
+    AmmoInstance!.destroy(toAmmo)
+    AmmoInstance!.destroy(cb)
+    return { hit, y }
+  }
+
+  /**
+   * Smoothly stick to sloping ground (ramps) — no stair-snap stutter.
+   */
+  private smoothGroundFollow(): void {
+    if (!this.isOnGround || this.jumpIgnoreGroundMs > 0) return
+
+    const radius = this.capsuleDimension.x
+    const halfCyl = this.capsuleDimension.y * 0.5
+    const bottomOffset = halfCyl + radius
+    const maxLift = Math.max(2.2, 1.1 * this.mapSpeedScale)
+
+    const under = this.ammoRayHit(
+      new Vector3D(this.position.x, this.position.y + 0.4, this.position.z),
+      new Vector3D(this.position.x, this.position.y - bottomOffset - 1.8, this.position.z)
+    )
+    if (!under.hit) return
+
+    let targetFeetY = under.y
+    let isSmoothRamp = false
+
+    const mx = this.moveDirection.x
+    const mz = this.moveDirection.z
+    const moveLenSq = mx * mx + mz * mz
+    if (moveLenSq > 1e-4) {
+      const inv = 1 / Math.sqrt(moveLenSq)
+      const dirX = mx * inv
+      const dirZ = mz * inv
+      const aheadDist = radius * 0.55 + 0.35
+      const ahead = this.ammoRayHit(
+        new Vector3D(
+          this.position.x + dirX * aheadDist,
+          this.position.y + maxLift,
+          this.position.z + dirZ * aheadDist
+        ),
+        new Vector3D(
+          this.position.x + dirX * aheadDist,
+          this.position.y - bottomOffset - 1.2,
+          this.position.z + dirZ * aheadDist
+        )
+      )
+      if (ahead.hit) {
+        const rise = ahead.y - under.y
+        const slope = rise / aheadDist
+        // Only treat as smooth ramp if there's no shin blocker (real stairs have risers)
+        const shin = this.ammoRayHit(
+          new Vector3D(this.position.x, under.y + 0.12, this.position.z),
+          new Vector3D(
+            this.position.x + dirX * aheadDist,
+            under.y + 0.12,
+            this.position.z + dirZ * aheadDist
+          )
+        )
+        if (!shin.hit && slope > -1.3 && slope < 1.15) {
+          isSmoothRamp = true
+          targetFeetY = under.y * 0.25 + ahead.y * 0.75
+        }
+      }
+    }
+
+    if (!isSmoothRamp && Math.abs(targetFeetY - under.y) < 0.001) {
+      // Still stick to ground under feet so we don't float
+      targetFeetY = under.y
+    }
+
+    const targetCenterY = targetFeetY + bottomOffset + 0.04
+    const dy = targetCenterY - this.position.y
+    if (dy < -0.9 || dy > maxLift) return
+    if (!isSmoothRamp && dy > 0.12) return // leave discrete climbs to tryStepUp
+
+    const apply = dy > 0 ? Math.min(dy, maxLift) * (isSmoothRamp ? 0.92 : 0.7) : dy * 0.55
+    if (Math.abs(apply) < 0.001) return
+
+    const ny = this.position.y + apply
+    this.setPosition(new Vector3D(this.position.x, ny, this.position.z))
+    this.position.y = ny
+    const lv = this.body.getLinearVelocity()
+    if (dy > 0.02 && lv.y() < 0) lv.setY(0)
+    if (dy > 0.02) this.velocity.y = Math.max(0, this.velocity.y)
+  }
+
+  /**
+   * Climb stair risers (Dust II start stairs, crates, ledges).
+   */
+  private tryStepUp(): boolean {
+    if (!this.isOnGround || this.jumpIgnoreGroundMs > 0) return false
+    const mx = this.moveDirection.x
+    const mz = this.moveDirection.z
+    const moveLenSq = mx * mx + mz * mz
+    if (moveLenSq < 1e-4) return false
+
+    const inv = 1 / Math.sqrt(moveLenSq)
+    const dirX = mx * inv
+    const dirZ = mz * inv
+
+    const radius = this.capsuleDimension.x
+    const halfCyl = this.capsuleDimension.y * 0.5
+    const feetY = this.position.y - halfCyl - radius
+    const maxStep = Math.max(2.8, 1.35 * this.mapSpeedScale)
+    const distances = [0.35, 0.55, 0.8, 1.05, 1.35]
+
+    for (const forward of distances) {
+      const ax = this.position.x + dirX * forward
+      const az = this.position.z + dirZ * forward
+
+      const down = this.ammoRayHit(
+        new Vector3D(ax, feetY + maxStep + 0.25, az),
+        new Vector3D(ax, feetY - 0.4, az)
+      )
+      if (!down.hit) continue
+
+      const stepH = down.y - feetY
+      if (stepH < 0.03 || stepH > maxStep) continue
+
+      // Stair riser or low wall in front at shin height
+      const shin = this.ammoRayHit(
+        new Vector3D(this.position.x, feetY + 0.08, this.position.z),
+        new Vector3D(ax, feetY + 0.08, az)
+      )
+      // Allow step without shin hit if clearly higher ground ahead (shallow stair tops)
+      if (!shin.hit && stepH < 0.1) continue
+
+      const wall = this.ammoRayHit(
+        new Vector3D(
+          this.position.x + dirX * (radius * 0.15),
+          feetY + stepH + 0.45,
+          this.position.z + dirZ * (radius * 0.15)
+        ),
+        new Vector3D(ax, feetY + stepH + 0.45, az)
+      )
+      if (wall.hit) continue
+
+      const headY = this.position.y + halfCyl + radius
+      const ceiling = this.ammoRayHit(
+        new Vector3D(ax, headY, az),
+        new Vector3D(ax, headY + stepH + 0.25, az)
+      )
+      if (ceiling.hit) continue
+
+      const newY = this.position.y + stepH + 0.05
+      const nudge = Math.min(0.16, forward * 0.2)
+      const nx = this.position.x + dirX * nudge
+      const nz = this.position.z + dirZ * nudge
+      this.setPosition(new Vector3D(nx, newY, nz))
+      this.position.set(nx, newY, nz)
+      const lv = this.body.getLinearVelocity()
+      if (lv.y() < 0) lv.setY(0)
+      this.velocity.y = Math.max(0, this.velocity.y)
+      this.isOnGround = true
+      return true
+    }
+    return false
+  }
+
+  private tryStepUpCascade(): void {
+    // Climb several shallow stair treads in one frame
+    for (let i = 0; i < 5; i++) {
+      if (!this.tryStepUp()) break
+    }
+  }
   private updateJumpRechargeTime(dt: number): void {
+    if (this.jumpIgnoreGroundMs > 0) {
+      this.jumpIgnoreGroundMs = Math.max(0, this.jumpIgnoreGroundMs - dt * 1000)
+    }
     if (this.jumpRechargeTimer < this.jumpRechargeTime) {
       this.jumpRechargeTimer += dt * 1000
     }
@@ -173,7 +374,7 @@ export class Player extends Pawn implements IUpdatable {
   }
 
   private getWishSpeed(): number {
-    return 10 * this.wishSpeedScale
+    return 10 * this.wishSpeedScale * this.mapSpeedScale
   }
 
   private MoveGround(accelDir: Vector3D, prevVelocity: Vector3D, dt: number): Vector3D {
@@ -235,6 +436,8 @@ export class Player extends Pawn implements IUpdatable {
 
     linearVelocity.setValue(this.velocity.x, y, this.velocity.z)
     this.velocity.y = y
+    this.smoothGroundFollow()
+    this.tryStepUpCascade()
     this.updateJumpRechargeTime(dt)
     this.updateReload(dt)
     this.addHalfGravity(dt)
@@ -266,8 +469,12 @@ export class Player extends Pawn implements IUpdatable {
 
   private updateSpeedScale(): void {
     if (this.isCrouching) this.wishSpeedScale = 0.38
-    else if (this.isWalking) this.wishSpeedScale = 0.48
+    else if (this.isWalking) this.wishSpeedScale = 0.55
     else this.wishSpeedScale = 1
+  }
+
+  public setMapSpeedScale(scale: number): void {
+    this.mapSpeedScale = Math.max(0.25, scale)
   }
 
   public startReload(): boolean {
@@ -480,15 +687,22 @@ export class Player extends Pawn implements IUpdatable {
     return new Date().getTime() - this.lastShootTimeStamp.getTime() > this.rateOfFire * 2
   }
   public canJump(): boolean {
-    return this.isOnGround && this.jumpRechargeTimer >= this.jumpRechargeTime
+    if (!this.isOnGround) return false
+    if (this.jumpIgnoreGroundMs > 0) return false
+    if (this.jumpRechargeTimer < this.jumpRechargeTime) return false
+    if (!this.hasLeftGroundSinceJump) return false
+    return true
   }
 
   public jump(): void {
     const vec3 = new AmmoInstance!.btVector3(0, this.jumpVelocity, 0)
     const linearVel = this.body.getLinearVelocity()
-    linearVel.setY(0)
+    const vy = linearVel.y()
+    if (vy > 0) linearVel.setY(0)
     this.body.applyCentralImpulse(vec3)
     this.isOnGround = false
+    this.hasLeftGroundSinceJump = false
+    this.jumpIgnoreGroundMs = this.jumpIgnoreGroundDuration
     this.jumpRechargeTimer = 0
     AmmoInstance!.destroy(vec3)
     AmmoInstance!.destroy(linearVel)
@@ -496,6 +710,22 @@ export class Player extends Pawn implements IUpdatable {
     const jumpYOffset = 0.11
     const previousY = this.getY()
     this.setY(previousY + jumpYOffset)
+
+    this.clampHorizontalSpeed(this.getWishSpeed() * 1.75)
+  }
+
+  private clampHorizontalSpeed(maxSpeed: number): void {
+    const lv = this.body.getLinearVelocity()
+    const hx = lv.x()
+    const hz = lv.z()
+    const mag = Math.sqrt(hx * hx + hz * hz)
+    if (mag > maxSpeed && mag > 0.001) {
+      const s = maxSpeed / mag
+      lv.setX(hx * s)
+      lv.setZ(hz * s)
+      this.velocity.x = hx * s
+      this.velocity.z = hz * s
+    }
   }
 
   public respawn(position?: Vector3D): void {
@@ -505,6 +735,8 @@ export class Player extends Pawn implements IUpdatable {
     this.setPosition(pos)
     this.setVelocity(Vector3D.ZERO())
     this.isOnGround = true
+    this.hasLeftGroundSinceJump = true
+    this.jumpIgnoreGroundMs = 0
     this.jumpRechargeTimer = this.jumpRechargeTime
     this.health = 100
     this.isDead = false
@@ -521,6 +753,9 @@ export class Player extends Pawn implements IUpdatable {
     this.setPosition(position)
     this.setVelocity(Vector3D.ZERO())
     this.isOnGround = true
+    this.hasLeftGroundSinceJump = true
+    this.jumpIgnoreGroundMs = 0
+    this.jumpRechargeTimer = this.jumpRechargeTime
     this.health = 100
     this.isDead = false
     this.isAlive = true

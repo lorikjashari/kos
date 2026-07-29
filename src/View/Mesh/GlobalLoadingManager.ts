@@ -60,9 +60,12 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     await tpsmesh.load()
     tpsmesh.register(this.loadableMeshs)
 
-    const mapmesh = new MapMesh()
+    // Default boot map (Pool Day) — other maps load on demand
+    const mapmesh = new MapMesh('pool_day_baked.glb', 'Map_pool_day', true)
     await mapmesh.load()
     mapmesh.register(this.loadableMeshs)
+    // Back-compat alias used by older call sites
+    this.loadableMeshs.set('Map', mapmesh)
 
     const ak = new FPSMesh('fps_mine_sketch_galil.glb', 'AK47')
     await ak.load()
@@ -79,6 +82,30 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     const bullet = new LoadableMesh('9mm2douille.glb', 'Bullet')
     await bullet.load()
     bullet.register(this.loadableMeshs)
+  }
+  public async loadMapMesh(
+    meshKey: string,
+    glbPath: string,
+    usePoolLights: boolean,
+    forceReload = false
+  ): Promise<MapMesh> {
+    if (forceReload) this.loadableMeshs.delete(meshKey)
+    const existing = this.loadableMeshs.get(meshKey)
+    if (existing instanceof MapMesh) return existing
+    const mapmesh = new MapMesh(glbPath, meshKey, usePoolLights)
+    await mapmesh.load()
+    mapmesh.register(this.loadableMeshs)
+    return mapmesh
+  }
+
+  /** Load a generic GLB once and cache it (editor character packs, etc.). */
+  public async ensureMesh(meshKey: string, glbPath: string): Promise<LoadableMesh> {
+    const existing = this.loadableMeshs.get(meshKey)
+    if (existing) return existing
+    const mesh = new LoadableMesh(glbPath, meshKey)
+    await mesh.load()
+    mesh.register(this.loadableMeshs)
+    return mesh
   }
   static async loadJson(path: string): Promise<any> {
     const response = await fetch(path)

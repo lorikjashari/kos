@@ -16,13 +16,24 @@ import { TrainingBotRenderer } from './View/Renderer/TrainingBotRenderer'
 import { FPSRenderer } from './View/Renderer/PlayerRenderer/FPSRenderer'
 import type { BotMatchConfig } from './UI/MainMenu'
 import { MatchStats, pickBotNames, type ScoreRow } from './Core/MatchStats'
+import * as THREE from 'three'
 import {
-  MATCH_SPAWNS,
+  BOT_GROUND_Y,
+  DEFAULT_MAP_ID,
+  getMapDefinition,
+  spawnsFromBounds,
+  type MapId,
+  type SpawnPoint,
+} from './Core/MapCatalog'
+import {
   flatDistXZ,
   shuffleInPlace,
   spawnToBotVector,
   spawnToPlayerVector,
 } from './Core/SpawnPoints'
+import { CommandConsole } from './UI/CommandConsole'
+import { EditorMenu, type EditorTool } from './UI/EditorMenu'
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 
 export class Game implements IUpdatable {
   public static game: Game
@@ -35,7 +46,13 @@ export class Game implements IUpdatable {
   private lastUpdateTS!: number
   public actors!: Array<Actor>
   public audioManager: AudioManager
-  public mapName = 'collision-world'
+  public mapName = 'pool_day'
+  public activeMapId: MapId = DEFAULT_MAP_ID
+  private activeSpawns: ReadonlyArray<SpawnPoint> = getMapDefinition(DEFAULT_MAP_ID).spawns
+  private mapExtras: THREE.Object3D[] = []
+  private mapColliders: Actor[] = []
+  private activeMapMesh: MapMesh | null = null
+  private debugPropMeshes: THREE.Object3D[] = []
   public trainingBots: TrainingBot[] = []
   public botRenderers: TrainingBotRenderer[] = []
   public matchStarted = false
@@ -53,6 +70,21 @@ export class Game implements IUpdatable {
   public stats = new MatchStats()
   private nameQueue: string[] = []
   private onReturnToMenu: (() => void) | null = null
+  private onHideMenu: (() => void) | null = null
+  private commandConsole: CommandConsole | null = null
+  private consoleResumeGameplay = false
+  /** /editormode sandbox */
+  public editorActive = false
+  private editorMenu: EditorMenu | null = null
+  private transformControls: TransformControls | null = null
+  private editorTool: EditorTool = 'translate'
+  private editorXray = false
+  private editorWireframe = false
+  private editorAxes = true
+  private editorHitZonesOnly = false
+  private editorFpsLook = false
+  private editorDragging = false
+  private boundEditorKeys: ((e: KeyboardEvent) => void) | null = null
 
   constructor() {
     this.players = new Array<PlayerWrapper>()
@@ -65,6 +97,355 @@ export class Game implements IUpdatable {
 
   public setReturnToMenuHandler(handler: () => void): void {
     this.onReturnToMenu = handler
+  }
+
+  public setHideMenuHandler(handler: () => void): void {
+    this.onHideMenu = handler
+  }
+
+  public isCommandConsoleOpen(): boolean {
+    return !!this.commandConsole?.isOpen()
+  }
+
+  /** Press `/` in-game or on the menu to open the slash-command bar. */
+  public openCommandConsole(): void {
+    if (!this.commandConsole) {
+      this.commandConsole = new CommandConsole({
+        onCommand: (line) => void this.runCommand(line),
+        onClose: () => this.onCommandConsoleClosed(),
+      })
+    }
+    if (this.commandConsole.isOpen()) return
+    this.consoleResumeGameplay = this.matchStarted && !this.matchPaused && this.inputManager.gameplayEnabled
+    this.inputManager.gameplayEnabled = false
+    this.inputManager.unlock()
+    this.commandConsole.show()
+  }
+
+  private onCommandConsoleClosed(): void {
+    if (this.consoleResumeGameplay && this.matchStarted && !this.matchPaused) {
+      this.inputManager.gameplayEnabled = true
+      setTimeout(() => this.inputManager.onLock(), 40)
+    }
+    this.consoleResumeGameplay = false
+  }
+
+  private async runCommand(line: string): Promise<void> {
+    const cmd = line.trim().toLowerCase().split(/\s+/)[0] ?? ''
+    if (cmd === 'editormode') {
+      // Don't auto-relock mid-command; enterEditorMode takes over input
+      this.consoleResumeGameplay = false
+      await this.enterEditorMode()
+      return
+    }
+    console.warn('[cmd] unknown command:', cmd || '(empty)')
+  }
+
+  public isEditorTransformDragging(): boolean {
+    return this.editorActive && this.editorDragging
+  }
+
+  public isEditorMenuOpen(): boolean {
+    return !!this.editorMenu?.isOpen()
+  }
+
+  /**
+   * Editor sandbox: Pool Day, one frozen bot in front of you (no AI / no shooting).
+   */
+  public async enterEditorMode(): Promise<void> {
+    this.onHideMenu?.()
+    await this.ensureMap('pool_day')
+    await this.prepareCombat()
+    // CS Source T model for the frozen editor dummy
+    await this.globalLoadingManager.ensureMesh('CsTerrorist', 'models/cs_terrorist.glb')
+
+    this.teardownEditorTools()
+    this.clearBots()
+    this.stats.reset()
+    this.playerName = this.playerName || 'Player'
+    this.refillAmmoOnKill = false
+    this.matchStarted = true
+    this.matchPaused = false
+    this.combatLive = true
+    this.lockdownTimer = 0
+    this.pendingBotSpawns = []
+    this.editorActive = true
+    this.editorFpsLook = false
+    this.editorTool = 'translate'
+    this.editorXray = false
+    this.editorWireframe = false
+    this.editorAxes = true
+    this.editorHitZonesOnly = false
+    TrainingBot.showHitboxes = false
+    // Cursor free so the editor panel + gizmo work
+    this.inputManager.gameplayEnabled = false
+    this.inputManager.unlock()
+    this.applyMapMoveSpeed('pool_day')
+
+    const spawn = spawnToPlayerVector(this.activeSpawns[0] ?? { x: 18.9, y: 2, z: 29.7 })
+    const player = this.currentPlayer.player
+    player.teleportToSpawn(spawn)
+    player.equipSpawnLoadout()
+
+    // Stand on the deck facing each other (not out in the pool)
+    const forward = new THREE.Vector3(0, 0, -1)
+    const cam = this.currentPlayer.cameraManager?.camera
+    if (cam) forward.applyQuaternion(cam.quaternion)
+    forward.y = 0
+    if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1)
+    else forward.normalize()
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
+
+    const standOff = 3.2
+    const side = 0.4
+    let botX = player.position.x + forward.x * standOff + right.x * side
+    let botZ = player.position.z + forward.z * standOff + right.z * side
+    let botY = BOT_GROUND_Y
+
+    const hit = this.physics.raycast(
+      new Vector3D(botX, player.position.y + 4, botZ),
+      new Vector3D(botX, player.position.y - 8, botZ)
+    )
+    if (hit?.hasHit && hit.hitPosition) {
+      botY = hit.hitPosition.y
+    }
+
+    const botPos = new Vector3D(botX, botY, botZ)
+    const yawFacingPlayer = Math.atan2(player.position.x - botPos.x, player.position.z - botPos.z)
+    const bot = new TrainingBot(botPos, yawFacingPlayer, 'medium', 'EDITOR')
+    bot.aiFrozen = true
+    bot.lookAtPlayer = true
+    bot.visualScale = 1
+    bot.visualModel = 'CsTerrorist'
+    bot.editorHome = {
+      x: botPos.x,
+      y: botPos.y,
+      z: botPos.z,
+      yaw: yawFacingPlayer,
+      scale: 1,
+    }
+    bot.addToWorld(this.physics)
+    const renderer = new TrainingBotRenderer(bot)
+    this.trainingBots.push(bot)
+    this.botRenderers.push(renderer)
+    renderer.setAxesVisible(true)
+
+    this.renderer.hud?.showGameplay()
+    this.renderer.hud?.setLockdown(null)
+    this.renderer.hud?.setScoreboardVisible(false)
+    this.renderer.hud?.setPauseMenuOpen(false)
+
+    this.setupEditorTools(renderer.getRoot())
+    this.ensureEditorMenu().show()
+  }
+
+  private ensureEditorMenu(): EditorMenu {
+    if (this.editorMenu) return this.editorMenu
+    this.editorMenu = new EditorMenu({
+      onTool: (tool) => this.setEditorTool(tool),
+      onToggleXray: (on) => {
+        this.editorXray = on
+        TrainingBot.showHitboxes = on
+        this.botRenderers.forEach((r) => r.refreshHitboxDebugMeshes())
+      },
+      onToggleWireframe: (on) => {
+        this.editorWireframe = on
+        this.botRenderers.forEach((r) => r.setWireframe(on))
+      },
+      onToggleAxes: (on) => {
+        this.editorAxes = on
+        this.botRenderers.forEach((r) => r.setAxesVisible(on))
+      },
+      onToggleLookAtPlayer: (on) => {
+        const bot = this.trainingBots[0]
+        if (bot) bot.lookAtPlayer = on
+      },
+      onToggleHitZonesOnly: (on) => {
+        this.editorHitZonesOnly = on
+        this.botRenderers.forEach((r) => r.setHitZonesOnly(on))
+      },
+      onScale: (value) => {
+        const bot = this.trainingBots[0]
+        const mesh = this.botRenderers[0]?.getRoot()
+        if (!bot || !mesh) return
+        bot.visualScale = value
+        mesh.scale.setScalar(value)
+        this.syncBotFromMesh()
+      },
+      onNudge: (axis, delta) => {
+        const bot = this.trainingBots[0]
+        const mesh = this.botRenderers[0]?.getRoot()
+        if (!bot || !mesh) return
+        bot.lookAtPlayer = false
+        bot.position[axis] += delta
+        bot.spawnPosition.copy(bot.position)
+        mesh.position.copy(bot.position)
+        this.transformControls?.attach(mesh)
+      },
+      onYaw: (deltaRad) => {
+        const bot = this.trainingBots[0]
+        const mesh = this.botRenderers[0]?.getRoot()
+        if (!bot || !mesh) return
+        bot.lookAtPlayer = false
+        bot.yaw += deltaRad
+        mesh.rotation.y = bot.yaw
+      },
+      onSnapGround: () => this.editorSnapGround(),
+      onResetPose: () => this.editorResetPose(),
+      onFpsLook: () => this.editorEnableFpsLook(),
+      onEditCursor: () => this.editorEnableEditCursor(),
+      onExit: () => this.returnToMenu(),
+      getState: () => {
+        const bot = this.trainingBots[0]
+        return {
+          tool: this.editorTool,
+          xray: this.editorXray,
+          wireframe: this.editorWireframe,
+          axes: this.editorAxes,
+          lookAtPlayer: !!bot?.lookAtPlayer,
+          hitZonesOnly: this.editorHitZonesOnly,
+          scale: bot?.visualScale ?? 1,
+          pos: {
+            x: bot?.position.x ?? 0,
+            y: bot?.position.y ?? 0,
+            z: bot?.position.z ?? 0,
+          },
+          yawDeg: ((bot?.yaw ?? 0) * 180) / Math.PI,
+          fpsLook: this.editorFpsLook,
+        }
+      },
+    })
+    return this.editorMenu
+  }
+
+  private setupEditorTools(target: THREE.Object3D): void {
+    const camera = this.currentPlayer.cameraManager?.camera
+    if (!camera) return
+
+    const controls = new TransformControls(camera, this.renderer.domElement)
+    controls.setMode('translate')
+    controls.setSize(0.95)
+    controls.attach(target)
+    controls.addEventListener('dragging-changed', (event: any) => {
+      this.editorDragging = !!event.value
+      if (!this.editorDragging) this.syncBotFromMesh()
+    })
+    controls.addEventListener('objectChange', () => {
+      this.syncBotFromMesh()
+      this.editorMenu?.refresh()
+    })
+
+    this.renderer.scene.add(controls as unknown as THREE.Object3D)
+    this.transformControls = controls
+    this.setEditorTool('translate')
+
+    this.boundEditorKeys = (e: KeyboardEvent) => {
+      if (!this.editorActive || this.editorFpsLook) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+      if (e.key === 'q' || e.key === 'Q') this.setEditorTool('select')
+      if (e.key === 'w' || e.key === 'W') this.setEditorTool('translate')
+      if (e.key === 'e' || e.key === 'E') this.setEditorTool('rotate')
+      if (e.key === 'r' || e.key === 'R') this.setEditorTool('scale')
+      if (e.key === 'Escape') this.editorEnableEditCursor()
+      this.editorMenu?.refresh()
+    }
+    window.addEventListener('keydown', this.boundEditorKeys)
+  }
+
+  private setEditorTool(tool: EditorTool): void {
+    this.editorTool = tool
+    if (!this.transformControls) return
+    if (tool === 'select') {
+      this.transformControls.enabled = false
+      this.transformControls.visible = false
+      return
+    }
+    this.transformControls.enabled = true
+    this.transformControls.visible = true
+    this.transformControls.setMode(tool)
+  }
+
+  private syncBotFromMesh(): void {
+    const bot = this.trainingBots[0]
+    const mesh = this.botRenderers[0]?.getRoot()
+    if (!bot || !mesh) return
+    bot.position.set(mesh.position.x, mesh.position.y, mesh.position.z)
+    bot.spawnPosition.copy(bot.position)
+    bot.yaw = mesh.rotation.y
+    const sx = mesh.scale.x
+    if (Number.isFinite(sx) && sx > 0.01) bot.visualScale = sx
+    if (this.editorDragging) bot.lookAtPlayer = false
+  }
+
+  private editorSnapGround(): void {
+    const bot = this.trainingBots[0]
+    const mesh = this.botRenderers[0]?.getRoot()
+    if (!bot || !mesh) return
+    const hit = this.physics.raycast(
+      new Vector3D(bot.position.x, bot.position.y + 6, bot.position.z),
+      new Vector3D(bot.position.x, bot.position.y - 20, bot.position.z)
+    )
+    if (hit?.hasHit && hit.hitPosition) {
+      bot.position.y = hit.hitPosition.y
+      bot.spawnPosition.copy(bot.position)
+      mesh.position.y = bot.position.y
+    }
+  }
+
+  private editorResetPose(): void {
+    const bot = this.trainingBots[0]
+    const mesh = this.botRenderers[0]?.getRoot()
+    const home = bot?.editorHome
+    if (!bot || !mesh || !home) return
+    bot.position.set(home.x, home.y, home.z)
+    bot.spawnPosition.copy(bot.position)
+    bot.yaw = home.yaw
+    bot.visualScale = home.scale
+    bot.lookAtPlayer = true
+    mesh.position.copy(bot.position)
+    mesh.rotation.set(0, bot.yaw, 0)
+    mesh.scale.setScalar(bot.visualScale)
+    this.transformControls?.attach(mesh)
+  }
+
+  private editorEnableFpsLook(): void {
+    this.editorFpsLook = true
+    if (this.transformControls) {
+      this.transformControls.enabled = false
+      this.transformControls.visible = false
+    }
+    this.inputManager.gameplayEnabled = true
+    setTimeout(() => this.inputManager.onLock(), 40)
+    this.editorMenu?.refresh()
+  }
+
+  private editorEnableEditCursor(): void {
+    this.editorFpsLook = false
+    this.inputManager.gameplayEnabled = false
+    this.inputManager.unlock()
+    if (this.transformControls && this.editorTool !== 'select') {
+      this.transformControls.enabled = true
+      this.transformControls.visible = true
+    }
+    this.editorMenu?.refresh()
+  }
+
+  private teardownEditorTools(): void {
+    if (this.boundEditorKeys) {
+      window.removeEventListener('keydown', this.boundEditorKeys)
+      this.boundEditorKeys = null
+    }
+    if (this.transformControls) {
+      this.transformControls.detach()
+      this.transformControls.removeFromParent()
+      this.transformControls.dispose()
+      this.transformControls = null
+    }
+    this.editorMenu?.hide()
+    this.editorActive = false
+    this.editorDragging = false
+    TrainingBot.showHitboxes = false
   }
 
   /** Load world + player; bots spawn when match starts from menu */
@@ -86,6 +467,7 @@ export class Game implements IUpdatable {
     this.combatLive = false
     this.lockdownTimer = this.lockdownDuration
     this.inputManager.gameplayEnabled = true
+    this.applyMapMoveSpeed(this.activeMapId)
 
     // Assign unique spawns: player first, then bots (never same point)
     const assignment = this.assignMatchSpawns(config.botCount)
@@ -114,6 +496,120 @@ export class Game implements IUpdatable {
     setTimeout(() => this.inputManager.onLock(), 80)
   }
 
+  /** Load / swap map before match start (Pool Day or Dust II). */
+  public async ensureMap(mapId: MapId): Promise<void> {
+    if (this.activeMapId === mapId && this.activeMapMesh) return
+
+    const def = getMapDefinition(mapId)
+    // Force reload Dust II so earlier white-bleach materials aren't reused
+    const mapMesh = await this.globalLoadingManager.loadMapMesh(
+      def.meshKey,
+      def.glbPath,
+      def.usePoolLights,
+      def.id === 'de_dust2'
+    )
+
+    if (def.normalizeToSize) {
+      mapMesh.normalizeForPlay(def.normalizeToSize)
+    }
+
+    this.unloadActiveMap()
+
+    mapMesh.init()
+    const extras: THREE.Object3D[] = []
+    const actorStart = this.actors.length
+    mapMesh.addPhysics(this, { usePoolLights: def.usePoolLights, extras })
+    this.mapColliders = this.actors.slice(actorStart)
+    this.mapExtras = extras
+    this.activeMapMesh = mapMesh
+    this.addToRenderer(mapMesh.mesh)
+    mapMesh.mesh.visible = true
+
+    if (def.useDebugCubes) {
+      this.spawnDebugCubes()
+    }
+
+    const box = mapMesh.getWorldBounds()
+    console.log('[map]', mapId, {
+      min: box.min.toArray(),
+      max: box.max.toArray(),
+      size: box.getSize(new THREE.Vector3()).toArray(),
+      colliders: this.mapColliders.length,
+    })
+
+    if (def.id === 'de_dust2' || def.spawns.length <= 1) {
+      this.activeSpawns = spawnsFromBounds(
+        { x: box.min.x, y: box.min.y, z: box.min.z },
+        { x: box.max.x, y: box.max.y, z: box.max.z },
+        2.2
+      )
+      // Prefer a spawn near CT/T mid — center of normalized map
+      const mid = this.activeSpawns[0]
+      if (mid) {
+        // Drop onto ground via short physics ray once world exists
+        const from = new Vector3D(mid.x, box.max.y + 20, mid.z)
+        const to = new Vector3D(mid.x, box.min.y - 5, mid.z)
+        const hit = this.physics.raycast(from, to)
+        if (hit.hasHit && hit.hitPosition) {
+          mid.y = hit.hitPosition.y + 2.0
+          for (const s of this.activeSpawns) {
+            if (s === mid) continue
+            const h2 = this.physics.raycast(
+              new Vector3D(s.x, box.max.y + 20, s.z),
+              new Vector3D(s.x, box.min.y - 5, s.z)
+            )
+            if (h2.hasHit && h2.hitPosition) s.y = h2.hitPosition.y + 2.0
+          }
+        }
+      }
+    } else {
+      this.activeSpawns = def.spawns
+    }
+
+    this.activeMapId = mapId
+    this.mapName = mapId
+    this.applyMapMoveSpeed(mapId)
+  }
+
+  private applyMapMoveSpeed(mapId: MapId): void {
+    const scale = getMapDefinition(mapId).moveSpeedScale ?? 1
+    this.currentPlayer?.player.setMapSpeedScale(scale)
+  }
+
+  private unloadActiveMap(): void {
+    for (const actor of this.mapColliders) {
+      if (actor.body) this.physics.remove(actor.body)
+      this.actors = this.actors.filter((a) => a !== actor)
+    }
+    this.mapColliders = []
+
+    for (const obj of this.mapExtras) {
+      this.renderer?.scene.remove(obj)
+    }
+    this.mapExtras = []
+
+    for (const mesh of this.debugPropMeshes) {
+      this.renderer?.scene.remove(mesh)
+    }
+    this.debugPropMeshes = []
+
+    if (this.activeMapMesh?.mesh) {
+      this.renderer?.scene.remove(this.activeMapMesh.mesh)
+    }
+    this.activeMapMesh = null
+  }
+
+  private spawnDebugCubes(): void {
+    for (let j = 1; j < 10; j++) {
+      const cube = new CubeRenderer(new Vector3D(10 + j * 2.5, 5, 46), new Vector3D(0, 0, 0), new Vector3D(2, 2, 2), 25)
+      this.actors.push(cube)
+      this.mapColliders.push(cube)
+      cube.addToWorld(this.physics)
+      this.addToRenderer(cube.mesh)
+      this.debugPropMeshes.push(cube.mesh)
+    }
+  }
+
   public pauseMatch(): void {
     if (!this.matchStarted || this.matchPaused) return
     this.matchPaused = true
@@ -132,6 +628,7 @@ export class Game implements IUpdatable {
   }
 
   public returnToMenu(): void {
+    this.teardownEditorTools()
     this.matchPaused = false
     this.matchStarted = false
     this.combatLive = false
@@ -154,19 +651,20 @@ export class Game implements IUpdatable {
    * Player gets one; bots get others — never the same coordinate.
    */
   private assignMatchSpawns(botCount: number): { playerPos: Vector3D; botPositions: Vector3D[] } {
-    const indices = shuffleInPlace([...MATCH_SPAWNS.keys()])
-    const playerIdx = indices[0]
-    const playerPos = spawnToPlayerVector(MATCH_SPAWNS[playerIdx])
+    const spawns = this.activeSpawns
+    const indices = shuffleInPlace([...spawns.keys()])
+    const playerIdx = indices[0] ?? 0
+    const playerPos = spawnToPlayerVector(spawns[playerIdx] ?? { x: 0, y: 2, z: 0 })
 
     const used = new Set<number>([playerIdx])
     const botPositions: Vector3D[] = []
-    const need = Math.min(botCount, MATCH_SPAWNS.length - 1)
+    const need = Math.min(botCount, Math.max(0, spawns.length - 1))
 
     for (const idx of indices) {
       if (botPositions.length >= need) break
       if (used.has(idx)) continue
       used.add(idx)
-      botPositions.push(spawnToBotVector(MATCH_SPAWNS[idx]))
+      botPositions.push(spawnToBotVector(spawns[idx]))
     }
     return { playerPos, botPositions }
   }
@@ -194,8 +692,8 @@ export class Game implements IUpdatable {
     type Ranked = { idx: number; score: number }
     const ranked: Ranked[] = []
 
-    for (let i = 0; i < MATCH_SPAWNS.length; i++) {
-      const s = MATCH_SPAWNS[i]
+    for (let i = 0; i < this.activeSpawns.length; i++) {
+      const s = this.activeSpawns[i]
       let nearest = Infinity
       for (const o of occupied) {
         nearest = Math.min(nearest, flatDistXZ(s.x, s.z, o.x, o.z))
@@ -209,11 +707,11 @@ export class Game implements IUpdatable {
 
     ranked.sort((a, b) => b.score - a.score)
     const clear = ranked.find((r) => {
-      const s = MATCH_SPAWNS[r.idx]
+      const s = this.activeSpawns[r.idx]
       return occupied.every((o) => flatDistXZ(s.x, s.z, o.x, o.z) >= minClear)
     })
     const pick = clear ?? ranked[0]
-    const s = MATCH_SPAWNS[pick.idx]
+    const s = this.activeSpawns[pick?.idx ?? 0] ?? { x: 0, y: 2, z: 0 }
     return forBot ? spawnToBotVector(s) : spawnToPlayerVector(s)
   }
 
@@ -378,21 +876,25 @@ export class Game implements IUpdatable {
 
   public setPhysicsObjects(): void {
     this.actors = new Array<CubeCollider>()
-
-    for (let j = 1; j < 10; j++) {
-      const cube = new CubeRenderer(new Vector3D(10 + j * 2.5, 5, 46), new Vector3D(0, 0, 0), new Vector3D(2, 2, 2), 25)
-      this.actors.push(cube)
-      cube.addToWorld(this.physics)
-      this.addToRenderer(cube.mesh)
-    }
-
-    const mapMesh = this.globalLoadingManager.loadableMeshs.get('Map') as MapMesh | undefined
+    // Pool Day is already loaded at boot — install it synchronously
+    const def = getMapDefinition('pool_day')
+    const mapMesh = this.globalLoadingManager.loadableMeshs.get(def.meshKey) as MapMesh | undefined
     if (!mapMesh) {
       throw new Error('Map mesh failed to load. Check that pool_day_baked.glb exists in public/.')
     }
     mapMesh.init()
-    mapMesh.addPhysics(this)
+    const extras: THREE.Object3D[] = []
+    const actorStart = this.actors.length
+    mapMesh.addPhysics(this, { usePoolLights: true, extras })
+    this.mapColliders = this.actors.slice(actorStart)
+    this.mapExtras = extras
+    this.activeMapMesh = mapMesh
+    this.activeMapId = 'pool_day'
+    this.mapName = 'pool_day'
+    this.activeSpawns = def.spawns
     this.addToRenderer(mapMesh.mesh)
+    this.spawnDebugCubes()
+    this.applyMapMoveSpeed('pool_day')
   }
   public static getInstance(): Game {
     if (!Game.game) {
@@ -464,6 +966,8 @@ export class Game implements IUpdatable {
     }
 
     this.inputManager.update(dt)
+
+    if (this.editorActive) this.editorMenu?.refresh()
 
     for (let i = 0; i < this.actors.length; i++) {
       this.actors[i].update(dt)

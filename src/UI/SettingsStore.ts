@@ -26,6 +26,8 @@ export interface PlayerSettings {
   playerName: string
   crosshair: CrosshairSettings
   keybinds: KeybindMap
+  /** CS-style: mouse wheel up/down also jumps */
+  jumpWithScrollWheel: boolean
 }
 
 export const DEFAULT_CROSSHAIR: CrosshairSettings = {
@@ -77,6 +79,7 @@ export function loadSettings(): PlayerSettings {
       playerName: typeof parsed.playerName === 'string' ? parsed.playerName.slice(0, 24) : '',
       crosshair: { ...DEFAULT_CROSSHAIR, ...(parsed.crosshair || {}) },
       keybinds: { ...DEFAULT_KEYBINDS, ...(parsed.keybinds || {}) },
+      jumpWithScrollWheel: parsed.jumpWithScrollWheel !== false,
     }
   } catch {
     return defaultSettings()
@@ -92,6 +95,7 @@ export function defaultSettings(): PlayerSettings {
     playerName: '',
     crosshair: { ...DEFAULT_CROSSHAIR },
     keybinds: { ...DEFAULT_KEYBINDS },
+    jumpWithScrollWheel: true,
   }
 }
 

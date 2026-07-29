@@ -20,13 +20,18 @@ export class InputManager implements IUpdatable {
   public boundOnPointerlockChange: (evt: any) => void
   public boundOnPointerlockError: (evt: any) => void
   public boundOnPointerlock: (evt: any) => void
+  public boundOnWheel: (evt: WheelEvent) => void
   private isLocked: boolean = false
   /** When false, ignore gameplay input / pointer lock (menu open) */
   public gameplayEnabled = false
+  /** CS-style scroll-wheel jump (mwheelup + mwheeldown) */
+  public jumpWithScrollWheel = true
 
   private playerWrapper!: PlayerWrapper
   private footstepTimer = 0
   private emptyClickCooldown = 0
+  /** Scroll ticks queued so wheel jumps apply on the next input update */
+  private pendingScrollJumps = 0
   /** event.key (lower) or mouseN → Key */
   private codeToAction = new Map<string, Key>()
 
@@ -47,6 +52,7 @@ export class InputManager implements IUpdatable {
     this.boundOnPointerlockChange = (evt) => this.onPointerlockChange(evt)
     this.boundOnPointerlockError = (evt) => this.onPointerlockError(evt)
     this.boundOnPointerlock = (evt) => this.onLock(evt)
+    this.boundOnWheel = (evt) => this.onWheel(evt)
 
     document.body.ownerDocument.addEventListener('keydown', this.boundOnKeyDown, false)
     document.body.ownerDocument.addEventListener('keyup', this.boundOnKeyUp, false)
@@ -54,6 +60,7 @@ export class InputManager implements IUpdatable {
     document.body.ownerDocument.addEventListener('mouseup', this.boundOnMouseUp, false)
 
     document.body.ownerDocument.addEventListener('mousemove', this.boundOnMouseMove, false)
+    document.body.ownerDocument.addEventListener('wheel', this.boundOnWheel, { passive: false, capture: true })
     document.body.ownerDocument.addEventListener('pointerlockchange', this.boundOnPointerlockChange, false)
     document.body.ownerDocument.addEventListener('pointerlockerror', this.boundOnPointerlockError, false)
     document.body.ownerDocument.addEventListener('click', this.boundOnPointerlock, false)
@@ -67,6 +74,10 @@ export class InputManager implements IUpdatable {
       if (!code) continue
       this.codeToAction.set(code.toLowerCase(), action as Key)
     }
+  }
+
+  public setJumpWithScrollWheel(enabled: boolean): void {
+    this.jumpWithScrollWheel = !!enabled
   }
 
   private normalizeKey(event: KeyboardEvent): string {
@@ -147,11 +158,14 @@ export class InputManager implements IUpdatable {
     player.setCrouching(!!this.keys.get(Key.Crouch)?.isPressed)
     this.updateFootsteps(dt)
 
-    if (this.keys.get(Key.Jump)?.isPressed) {
-      if (playerController.jump()) {
-        playerRenderer!.handleJump()
-        void Game.getInstance().audioManager.playJump()
-      }
+    // One jump per key press — no hold-space auto-bhop
+    if (this.keys.get(Key.Jump)?.justPressed) {
+      this.tryJump()
+    }
+    // Scroll-wheel jump (mwheelup / mwheeldown)
+    while (this.pendingScrollJumps > 0) {
+      this.pendingScrollJumps--
+      if (this.tryJump()) break
     }
     if (this.keys.get(Key.Forward)?.isPressed) {
       playerController.moveForward(0, dt)
@@ -275,6 +289,17 @@ export class InputManager implements IUpdatable {
       return
     }
 
+    // Slash-command bar (works from menu or in-match)
+    if (event.key === '/' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const target = event.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (Game.getInstance().isCommandConsoleOpen()) return
+      event.preventDefault()
+      Game.getInstance().openCommandConsole()
+      return
+    }
+
     if (!this.gameplayEnabled) return
     const code = this.normalizeKey(event)
     const action = this.codeToAction.get(code)
@@ -301,10 +326,12 @@ export class InputManager implements IUpdatable {
   clickedOnHud(event: MouseEvent): boolean {
     const menu = document.getElementById('kos-menu')
     if (menu && !menu.classList.contains('is-hidden')) return true
+    if (Game.getInstance().isCommandConsoleOpen()) return true
     const target = event.target as HTMLElement
+    if (target?.closest?.('#kos-editor')) return true
     if (target.nodeName === 'BODY' || target.nodeName === 'CANVAS') return false
     // Only treat interactive HUD chrome as blocking (pause button / panel)
-    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu')
+    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu, #kos-cmd, #kos-editor')
   }
 
   onMouseDown(event: MouseEvent): void {
@@ -327,6 +354,29 @@ export class InputManager implements IUpdatable {
       if (event.button === 0) this.keys.get(Key.Left_Click)?.onKeyUp()
       if (event.button === 2) this.keys.get(Key.Right_Click)?.onKeyUp()
     }
+  }
+
+  private onWheel(event: WheelEvent): void {
+    if (!this.jumpWithScrollWheel) return
+    if (!this.gameplayEnabled) return
+    if (!this.playerWrapper?.player || this.playerWrapper.player.isDead) return
+    if (Game.getInstance().matchStarted && !Game.getInstance().isCombatLive()) return
+    // Any scroll tick (up or down) = one jump attempt
+    if (event.deltaY === 0 && event.deltaX === 0) return
+    event.preventDefault()
+    this.pendingScrollJumps = Math.min(this.pendingScrollJumps + 1, 3)
+  }
+
+  private tryJump(): boolean {
+    if (!this.playerWrapper) return false
+    const playerController = this.playerWrapper.controller
+    const playerRenderer = this.playerWrapper.renderer as PlayerRenderer
+    if (playerController.jump()) {
+      playerRenderer?.handleJump()
+      void Game.getInstance().audioManager.playJump()
+      return true
+    }
+    return false
   }
 
   setCurrentPlayer(playerWrapper: PlayerWrapper): void {

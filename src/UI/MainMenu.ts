@@ -1,4 +1,5 @@
 import type { BotDifficulty } from '../Core/TrainingBot'
+import { DEFAULT_MAP_ID, getMapDefinition, type MapId } from '../Core/MapCatalog'
 import {
   DEFAULT_CROSSHAIR,
   DEFAULT_KEYBINDS,
@@ -19,6 +20,8 @@ export type BotMatchConfig = {
   playerName: string
   /** Instantly refill mag to full after each bot kill */
   refillAmmoOnKill: boolean
+  /** Selected arena */
+  mapId: MapId
 }
 
 type MenuCallbacks = {
@@ -39,6 +42,7 @@ export class MainMenu {
   private listeningKey: Key | null = null
   private selectedDifficulty: BotDifficulty = 'medium'
   private selectedBotCount = 5
+  private selectedMapId: MapId = DEFAULT_MAP_ID
   private currentScreen: 'loading' | 'main' | 'bots' | 'settings' = 'loading'
 
   constructor(callbacks: MenuCallbacks) {
@@ -187,7 +191,14 @@ export class MainMenu {
             <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
           </div>
           <h2 class="kos-heading">Play with Bots</h2>
-          <p class="kos-hint">Pick difficulty and how many bots spawn around the map.</p>
+          <p class="kos-hint">Pick a map, difficulty, and how many bots spawn.</p>
+
+          <div class="kos-section-label">Map</div>
+          <div class="kos-chip-row" id="kos-map">
+            <button type="button" class="kos-chip is-on" data-map="pool_day">Pool Day</button>
+            <button type="button" class="kos-chip" data-map="de_dust2">Dust II</button>
+          </div>
+          <p class="kos-hint tight-left" id="kos-map-hint">Classic pool arena — bots ready.</p>
 
           <div class="kos-section-label">Difficulty</div>
           <div class="kos-chip-row" id="kos-diff">
@@ -200,7 +211,7 @@ export class MainMenu {
             <span>How many bots</span>
             <input id="kos-bot-count" type="number" min="0" max="10" step="1" value="5" inputmode="numeric" />
           </label>
-          <p class="kos-hint tight-left">Type any amount (0–10).</p>
+          <p class="kos-hint tight-left">Type any amount (0–10). Dust II starts at 0 while we tune it.</p>
 
           <label class="kos-check kos-match-opt">
             <input id="kos-refill-kill" type="checkbox" />
@@ -240,6 +251,13 @@ export class MainMenu {
 
           <div class="kos-tab-panel" data-panel="keybinds">
             <p class="kos-hint">Click a bind, then press a new key. Esc cancels.</p>
+            <label class="kos-check kos-match-opt">
+              <input id="kos-jump-wheel" type="checkbox" />
+              <span>
+                <strong>Jump with mouse wheel</strong>
+                <em>Scroll up or down to jump (CS-style)</em>
+              </span>
+            </label>
             <div class="kos-bind-list" id="kos-bind-list"></div>
             <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-binds">Reset Keybinds</button>
           </div>
@@ -255,6 +273,15 @@ export class MainMenu {
       this.settings.playerName = nameInput.value.trim().slice(0, 24)
       this.persist()
     })
+
+    const jumpWheel = this.root.querySelector('#kos-jump-wheel') as HTMLInputElement | null
+    if (jumpWheel) {
+      jumpWheel.checked = !!this.settings.jumpWithScrollWheel
+      jumpWheel.addEventListener('change', () => {
+        this.settings.jumpWithScrollWheel = jumpWheel.checked
+        this.persist()
+      })
+    }
 
     this.root.addEventListener('dragstart', (e) => {
       if ((e.target as HTMLElement).closest('.kos-bg')) e.preventDefault()
@@ -273,7 +300,7 @@ export class MainMenu {
     )
 
     this.root.addEventListener('click', (e) => {
-      const t = (e.target as HTMLElement).closest('[data-action], [data-diff], [data-tab]') as HTMLElement | null
+      const t = (e.target as HTMLElement).closest('[data-action], [data-diff], [data-tab], [data-map]') as HTMLElement | null
       if (!t) return
 
       const action = t.getAttribute('data-action')
@@ -294,6 +321,12 @@ export class MainMenu {
         this.renderKeybindList()
         this.persist()
         this.callbacks.onSettingsChanged(this.settings)
+      }
+
+      const mapId = t.getAttribute('data-map') as MapId | null
+      if (mapId === 'pool_day' || mapId === 'de_dust2') {
+        this.selectMap(mapId)
+        this.root.querySelectorAll('[data-map]').forEach((el) => el.classList.toggle('is-on', el === t))
       }
 
       const diff = t.getAttribute('data-diff') as BotDifficulty | null
@@ -335,10 +368,25 @@ export class MainMenu {
     })
   }
 
+  private selectMap(mapId: MapId): void {
+    this.selectedMapId = mapId
+    const def = getMapDefinition(mapId)
+    this.selectedBotCount = def.defaultBotCount
+    const botCountInput = this.root.querySelector('#kos-bot-count') as HTMLInputElement | null
+    if (botCountInput) botCountInput.value = String(this.selectedBotCount)
+    const hint = this.root.querySelector('#kos-map-hint')
+    if (hint) {
+      hint.textContent =
+        mapId === 'de_dust2'
+          ? 'Dust II — no bots yet while we tune collision & spawns.'
+          : 'Classic pool arena — bots ready.'
+    }
+  }
+
   private readBotCount(): number {
     const input = this.root.querySelector('#kos-bot-count') as HTMLInputElement | null
     const raw = Number(input?.value)
-    if (!Number.isFinite(raw)) return 16
+    if (!Number.isFinite(raw)) return getMapDefinition(this.selectedMapId).defaultBotCount
     return Math.max(0, Math.min(10, Math.round(raw)))
   }
 
@@ -354,6 +402,7 @@ export class MainMenu {
       botCount: this.selectedBotCount,
       playerName: this.settings.playerName,
       refillAmmoOnKill: refill,
+      mapId: this.selectedMapId,
     })
   }
 

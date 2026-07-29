@@ -33,6 +33,10 @@ export class Physics implements IUpdatable {
     this.world.addRigidBody(body)
   }
 
+  remove(body: Ammo.btRigidBody) {
+    this.world.removeRigidBody(body)
+  }
+
   public raycast(from: Vector3D, to: Vector3D): HitscanResult {
     const fromAmmo = from.toAmmo()
     const toAmmo = to.toAmmo()
