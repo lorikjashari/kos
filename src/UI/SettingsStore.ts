@@ -38,6 +38,58 @@ export interface PlayerSettings {
   musicVolume: number
   /** fps_max — 0 = unlimited */
   fpsMax: number
+  /** Internal render resolution (aspect from w/h). */
+  resolutionWidth: number
+  resolutionHeight: number
+}
+
+export type AspectGroup = '4:3' | '16:9' | '16:10'
+
+export type ResolutionPreset = {
+  aspect: AspectGroup
+  width: number
+  height: number
+  recommended?: boolean
+}
+
+/** CS-style resolution list for the Video settings tab. */
+export const RESOLUTION_PRESETS: ResolutionPreset[] = [
+  // 4:3
+  { aspect: '4:3', width: 640, height: 480 },
+  { aspect: '4:3', width: 800, height: 600 },
+  { aspect: '4:3', width: 960, height: 720 },
+  { aspect: '4:3', width: 1024, height: 768 },
+  { aspect: '4:3', width: 1152, height: 864 },
+  { aspect: '4:3', width: 1280, height: 960, recommended: true },
+  { aspect: '4:3', width: 1400, height: 1050 },
+  { aspect: '4:3', width: 1440, height: 1080, recommended: true },
+  // 16:9
+  { aspect: '16:9', width: 1024, height: 576 },
+  { aspect: '16:9', width: 1152, height: 648 },
+  { aspect: '16:9', width: 1280, height: 720 },
+  { aspect: '16:9', width: 1360, height: 768 },
+  { aspect: '16:9', width: 1366, height: 768 },
+  { aspect: '16:9', width: 1600, height: 900 },
+  { aspect: '16:9', width: 1920, height: 1080, recommended: true },
+  // 16:10
+  { aspect: '16:10', width: 1024, height: 640 },
+  { aspect: '16:10', width: 1280, height: 800 },
+  { aspect: '16:10', width: 1440, height: 900, recommended: true },
+  { aspect: '16:10', width: 1680, height: 1050, recommended: true },
+]
+
+export function resolutionKey(w: number, h: number): string {
+  return `${w}x${h}`
+}
+
+export function findResolutionPreset(w: number, h: number): ResolutionPreset | undefined {
+  return RESOLUTION_PRESETS.find((p) => p.width === w && p.height === h)
+}
+
+export function normalizeResolution(w: number, h: number): { width: number; height: number } {
+  const hit = findResolutionPreset(w, h)
+  if (hit) return { width: hit.width, height: hit.height }
+  return { width: 1280, height: 960 }
 }
 
 /** Clamp / sanitize mouse sensitivity (CS-style range). */
@@ -101,6 +153,10 @@ export function loadSettings(): PlayerSettings {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return defaultSettings()
     const parsed = JSON.parse(raw) as Partial<PlayerSettings>
+    const res = normalizeResolution(
+      typeof parsed.resolutionWidth === 'number' ? parsed.resolutionWidth : 1280,
+      typeof parsed.resolutionHeight === 'number' ? parsed.resolutionHeight : 960
+    )
     return {
       playerName: typeof parsed.playerName === 'string' ? parsed.playerName.slice(0, 24) : '',
       crosshair: { ...DEFAULT_CROSSHAIR, ...(parsed.crosshair || {}) },
@@ -120,6 +176,8 @@ export function loadSettings(): PlayerSettings {
         typeof parsed.fpsMax === 'number' && Number.isFinite(parsed.fpsMax)
           ? Math.max(0, Math.min(999, Math.floor(parsed.fpsMax)))
           : 0,
+      resolutionWidth: res.width,
+      resolutionHeight: res.height,
     }
   } catch {
     return defaultSettings()
@@ -141,6 +199,8 @@ export function defaultSettings(): PlayerSettings {
     volume: 1,
     musicVolume: 0.38,
     fpsMax: 0,
+    resolutionWidth: 1280,
+    resolutionHeight: 960,
   }
 }
 

@@ -42,6 +42,7 @@ import {
   clampVolume,
   clampZoomSensitivity,
   loadSettings,
+  normalizeResolution,
   saveSettings,
 } from './UI/SettingsStore'
 import { CameraManager } from './View/CameraManager/CameraManager'
@@ -228,6 +229,13 @@ export class Game implements IUpdatable {
     this.audioManager.setSfxVolume(clampVolume(s.volume))
     this.audioManager.setMusicVolume(clampVolume(s.musicVolume))
     this.setFpsCap(s.fpsMax)
+    this.applyResolution(s.resolutionWidth, s.resolutionHeight)
+  }
+
+  /** Apply internal render resolution from settings (persists when saved via menu). */
+  public applyResolution(width: number, height: number): void {
+    const normalized = normalizeResolution(width, height)
+    this.renderer?.setGameResolution(normalized.width, normalized.height)
   }
 
   private persistSettingsPatch(patch: Partial<PlayerSettings>): void {

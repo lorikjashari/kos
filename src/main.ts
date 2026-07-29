@@ -22,6 +22,7 @@ async function main() {
       game.inputManager.applyKeybinds(settings.keybinds)
       game.inputManager.setJumpWithScrollWheel(settings.jumpWithScrollWheel)
       game.attachCrosshair(menu.getGameCrosshair(), settings)
+      game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)
     },
   })
 
@@ -54,6 +55,7 @@ async function main() {
 
     menu.setLoadingProgress('Preparing world…', 90)
     game.onLoad()
+    game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)
     game.startUpdateLoop()
 
     menu.setLoadingProgress('Warming combat…', 96)

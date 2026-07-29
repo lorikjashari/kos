@@ -6,7 +6,10 @@ import {
   formatKeyLabel,
   loadSettings,
   REBINDABLE_ACTIONS,
+  RESOLUTION_PRESETS,
+  resolutionKey,
   saveSettings,
+  type AspectGroup,
   type CrosshairSettings,
   type PlayerSettings,
 } from './SettingsStore'
@@ -113,6 +116,7 @@ export class MainMenu {
       this.renderKeybindList()
       this.syncCrosshairControls()
       this.syncSensitivityControl()
+      this.renderResolutionGroups()
       this.crosshairPreview?.draw()
     }
   }
@@ -242,11 +246,17 @@ export class MainMenu {
           <h2 class="kos-heading">Settings</h2>
 
           <div class="kos-tabs" role="tablist">
-            <button type="button" class="kos-tab is-on" data-tab="crosshair">Crosshair</button>
+            <button type="button" class="kos-tab is-on" data-tab="video">Video</button>
+            <button type="button" class="kos-tab" data-tab="crosshair">Crosshair</button>
             <button type="button" class="kos-tab" data-tab="keybinds">Keybinds</button>
           </div>
 
-          <div class="kos-tab-panel is-on" data-panel="crosshair">
+          <div class="kos-tab-panel is-on" data-panel="video">
+            <p class="kos-hint">Render resolution — stretched to fill your screen. Starred options are recommended.</p>
+            <div class="kos-res-groups" id="kos-res-groups"></div>
+          </div>
+
+          <div class="kos-tab-panel" data-panel="crosshair">
             <div class="kos-xhair-preview-wrap">
               <canvas id="kos-xhair-preview" width="120" height="120"></canvas>
               <p class="kos-hint tight">Live preview</p>
@@ -314,7 +324,7 @@ export class MainMenu {
       'pointerenter',
       (e) => {
         const t = (e.target as HTMLElement).closest(
-          'button.kos-btn, button.kos-chip, button.kos-tab, button.kos-back, button.kos-bind'
+          'button.kos-btn, button.kos-chip, button.kos-tab, button.kos-back, button.kos-bind, button.kos-res'
         ) as HTMLButtonElement | null
         if (!t || t.disabled) return
         this.playHover()
@@ -323,7 +333,9 @@ export class MainMenu {
     )
 
     this.root.addEventListener('click', (e) => {
-      const t = (e.target as HTMLElement).closest('[data-action], [data-diff], [data-tab], [data-map]') as HTMLElement | null
+      const t = (e.target as HTMLElement).closest(
+        '[data-action], [data-diff], [data-tab], [data-map], [data-res]'
+      ) as HTMLElement | null
       if (!t) return
 
       const action = t.getAttribute('data-action')
@@ -344,6 +356,19 @@ export class MainMenu {
         this.renderKeybindList()
         this.persist()
         this.callbacks.onSettingsChanged(this.settings)
+      }
+
+      const res = t.getAttribute('data-res')
+      if (res) {
+        const [ws, hs] = res.split('x')
+        const w = Number(ws)
+        const h = Number(hs)
+        if (Number.isFinite(w) && Number.isFinite(h)) {
+          this.settings.resolutionWidth = w
+          this.settings.resolutionHeight = h
+          this.renderResolutionGroups()
+          this.persist()
+        }
       }
 
       const mapId = t.getAttribute('data-map') as MapId | null
@@ -499,6 +524,31 @@ export class MainMenu {
     if (!sensInput) return
     sensInput.value = String(this.settings.sensitivity)
     if (sensVal) sensVal.textContent = String(this.settings.sensitivity)
+  }
+
+  private renderResolutionGroups(): void {
+    const host = this.root.querySelector('#kos-res-groups')
+    if (!host) return
+    const current = resolutionKey(this.settings.resolutionWidth, this.settings.resolutionHeight)
+    const aspects: AspectGroup[] = ['4:3', '16:9', '16:10']
+    host.innerHTML = aspects
+      .map((aspect) => {
+        const presets = RESOLUTION_PRESETS.filter((p) => p.aspect === aspect)
+        const chips = presets
+          .map((p) => {
+            const key = resolutionKey(p.width, p.height)
+            const on = key === current ? ' is-on' : ''
+            const star = p.recommended ? ' <span class="kos-res-star" title="Recommended">★</span>' : ''
+            return `<button type="button" class="kos-res${on}" data-res="${key}">${p.width}×${p.height}${star}</button>`
+          })
+          .join('')
+        return `
+          <div class="kos-res-group">
+            <div class="kos-res-aspect">${aspect}</div>
+            <div class="kos-res-grid">${chips}</div>
+          </div>`
+      })
+      .join('')
   }
 
   private syncCrosshairControls(): void {
@@ -760,7 +810,7 @@ export class MainMenu {
         scrollbar-color: rgba(26, 95, 255, 0.25) transparent;
         animation: kos-slide-up 420ms var(--kos-ease) both;
       }
-      .kos-shell-settings { width: min(560px, 94vw); }
+      .kos-shell-settings { width: min(640px, 94vw); }
       .kos-sub-brand { margin-bottom: 4px; }
       .kos-logo-sm {
         width: min(120px, 32vw);
@@ -1006,6 +1056,52 @@ export class MainMenu {
       }
       .kos-tab-panel { display: none; width: 100%; animation: kos-fade-in 280ms ease both; }
       .kos-tab-panel.is-on { display: block; }
+
+      .kos-res-groups {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .kos-res-aspect {
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--kos-blue-deep);
+        margin-bottom: 8px;
+      }
+      .kos-res-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .kos-res {
+        appearance: none;
+        border: 1px solid rgba(26, 95, 255, 0.16);
+        background: rgba(255, 255, 255, 0.85);
+        color: var(--kos-ink);
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        padding: 9px 12px;
+        cursor: pointer;
+        transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+      }
+      .kos-res:hover {
+        border-color: rgba(26, 95, 255, 0.45);
+        color: var(--kos-blue-deep);
+      }
+      .kos-res.is-on {
+        background: linear-gradient(180deg, rgba(26, 95, 255, 0.12), rgba(26, 95, 255, 0.06));
+        border-color: var(--kos-blue);
+        color: var(--kos-blue-deep);
+        box-shadow: inset 0 0 0 1px rgba(26, 95, 255, 0.15);
+      }
+      .kos-res-star {
+        color: #c9a227;
+        margin-left: 2px;
+      }
 
       .kos-xhair-preview-wrap {
         display: flex; flex-direction: column; align-items: center;

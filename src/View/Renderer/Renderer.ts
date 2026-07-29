@@ -59,10 +59,12 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.bloodManager = new BloodManager(this.scene)
     this.debugUI = new DebugUI()
     this.debugUI.addMonitor(this.info.render, 'calls')
-    this.setSize(window.innerWidth, window.innerHeight)
+    this.gameResW = 1280
+    this.gameResH = 960
     this.setRenderingConfig()
     this.onWindowResize = this.onWindowResize.bind(this)
     this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
+    this.applyGameResolution()
     this.hud = new GameHUD()
     this.fpsUpdater = new PeriodicUpdater(
       1000,
@@ -73,6 +75,53 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     )
     window.addEventListener('resize', this.onWindowResize, false)
     document.body.appendChild(this.domElement)
+    this.styleCanvas()
+  }
+
+  private gameResW = 1280
+  private gameResH = 960
+
+  /** CS-style internal resolution — stretched to fill the window. */
+  public setGameResolution(width: number, height: number): void {
+    const w = Math.max(320, Math.floor(width))
+    const h = Math.max(240, Math.floor(height))
+    if (w === this.gameResW && h === this.gameResH) {
+      this.applyGameResolution()
+      return
+    }
+    this.gameResW = w
+    this.gameResH = h
+    this.applyGameResolution()
+  }
+
+  public getGameResolution(): { width: number; height: number } {
+    return { width: this.gameResW, height: this.gameResH }
+  }
+
+  private styleCanvas(): void {
+    const canvas = this.domElement
+    canvas.style.position = 'fixed'
+    canvas.style.left = '0'
+    canvas.style.top = '0'
+    canvas.style.width = '100vw'
+    canvas.style.height = '100vh'
+    canvas.style.display = 'block'
+    canvas.style.objectFit = 'fill'
+    canvas.style.zIndex = '0'
+  }
+
+  private applyGameResolution(): void {
+    const w = this.gameResW
+    const h = this.gameResH
+    this.setSize(w, h, false)
+    this.composer?.setSize(w, h)
+    this.styleCanvas()
+    if (this.camera instanceof THREE.PerspectiveCamera) {
+      this.camera.aspect = w / h
+      this.camera.updateProjectionMatrix()
+    }
+    this.viewmodelRenderer.camera.aspect = w / h
+    this.viewmodelRenderer.camera.updateProjectionMatrix()
   }
 
   private createDebugCamera() {
@@ -116,11 +165,11 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   private addPostProcess() {
     this.composer = new EffectComposer(this)
     const postProcessFolder = this.debugUI.addFolder({ title: 'Post Process' })
-    this.composer.setSize(window.innerWidth, window.innerHeight)
+    this.composer.setSize(this.gameResW, this.gameResH)
     this.composer.addPass(new RenderPass(this.scene, this.camera))
 
     const bloomFolder = postProcessFolder.addFolder({ title: 'Bloom' })
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85)
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(this.gameResW, this.gameResH), 1.5, 0.4, 0.85)
     bloomPass.threshold = 0.88
     bloomPass.strength = 0.14
     bloomPass.radius = 0.3
@@ -233,19 +282,10 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     }
   }
   private onWindowResize(): void {
-    if (this.camera instanceof THREE.PerspectiveCamera) {
-      const width = window.innerWidth
-      const height = window.innerHeight
-
-      this.camera.aspect = width / height
-      this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
-      this.camera.updateProjectionMatrix()
-      this.viewmodelRenderer.camera.aspect = width / height
-      this.viewmodelRenderer.camera.updateProjectionMatrix()
-      this.setSize(width, height)
-      this.composer?.setSize(width, height)
-      this.update()
-    }
+    // Keep the chosen game resolution; only refresh CSS fill + pixel ratio
+    this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
+    this.applyGameResolution()
+    this.update()
   }
   public addToRenderer(gameObject: GameObject, viewmodel = false) {
     if (!viewmodel) this.scene.add(gameObject)
