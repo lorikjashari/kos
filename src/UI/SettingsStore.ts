@@ -22,25 +22,50 @@ export interface CrosshairSettings {
 
 export type KeybindMap = Partial<Record<Key, string>>
 
+export type MobileControlId =
+  | 'joystick'
+  | 'fire'
+  | 'aim'
+  | 'jump'
+  | 'crouch'
+  | 'reload'
+  | 'walk'
+  | 'weapon1'
+  | 'weapon2'
+  | 'weapon3'
+  | 'leanLeft'
+  | 'leanRight'
+
+export interface MobileControlSlot {
+  x: number
+  y: number
+  size: number
+  opacity: number
+  visible: boolean
+}
+
+export type MobileLayoutMap = Record<MobileControlId, MobileControlSlot>
+
+export interface MobileControlsSettings {
+  enabled: boolean
+  lookSensitivity: number
+  joystickDeadzone: number
+  layout: MobileLayoutMap
+}
+
 export interface PlayerSettings {
   playerName: string
   crosshair: CrosshairSettings
   keybinds: KeybindMap
-  /** CS-style: mouse wheel up/down also jumps */
   jumpWithScrollWheel: boolean
-  /** Mouse look multiplier (1 = default). Console: sensitivity */
   sensitivity: number
-  /** Scoped look scale vs hipfire (console: zoom_sensitivity). CS default 1 */
   zoomSensitivity: number
-  /** Master SFX 0..1 (console: volume) */
   volume: number
-  /** Menu / background music 0..1 (console: MP3Volume / bgmvolume) */
   musicVolume: number
-  /** fps_max — 0 = unlimited */
   fpsMax: number
-  /** Internal render resolution (aspect from w/h). */
   resolutionWidth: number
   resolutionHeight: number
+  mobile: MobileControlsSettings
 }
 
 export type AspectGroup = '4:3' | '16:9' | '16:10'
@@ -146,6 +171,74 @@ export const DEFAULT_KEYBINDS: Record<Key, string> = {
   [Key.SwitchHands]: 'h',
 }
 
+export const MOBILE_CONTROL_META: Array<{ id: MobileControlId; label: string; glyph: string }> = [
+  { id: 'joystick', label: 'Move Stick', glyph: '⊕' },
+  { id: 'fire', label: 'Fire', glyph: '◎' },
+  { id: 'aim', label: 'Aim / Scope', glyph: '⌖' },
+  { id: 'jump', label: 'Jump', glyph: '⤒' },
+  { id: 'crouch', label: 'Crouch', glyph: '⤓' },
+  { id: 'reload', label: 'Reload', glyph: '↻' },
+  { id: 'walk', label: 'Walk', glyph: 'Ｗ' },
+  { id: 'weapon1', label: 'Primary', glyph: '1' },
+  { id: 'weapon2', label: 'Secondary', glyph: '2' },
+  { id: 'weapon3', label: 'Knife', glyph: '3' },
+  { id: 'leanLeft', label: 'Lean Left', glyph: '◁' },
+  { id: 'leanRight', label: 'Lean Right', glyph: '▷' },
+]
+
+export const DEFAULT_MOBILE_LAYOUT: MobileLayoutMap = {
+  joystick: { x: 14, y: 72, size: 1.15, opacity: 0.55, visible: true },
+  fire: { x: 86, y: 74, size: 1.25, opacity: 0.72, visible: true },
+  aim: { x: 72, y: 78, size: 0.95, opacity: 0.65, visible: true },
+  jump: { x: 86, y: 56, size: 0.95, opacity: 0.65, visible: true },
+  crouch: { x: 74, y: 60, size: 0.9, opacity: 0.62, visible: true },
+  reload: { x: 90, y: 40, size: 0.85, opacity: 0.6, visible: true },
+  walk: { x: 28, y: 88, size: 0.8, opacity: 0.55, visible: true },
+  weapon1: { x: 62, y: 18, size: 0.75, opacity: 0.58, visible: true },
+  weapon2: { x: 72, y: 18, size: 0.75, opacity: 0.58, visible: true },
+  weapon3: { x: 82, y: 18, size: 0.75, opacity: 0.58, visible: true },
+  leanLeft: { x: 8, y: 48, size: 0.75, opacity: 0.5, visible: true },
+  leanRight: { x: 22, y: 48, size: 0.75, opacity: 0.5, visible: true },
+}
+
+export function clampMobileSlot(slot: Partial<MobileControlSlot> | undefined, fallback: MobileControlSlot): MobileControlSlot {
+  const base = { ...fallback, ...(slot || {}) }
+  return {
+    x: Math.max(2, Math.min(98, Number.isFinite(base.x) ? base.x : fallback.x)),
+    y: Math.max(4, Math.min(96, Number.isFinite(base.y) ? base.y : fallback.y)),
+    size: Math.max(0.55, Math.min(1.8, Number.isFinite(base.size) ? base.size : fallback.size)),
+    opacity: Math.max(0.15, Math.min(1, Number.isFinite(base.opacity) ? base.opacity : fallback.opacity)),
+    visible: base.visible !== false,
+  }
+}
+
+export function normalizeMobileLayout(raw?: Partial<MobileLayoutMap>): MobileLayoutMap {
+  const out = { ...DEFAULT_MOBILE_LAYOUT }
+  for (const id of Object.keys(DEFAULT_MOBILE_LAYOUT) as MobileControlId[]) {
+    out[id] = clampMobileSlot(raw?.[id], DEFAULT_MOBILE_LAYOUT[id])
+  }
+  return out
+}
+
+export function defaultMobileSettings(): MobileControlsSettings {
+  return {
+    enabled: true,
+    lookSensitivity: 1.15,
+    joystickDeadzone: 0.18,
+    layout: normalizeMobileLayout(),
+  }
+}
+
+export function normalizeMobileSettings(raw?: Partial<MobileControlsSettings>): MobileControlsSettings {
+  const d = defaultMobileSettings()
+  return {
+    enabled: raw?.enabled !== false,
+    lookSensitivity: Math.max(0.2, Math.min(3, typeof raw?.lookSensitivity === 'number' ? raw.lookSensitivity : d.lookSensitivity)),
+    joystickDeadzone: Math.max(0.05, Math.min(0.45, typeof raw?.joystickDeadzone === 'number' ? raw.joystickDeadzone : d.joystickDeadzone)),
+    layout: normalizeMobileLayout(raw?.layout),
+  }
+}
+
 const STORAGE_KEY = 'kos-settings-v1'
 
 export function loadSettings(): PlayerSettings {
@@ -178,6 +271,7 @@ export function loadSettings(): PlayerSettings {
           : 0,
       resolutionWidth: res.width,
       resolutionHeight: res.height,
+      mobile: normalizeMobileSettings(parsed.mobile),
     }
   } catch {
     return defaultSettings()
@@ -201,6 +295,7 @@ export function defaultSettings(): PlayerSettings {
     fpsMax: 0,
     resolutionWidth: 1280,
     resolutionHeight: 960,
+    mobile: defaultMobileSettings(),
   }
 }
 

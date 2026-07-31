@@ -3,19 +3,24 @@ import { DEFAULT_MAP_ID, getMapDefinition, type MapId } from '../Core/MapCatalog
 import {
   DEFAULT_CROSSHAIR,
   DEFAULT_KEYBINDS,
+  DEFAULT_MOBILE_LAYOUT,
   formatKeyLabel,
   loadSettings,
+  MOBILE_CONTROL_META,
+  normalizeMobileSettings,
   REBINDABLE_ACTIONS,
   RESOLUTION_PRESETS,
   resolutionKey,
   saveSettings,
   type AspectGroup,
   type CrosshairSettings,
+  type MobileControlId,
   type PlayerSettings,
 } from './SettingsStore'
 import { CrosshairRenderer } from './CrosshairRenderer'
 import { Key } from '../Input/KeyBinding'
 import { Game } from '../Game'
+import type { MobileControls } from './MobileControls'
 
 export type BotMatchConfig = {
   difficulty: BotDifficulty
@@ -47,6 +52,9 @@ export class MainMenu {
   private selectedBotCount = 5
   private selectedMapId: MapId = DEFAULT_MAP_ID
   private currentScreen: 'loading' | 'main' | 'bots' | 'settings' = 'loading'
+  private mobileControls: MobileControls | null = null
+  private editingMobileLayout = false
+  private selectedMobileId: MobileControlId | null = null
 
   constructor(callbacks: MenuCallbacks) {
     this.callbacks = callbacks
@@ -64,6 +72,10 @@ export class MainMenu {
 
   public getSettings(): PlayerSettings {
     return this.settings
+  }
+
+  public setMobileControls(controls: MobileControls): void {
+    this.mobileControls = controls
   }
 
   /** In-game crosshair renderer (for the console to tweak live). */
@@ -117,7 +129,10 @@ export class MainMenu {
       this.syncCrosshairControls()
       this.syncSensitivityControl()
       this.renderResolutionGroups()
+      this.syncMobileControlsPanel()
       this.crosshairPreview?.draw()
+    } else {
+      this.stopMobileLayoutEdit()
     }
   }
 
@@ -249,6 +264,7 @@ export class MainMenu {
             <button type="button" class="kos-tab is-on" data-tab="video">Video</button>
             <button type="button" class="kos-tab" data-tab="crosshair">Crosshair</button>
             <button type="button" class="kos-tab" data-tab="keybinds">Keybinds</button>
+            <button type="button" class="kos-tab" data-tab="mobile">Mobile</button>
           </div>
 
           <div class="kos-tab-panel is-on" data-panel="video">
@@ -280,6 +296,46 @@ export class MainMenu {
             </label>
             <div class="kos-bind-list" id="kos-bind-list"></div>
             <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-binds">Reset Keybinds</button>
+          </div>
+
+          <div class="kos-tab-panel" data-panel="mobile">
+            <p class="kos-hint">Standoff-style touch layout. Drag buttons in the editor, tune size & opacity, then save. Right-side drag aims in-match.</p>
+            <label class="kos-check kos-match-opt">
+              <input id="kos-mobile-enabled" type="checkbox" />
+              <span>
+                <strong>Touch controls</strong>
+                <em>On-screen stick + action buttons for mobile</em>
+              </span>
+            </label>
+            <label class="kos-slider">
+              <span>Touch look sensitivity<em id="kos-mobile-look-val">1.15</em></span>
+              <input id="kos-mobile-look" type="range" min="0.2" max="3" step="0.05" value="1.15" />
+            </label>
+            <label class="kos-slider">
+              <span>Joystick deadzone<em id="kos-mobile-dead-val">0.18</em></span>
+              <input id="kos-mobile-dead" type="range" min="0.05" max="0.45" step="0.01" value="0.18" />
+            </label>
+            <div class="kos-mobile-editor-actions">
+              <button type="button" class="kos-btn kos-btn-primary" data-action="edit-mobile-layout">Edit Button Layout</button>
+              <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-mobile-layout">Reset Layout</button>
+            </div>
+            <div class="kos-mobile-slot-panel" id="kos-mobile-slot-panel" hidden>
+              <p class="kos-hint tight">Selected: <strong id="kos-mobile-slot-name">—</strong></p>
+              <label class="kos-slider">
+                <span>Size<em id="kos-mobile-size-val">1</em></span>
+                <input id="kos-mobile-size" type="range" min="0.55" max="1.8" step="0.05" value="1" />
+              </label>
+              <label class="kos-slider">
+                <span>Opacity<em id="kos-mobile-opacity-val">0.6</em></span>
+                <input id="kos-mobile-opacity" type="range" min="0.15" max="1" step="0.05" value="0.6" />
+              </label>
+              <label class="kos-check">
+                <input id="kos-mobile-visible" type="checkbox" checked />
+                <span>Visible</span>
+              </label>
+              <button type="button" class="kos-btn kos-btn-primary" data-action="done-mobile-layout">Done</button>
+            </div>
+            <div class="kos-mobile-list" id="kos-mobile-list"></div>
           </div>
         </div>
       </section>
@@ -316,6 +372,70 @@ export class MainMenu {
       })
     }
 
+    this.settings.mobile = normalizeMobileSettings(this.settings.mobile)
+    const mobileEnabled = this.root.querySelector('#kos-mobile-enabled') as HTMLInputElement | null
+    if (mobileEnabled) {
+      mobileEnabled.checked = this.settings.mobile.enabled
+      mobileEnabled.addEventListener('change', () => {
+        this.settings.mobile.enabled = mobileEnabled.checked
+        this.persist()
+      })
+    }
+    const lookInput = this.root.querySelector('#kos-mobile-look') as HTMLInputElement | null
+    const lookVal = this.root.querySelector('#kos-mobile-look-val')
+    if (lookInput) {
+      lookInput.value = String(this.settings.mobile.lookSensitivity)
+      if (lookVal) lookVal.textContent = String(this.settings.mobile.lookSensitivity)
+      lookInput.addEventListener('input', () => {
+        const v = Number(lookInput.value)
+        this.settings.mobile.lookSensitivity = Number.isFinite(v) ? Math.round(v * 100) / 100 : 1.15
+        if (lookVal) lookVal.textContent = String(this.settings.mobile.lookSensitivity)
+        this.persist()
+      })
+    }
+    const deadInput = this.root.querySelector('#kos-mobile-dead') as HTMLInputElement | null
+    const deadVal = this.root.querySelector('#kos-mobile-dead-val')
+    if (deadInput) {
+      deadInput.value = String(this.settings.mobile.joystickDeadzone)
+      if (deadVal) deadVal.textContent = String(this.settings.mobile.joystickDeadzone)
+      deadInput.addEventListener('input', () => {
+        const v = Number(deadInput.value)
+        this.settings.mobile.joystickDeadzone = Number.isFinite(v) ? Math.round(v * 100) / 100 : 0.18
+        if (deadVal) deadVal.textContent = String(this.settings.mobile.joystickDeadzone)
+        this.persist()
+      })
+    }
+    const sizeInput = this.root.querySelector('#kos-mobile-size') as HTMLInputElement | null
+    const sizeVal = this.root.querySelector('#kos-mobile-size-val')
+    sizeInput?.addEventListener('input', () => {
+      if (!this.selectedMobileId) return
+      const v = Number(sizeInput.value)
+      const size = Number.isFinite(v) ? v : 1
+      if (sizeVal) sizeVal.textContent = String(size)
+      this.settings.mobile.layout[this.selectedMobileId].size = size
+      this.mobileControls?.updateSelectedSlot({ size })
+      this.persist()
+    })
+    const opacityInput = this.root.querySelector('#kos-mobile-opacity') as HTMLInputElement | null
+    const opacityVal = this.root.querySelector('#kos-mobile-opacity-val')
+    opacityInput?.addEventListener('input', () => {
+      if (!this.selectedMobileId) return
+      const v = Number(opacityInput.value)
+      const opacity = Number.isFinite(v) ? v : 0.6
+      if (opacityVal) opacityVal.textContent = String(opacity)
+      this.settings.mobile.layout[this.selectedMobileId].opacity = opacity
+      this.mobileControls?.updateSelectedSlot({ opacity })
+      this.persist()
+    })
+    const visibleInput = this.root.querySelector('#kos-mobile-visible') as HTMLInputElement | null
+    visibleInput?.addEventListener('change', () => {
+      if (!this.selectedMobileId || !visibleInput) return
+      this.settings.mobile.layout[this.selectedMobileId].visible = visibleInput.checked
+      this.mobileControls?.updateSelectedSlot({ visible: visibleInput.checked })
+      this.persist()
+      this.renderMobileList()
+    })
+
     this.root.addEventListener('dragstart', (e) => {
       if ((e.target as HTMLElement).closest('.kos-bg')) e.preventDefault()
     })
@@ -334,7 +454,7 @@ export class MainMenu {
 
     this.root.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-tab], [data-map], [data-res]'
+        '[data-action], [data-diff], [data-tab], [data-map], [data-res], [data-mobile-id]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -356,6 +476,15 @@ export class MainMenu {
         this.renderKeybindList()
         this.persist()
         this.callbacks.onSettingsChanged(this.settings)
+      }
+      if (action === 'edit-mobile-layout') this.startMobileLayoutEdit()
+      if (action === 'done-mobile-layout') this.stopMobileLayoutEdit()
+      if (action === 'reset-mobile-layout') {
+        this.settings.mobile.layout = { ...DEFAULT_MOBILE_LAYOUT }
+        this.mobileControls?.applySettings(this.settings.mobile)
+        this.mobileControls?.resetLayout()
+        this.persist()
+        this.syncMobileControlsPanel()
       }
 
       const res = t.getAttribute('data-res')
@@ -385,10 +514,19 @@ export class MainMenu {
 
       const tab = t.getAttribute('data-tab')
       if (tab) {
+        if (tab !== 'mobile') this.stopMobileLayoutEdit()
         this.root.querySelectorAll('.kos-tab').forEach((el) => el.classList.toggle('is-on', el === t))
         this.root.querySelectorAll('.kos-tab-panel').forEach((el) => {
           el.classList.toggle('is-on', el.getAttribute('data-panel') === tab)
         })
+        if (tab === 'mobile') this.syncMobileControlsPanel()
+      }
+
+      const mobilePick = t.getAttribute('data-mobile-id') as MobileControlId | null
+      if (mobilePick) {
+        this.selectedMobileId = mobilePick
+        this.mobileControls?.selectControl(mobilePick)
+        this.syncSelectedMobileSlot()
       }
     })
 
@@ -621,7 +759,6 @@ export class MainMenu {
   }
 
   private assignBind(action: Key, code: string): void {
-    // Swap if another action already uses this key
     for (const [k, v] of Object.entries(this.settings.keybinds)) {
       if (v === code && k !== action) {
         this.settings.keybinds[k as Key] = this.settings.keybinds[action] || DEFAULT_KEYBINDS[action]
@@ -632,6 +769,96 @@ export class MainMenu {
     this.renderKeybindList()
     this.persist()
     this.callbacks.onSettingsChanged(this.settings)
+  }
+
+  private syncMobileControlsPanel(): void {
+    this.settings.mobile = normalizeMobileSettings(this.settings.mobile)
+    const enabled = this.root.querySelector('#kos-mobile-enabled') as HTMLInputElement | null
+    if (enabled) enabled.checked = this.settings.mobile.enabled
+    const lookInput = this.root.querySelector('#kos-mobile-look') as HTMLInputElement | null
+    const lookVal = this.root.querySelector('#kos-mobile-look-val')
+    if (lookInput) {
+      lookInput.value = String(this.settings.mobile.lookSensitivity)
+      if (lookVal) lookVal.textContent = String(this.settings.mobile.lookSensitivity)
+    }
+    const deadInput = this.root.querySelector('#kos-mobile-dead') as HTMLInputElement | null
+    const deadVal = this.root.querySelector('#kos-mobile-dead-val')
+    if (deadInput) {
+      deadInput.value = String(this.settings.mobile.joystickDeadzone)
+      if (deadVal) deadVal.textContent = String(this.settings.mobile.joystickDeadzone)
+    }
+    this.renderMobileList()
+    this.syncSelectedMobileSlot()
+  }
+
+  private renderMobileList(): void {
+    const host = this.root.querySelector('#kos-mobile-list')
+    if (!host) return
+    host.innerHTML = MOBILE_CONTROL_META.map((m) => {
+      const slot = this.settings.mobile.layout[m.id]
+      const on = this.selectedMobileId === m.id ? ' is-on' : ''
+      return `<button type="button" class="kos-mobile-item${on}" data-mobile-id="${m.id}">
+        <span>${m.glyph} ${m.label}</span>
+        <em>${slot.visible ? `${Math.round(slot.x)}%, ${Math.round(slot.y)}%` : 'Hidden'}</em>
+      </button>`
+    }).join('')
+  }
+
+  private syncSelectedMobileSlot(): void {
+    const panel = this.root.querySelector('#kos-mobile-slot-panel') as HTMLElement | null
+    const name = this.root.querySelector('#kos-mobile-slot-name')
+    if (!panel) return
+    panel.hidden = !this.editingMobileLayout
+    const id = this.selectedMobileId || this.mobileControls?.getSelectedId()
+    if (!id) {
+      if (name) name.textContent = '—'
+      return
+    }
+    this.selectedMobileId = id
+    const meta = MOBILE_CONTROL_META.find((m) => m.id === id)
+    const slot = this.settings.mobile.layout[id]
+    if (name) name.textContent = meta?.label || id
+    const sizeInput = this.root.querySelector('#kos-mobile-size') as HTMLInputElement | null
+    const sizeVal = this.root.querySelector('#kos-mobile-size-val')
+    if (sizeInput) {
+      sizeInput.value = String(slot.size)
+      if (sizeVal) sizeVal.textContent = String(slot.size)
+    }
+    const opacityInput = this.root.querySelector('#kos-mobile-opacity') as HTMLInputElement | null
+    const opacityVal = this.root.querySelector('#kos-mobile-opacity-val')
+    if (opacityInput) {
+      opacityInput.value = String(slot.opacity)
+      if (opacityVal) opacityVal.textContent = String(slot.opacity)
+    }
+    const visibleInput = this.root.querySelector('#kos-mobile-visible') as HTMLInputElement | null
+    if (visibleInput) visibleInput.checked = slot.visible
+    this.renderMobileList()
+  }
+
+  private startMobileLayoutEdit(): void {
+    if (!this.mobileControls) return
+    this.editingMobileLayout = true
+    this.root.classList.add('is-layout-edit')
+    this.mobileControls.applySettings(this.settings.mobile)
+    this.mobileControls.setEditMode(true, (layout) => {
+      this.settings.mobile.layout = layout
+      this.selectedMobileId = this.mobileControls?.getSelectedId() || this.selectedMobileId
+      this.syncSelectedMobileSlot()
+      this.persist()
+    })
+    this.selectedMobileId = this.selectedMobileId || 'fire'
+    this.mobileControls.selectControl(this.selectedMobileId)
+    this.syncSelectedMobileSlot()
+  }
+
+  private stopMobileLayoutEdit(): void {
+    if (!this.editingMobileLayout) return
+    this.editingMobileLayout = false
+    this.root.classList.remove('is-layout-edit')
+    this.mobileControls?.setEditMode(false)
+    const panel = this.root.querySelector('#kos-mobile-slot-panel') as HTMLElement | null
+    if (panel) panel.hidden = true
+    this.persist()
   }
 
   private ensureStyles(): void {
@@ -1032,9 +1259,54 @@ export class MainMenu {
         font-size: 15px; letter-spacing: 0.08em;
       }
 
+      #kos-menu.is-layout-edit .kos-bg { opacity: 0.25; filter: none; }
+      #kos-menu.is-layout-edit .kos-shell-settings {
+        position: fixed;
+        left: max(10px, env(safe-area-inset-left));
+        top: max(10px, env(safe-area-inset-top));
+        bottom: max(10px, env(safe-area-inset-bottom));
+        width: min(360px, 46vw);
+        z-index: 70;
+        overflow: auto;
+        background: rgba(255,255,255,0.96);
+        border: 1px solid var(--kos-line);
+        border-radius: 16px;
+        padding: 14px 14px 18px;
+        box-shadow: 0 18px 40px rgba(0,0,0,0.28);
+      }
+      #kos-menu.is-layout-edit .kos-tab-panel:not([data-panel="mobile"]) { display: none !important; }
+      .kos-mobile-editor-actions {
+        display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0;
+      }
+      .kos-mobile-editor-actions .kos-btn { flex: 1; min-width: 120px; justify-content: center; margin-top: 0; }
+      .kos-mobile-slot-panel {
+        margin: 10px 0 14px;
+        padding: 12px;
+        border: 1px solid var(--kos-line);
+        border-radius: 12px;
+        background: var(--kos-blue-soft);
+      }
+      .kos-mobile-list {
+        display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto;
+      }
+      .kos-mobile-item {
+        display: flex; justify-content: space-between; align-items: center; gap: 8px;
+        width: 100%; appearance: none; cursor: pointer;
+        background: #fff; border: 1px solid var(--kos-line);
+        border-radius: 10px; padding: 10px 12px;
+        font: inherit; color: var(--kos-ink); text-align: left;
+      }
+      .kos-mobile-item em { color: var(--kos-muted); font-style: normal; font-size: 12px; }
+      .kos-mobile-item.is-on {
+        border-color: rgba(26,95,255,0.45);
+        background: #eef4ff;
+        color: var(--kos-blue-deep);
+      }
+
       .kos-tabs {
         display: flex; gap: 0; width: 100%; margin: 10px 0 20px;
         border-bottom: 2px solid var(--kos-line);
+        flex-wrap: wrap;
       }
       .kos-tab {
         flex: 1; appearance: none; border: none; cursor: pointer;

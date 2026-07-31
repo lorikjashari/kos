@@ -46,6 +46,8 @@ import {
   saveSettings,
 } from './UI/SettingsStore'
 import { CameraManager } from './View/CameraManager/CameraManager'
+import type { MobileControls } from './UI/MobileControls'
+import { isTouchDevice } from './UI/MobileDevice'
 
 export class Game implements IUpdatable {
   public static game: Game
@@ -113,6 +115,7 @@ export class Game implements IUpdatable {
   /** '' = gizmo moves the whole bot; otherwise a bone key being posed */
   private editorBoneKey = ''
   private boundEditorKeys: ((e: KeyboardEvent) => void) | null = null
+  private mobileControls: MobileControls | null = null
 
   constructor() {
     this.players = new Array<PlayerWrapper>()
@@ -192,6 +195,7 @@ export class Game implements IUpdatable {
     this.consoleResumeGameplay = this.matchStarted && !this.matchPaused && this.inputManager.gameplayEnabled
     this.inputManager.gameplayEnabled = false
     this.inputManager.unlock()
+    this.syncMobileControls()
     this.commandConsole.show()
   }
 
@@ -207,6 +211,7 @@ export class Game implements IUpdatable {
   private onCommandConsoleClosed(): void {
     if (this.consoleResumeGameplay && this.matchStarted && !this.matchPaused) {
       this.inputManager.gameplayEnabled = true
+      this.syncMobileControls()
       setTimeout(() => this.inputManager.onLock(), 40)
     }
     this.consoleResumeGameplay = false
@@ -230,6 +235,8 @@ export class Game implements IUpdatable {
     this.audioManager.setMusicVolume(clampVolume(s.musicVolume))
     this.setFpsCap(s.fpsMax)
     this.applyResolution(s.resolutionWidth, s.resolutionHeight)
+    this.mobileControls?.applySettings(s.mobile)
+    this.syncMobileControls()
   }
 
   /** Apply internal render resolution from settings (persists when saved via menu). */
@@ -912,6 +919,27 @@ export class Game implements IUpdatable {
     this.setPhysicsObjects()
   }
 
+  public setMobileControls(controls: MobileControls): void {
+    this.mobileControls = controls
+  }
+
+  public getMobileControls(): MobileControls | null {
+    return this.mobileControls
+  }
+
+  public syncMobileControls(): void {
+    const on =
+      !!this.mobileControls &&
+      this.matchStarted &&
+      !this.matchPaused &&
+      this.inputManager.gameplayEnabled &&
+      !this.editorActive
+    this.mobileControls?.setActive(on)
+    if (on && isTouchDevice()) {
+      this.inputManager.setMobileMode(true)
+    }
+  }
+
   public startBotMatch(config: BotMatchConfig): void {
     this.lastMatchConfig = config
     this.clearBots()
@@ -924,6 +952,7 @@ export class Game implements IUpdatable {
     this.awaitingLoadout = true
     this.lockdownTimer = 0
     this.inputManager.gameplayEnabled = true
+    this.syncMobileControls()
     this.applyMapMoveSpeed(this.activeMapId)
 
     // Assign unique spawns: player first, then bots (never same point)
@@ -1087,6 +1116,7 @@ export class Game implements IUpdatable {
     this.matchPaused = true
     this.inputManager.gameplayEnabled = false
     this.inputManager.unlock()
+    this.syncMobileControls()
     this.renderer.hud?.setScoreboardVisible(false)
     this.renderer.hud?.setPauseMenuOpen(true)
   }
@@ -1096,6 +1126,7 @@ export class Game implements IUpdatable {
     this.matchPaused = false
     this.inputManager.gameplayEnabled = true
     this.renderer.hud?.setPauseMenuOpen(false)
+    this.syncMobileControls()
     setTimeout(() => this.inputManager.onLock(), 40)
   }
 
@@ -1110,6 +1141,7 @@ export class Game implements IUpdatable {
     this.stats.reset()
     this.inputManager.gameplayEnabled = false
     this.inputManager.unlock()
+    this.syncMobileControls()
     this.renderer.hud?.setPauseMenuOpen(false)
     this.renderer.hud?.setLockdown(null)
     this.renderer.hud?.hideLoadoutPicker()

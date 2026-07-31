@@ -25,18 +25,15 @@ export class InputManager implements IUpdatable {
   private isLocked: boolean = false
   /** When false, ignore gameplay input / pointer lock (menu open) */
   public gameplayEnabled = false
-  /** CS-style scroll-wheel jump (mwheelup + mwheeldown) */
   public jumpWithScrollWheel = true
+  public mobileMode = false
 
   private playerWrapper!: PlayerWrapper
   private footstepTimer = 0
   private emptyClickCooldown = 0
-  /** Scroll ticks queued so wheel jumps apply on the next input update */
   private pendingScrollJumps = 0
-  /** Time left on a queued jump press, so landing frames aren't missed */
   private jumpBufferMs = 0
   private readonly jumpBufferDuration = 130
-  /** event.key (lower) or mouseN → Key */
   private codeToAction = new Map<string, Key>()
 
   constructor() {
@@ -92,13 +89,35 @@ export class InputManager implements IUpdatable {
     return CameraManager.mouseSensitivity
   }
 
+  public setMobileMode(enabled: boolean): void {
+    this.mobileMode = !!enabled
+    if (this.mobileMode) this.unlock()
+  }
+
+  public setActionPressed(action: Key, pressed: boolean): void {
+    const binding = this.keys.get(action)
+    if (!binding) return
+    if (pressed) {
+      if (!binding.isPressed) binding.setPressed(true)
+      else binding.isPressed = true
+    } else if (binding.isPressed) {
+      binding.onKeyUp()
+    }
+  }
+
+  public applyLookDelta(dx: number, dy: number): void {
+    if (!this.gameplayEnabled || !this.playerWrapper?.player.isCurrentPlayer) return
+    if (this.playerWrapper.player.isDead) return
+    this.playerWrapper.cameraManager?.onMouseMove({ movementX: dx, movementY: dy })
+  }
+
   private normalizeKey(event: KeyboardEvent): string {
     if (event.key === ' ') return ' '
     return event.key.toLowerCase()
   }
 
   onLock(event?: MouseEvent): void {
-    if (!this.gameplayEnabled) return
+    if (!this.gameplayEnabled || this.mobileMode) return
     if (event && this.clickedOnHud(event)) return
     document.body.requestPointerLock()
   }
@@ -112,7 +131,9 @@ export class InputManager implements IUpdatable {
     this.isLocked = document.body.ownerDocument.pointerLockElement === document.body
   }
   onMouseMove(evt: any): void {
-    if (!this.gameplayEnabled || this.isLocked === false || !this.playerWrapper?.player.isCurrentPlayer) return
+    if (!this.gameplayEnabled || !this.playerWrapper?.player.isCurrentPlayer) return
+    if (!this.mobileMode && this.isLocked === false) return
+    if (this.mobileMode) return
     this.playerWrapper.cameraManager!.onMouseMove(evt)
   }
 
@@ -340,16 +361,17 @@ export class InputManager implements IUpdatable {
   clickedOnHud(event: MouseEvent): boolean {
     const menu = document.getElementById('kos-menu')
     if (menu && !menu.classList.contains('is-hidden')) return true
+    if (document.getElementById('kos-pwa-gate')) return true
     if (Game.getInstance().isCommandConsoleOpen()) return true
     const target = event.target as HTMLElement
     if (target?.closest?.('#kos-editor')) return true
+    if (target?.closest?.('#kos-mobile-controls')) return true
     if (target.nodeName === 'BODY' || target.nodeName === 'CANVAS') return false
-    // Only treat interactive HUD chrome as blocking (pause button / panel)
-    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu, #kos-con, #kos-editor')
+    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu, .cs-loadout, #kos-con, #kos-editor')
   }
 
   onMouseDown(event: MouseEvent): void {
-    if (!this.gameplayEnabled) return
+    if (!this.gameplayEnabled || this.mobileMode) return
     if (this.clickedOnHud(event)) return
     const action = this.codeToAction.get(`mouse${event.button}`)
     if (action) this.keys.get(action)?.setPressed(true)
@@ -360,7 +382,7 @@ export class InputManager implements IUpdatable {
   }
 
   onMouseUp(event: MouseEvent): void {
-    if (!this.gameplayEnabled) return
+    if (!this.gameplayEnabled || this.mobileMode) return
     if (this.clickedOnHud(event)) return
     const action = this.codeToAction.get(`mouse${event.button}`)
     if (action) this.keys.get(action)?.onKeyUp()

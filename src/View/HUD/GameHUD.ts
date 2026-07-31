@@ -426,7 +426,7 @@ export class GameHUD {
         position: fixed;
         inset: 0;
         pointer-events: none;
-        z-index: 5;
+        z-index: 30;
         font-family: "Segoe UI", Arial, Helvetica, sans-serif;
         color: #fff;
         text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 8px rgba(0,0,0,0.35);
