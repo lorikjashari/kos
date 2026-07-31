@@ -190,14 +190,21 @@ export class GameHUD {
     this.loadoutEl = document.getElementById('hud-loadout')!
     this.killFeedEl = document.getElementById('hud-killfeed')!
     this.loadoutEl.querySelectorAll('[data-primary]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+      const pick = (e: Event) => {
         e.preventDefault()
         e.stopPropagation()
         const primary = (btn as HTMLElement).getAttribute('data-primary')
         if (primary !== 'AK47' && primary !== 'AWP') return
         const handler = this.loadoutPickHandler
+        if (!handler) return
         this.loadoutPickHandler = null
-        handler?.(primary)
+        handler(primary)
+      }
+      btn.addEventListener('pointerup', pick)
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (this.loadoutPickHandler) pick(e)
       })
     })
     this.scoreboardEl = document.getElementById('hud-scoreboard')!
@@ -683,7 +690,8 @@ export class GameHUD {
         background:
           radial-gradient(ellipse at center, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.72) 100%);
         transition: opacity 160ms ease, visibility 160ms ease;
-        z-index: 9;
+        z-index: 50;
+        touch-action: manipulation;
       }
       .cs-loadout.is-on {
         opacity: 1;
@@ -732,6 +740,8 @@ export class GameHUD {
         cursor: pointer;
         text-align: center;
         pointer-events: auto;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
         transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
       }
       .cs-loadout-box:hover {

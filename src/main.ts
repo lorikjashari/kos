@@ -20,10 +20,16 @@ async function main() {
       game.audioManager.stopMenuMusic()
       menu.hide()
       void (async () => {
-        await game.audioManager.unlock()
-        await game.ensureMap(config.mapId || 'pool_day')
-        await game.prepareCombat()
-        game.startBotMatch(config)
+        try {
+          await game.audioManager.unlock()
+          await game.ensureMap(config.mapId || 'pool_day')
+          await game.prepareCombat()
+          game.startBotMatch(config)
+        } catch (error) {
+          console.error(error)
+          menu.show()
+          menu.showError(error instanceof Error ? error.message : 'Failed to start match.')
+        }
       })()
     },
     onSettingsChanged: (settings) => {

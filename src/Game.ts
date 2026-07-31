@@ -932,11 +932,14 @@ export class Game implements IUpdatable {
       !!this.mobileControls &&
       this.matchStarted &&
       !this.matchPaused &&
+      !this.awaitingLoadout &&
       this.inputManager.gameplayEnabled &&
       !this.editorActive
     this.mobileControls?.setActive(on)
     if (on && isTouchDevice()) {
       this.inputManager.setMobileMode(true)
+    } else if (!on && !this.editorActive) {
+      this.inputManager.setMobileMode(false)
     }
   }
 
@@ -969,21 +972,20 @@ export class Game implements IUpdatable {
       name: this.nameQueue[i] || `BOT ${i + 1}`,
     }))
     this.botSpawnAcc = 0
-    this.flushPendingBots(2)
+    this.flushPendingBots(Math.max(2, config.botCount))
 
+    this.mobileControls?.setActive(false)
+    this.inputManager.setMobileMode(false)
     this.renderer.hud?.showGameplay()
     this.renderer.hud?.setLockdown(null)
     this.renderer.hud?.setScoreboardVisible(false)
     this.renderer.hud?.setPauseMenuOpen(false)
     this.renderer.hud?.showLoadoutPicker((primary) => this.confirmMatchLoadout(primary))
 
-    // Keep cursor free so the loadout boxes are clickable
     this.inputManager.unlock()
-    // Warm already kicked off from menu click; keep a background pass too
     void this.warmCombatSystems()
   }
 
-  /** After loadout pick: equip guns and start the pre-round countdown */
   public confirmMatchLoadout(primary: 'AK47' | 'AWP'): void {
     if (!this.awaitingLoadout || !this.matchStarted) return
     this.awaitingLoadout = false
@@ -993,7 +995,7 @@ export class Game implements IUpdatable {
     this.renderer.hud?.hideLoadoutPicker()
     this.renderer.hud?.setLockdown(this.lockdownTimer)
     void this.audioManager.playSwitch(primary)
-    // Lock look for countdown + match
+    this.syncMobileControls()
     setTimeout(() => this.inputManager.onLock(), 40)
   }
 

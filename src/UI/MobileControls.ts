@@ -352,7 +352,7 @@ export class MobileControls {
         font-family: "Outfit", "Segoe UI", system-ui, sans-serif;
       }
       #kos-mobile-controls.is-on { display: block; }
-      #kos-mobile-controls.is-edit { z-index: 55; }
+      #kos-mobile-controls.is-edit { z-index: 50; }
       #kos-mobile-controls .kos-mc-look {
         position: absolute; inset: 0;
         pointer-events: auto;

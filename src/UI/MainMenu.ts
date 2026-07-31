@@ -104,6 +104,7 @@ export class MainMenu {
   }
 
   public hide(): void {
+    this.stopMobileLayoutEdit()
     this.stopMenuAudio()
     this.root.classList.add('is-hidden')
     this.root.setAttribute('aria-hidden', 'true')
@@ -1259,32 +1260,51 @@ export class MainMenu {
         font-size: 15px; letter-spacing: 0.08em;
       }
 
-      #kos-menu.is-layout-edit .kos-bg { opacity: 0.25; filter: none; }
+      #kos-menu.is-layout-edit {
+        z-index: 80;
+        pointer-events: none;
+      }
+      #kos-menu.is-layout-edit .kos-bg { opacity: 0.2; filter: none; pointer-events: none; }
       #kos-menu.is-layout-edit .kos-shell-settings {
         position: fixed;
         left: max(10px, env(safe-area-inset-left));
         top: max(10px, env(safe-area-inset-top));
         bottom: max(10px, env(safe-area-inset-bottom));
         width: min(360px, 46vw);
-        z-index: 70;
+        z-index: 90;
         overflow: auto;
-        background: rgba(255,255,255,0.96);
+        pointer-events: auto;
+        background: rgba(255,255,255,0.97);
         border: 1px solid var(--kos-line);
         border-radius: 16px;
         padding: 14px 14px 18px;
         box-shadow: 0 18px 40px rgba(0,0,0,0.28);
       }
+      #kos-menu.is-layout-edit .kos-back,
+      #kos-menu.is-layout-edit .kos-tabs,
+      #kos-menu.is-layout-edit .kos-sub-brand,
+      #kos-menu.is-layout-edit .kos-heading { display: none; }
       #kos-menu.is-layout-edit .kos-tab-panel:not([data-panel="mobile"]) { display: none !important; }
+      #kos-menu.is-layout-edit .kos-tab-panel[data-panel="mobile"] { display: block !important; }
       .kos-mobile-editor-actions {
         display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0;
       }
       .kos-mobile-editor-actions .kos-btn { flex: 1; min-width: 120px; justify-content: center; margin-top: 0; }
       .kos-mobile-slot-panel {
+        position: sticky;
+        bottom: 0;
         margin: 10px 0 14px;
         padding: 12px;
         border: 1px solid var(--kos-line);
         border-radius: 12px;
-        background: var(--kos-blue-soft);
+        background: #eef4ff;
+        box-shadow: 0 -8px 20px rgba(255,255,255,0.85);
+        z-index: 2;
+      }
+      .kos-mobile-slot-panel .kos-btn {
+        width: 100%;
+        justify-content: center;
+        margin-top: 10px;
       }
       .kos-mobile-list {
         display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto;
