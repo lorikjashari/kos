@@ -5,6 +5,7 @@ import { MobileControls } from './UI/MobileControls'
 import { PwaInstall } from './UI/PwaInstall'
 import { loadSettings } from './UI/SettingsStore'
 import { isStandalonePwa, isTouchDevice } from './UI/MobileDevice'
+import { probeRefreshRate, supportsHighRefresh } from './UI/DisplayRefresh'
 
 async function main() {
   const pwa = new PwaInstall()
@@ -81,6 +82,15 @@ async function main() {
 
     menu.setLoadingProgress('Warming combat…', 96)
     await game.audioManager.unlock()
+
+    menu.setLoadingProgress('Detecting display…', 98)
+    const hz = await probeRefreshRate(isTouchDevice() ? 55 : 40)
+    game.setDisplayRefreshRate(hz)
+    game.setFpsCap(settings.fpsMax)
+    if (settings.fpsMax === 0 && supportsHighRefresh()) {
+      document.documentElement.dataset.kosHz = String(hz)
+    }
+    menu.syncFpsControls(hz)
 
     menu.setLoadingProgress('Ready', 100)
     await new Promise((r) => setTimeout(r, 280))

@@ -55,6 +55,8 @@ export class MainMenu {
   private mobileControls: MobileControls | null = null
   private editingMobileLayout = false
   private selectedMobileId: MobileControlId | null = null
+  private dockDrag: { pointerId: number; ox: number; oy: number; x: number; y: number } | null = null
+  private displayHz = 60
 
   constructor(callbacks: MenuCallbacks) {
     this.callbacks = callbacks
@@ -131,6 +133,7 @@ export class MainMenu {
       this.syncSensitivityControl()
       this.renderResolutionGroups()
       this.syncMobileControlsPanel()
+      this.syncFpsControls()
       this.crosshairPreview?.draw()
     } else {
       this.stopMobileLayoutEdit()
@@ -271,6 +274,13 @@ export class MainMenu {
           <div class="kos-tab-panel is-on" data-panel="video">
             <p class="kos-hint">Render resolution — stretched to fill your screen. Starred options are recommended.</p>
             <div class="kos-res-groups" id="kos-res-groups"></div>
+            <p class="kos-section-label" style="margin-top:18px">Frame rate</p>
+            <p class="kos-hint tight" id="kos-fps-hint">Auto follows your display (120Hz on ProMotion iPhones).</p>
+            <div class="kos-chip-row" id="kos-fps-row">
+              <button type="button" class="kos-chip" data-fps="0">Auto</button>
+              <button type="button" class="kos-chip" data-fps="60">60</button>
+              <button type="button" class="kos-chip" data-fps="120">120</button>
+            </div>
           </div>
 
           <div class="kos-tab-panel" data-panel="crosshair">
@@ -320,27 +330,49 @@ export class MainMenu {
               <button type="button" class="kos-btn kos-btn-primary" data-action="edit-mobile-layout">Edit Button Layout</button>
               <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-mobile-layout">Reset Layout</button>
             </div>
-            <div class="kos-mobile-slot-panel" id="kos-mobile-slot-panel" hidden>
-              <p class="kos-hint tight">Selected: <strong id="kos-mobile-slot-name">—</strong></p>
-              <label class="kos-slider">
-                <span>Size<em id="kos-mobile-size-val">1</em></span>
-                <input id="kos-mobile-size" type="range" min="0.55" max="1.8" step="0.05" value="1" />
-              </label>
-              <label class="kos-slider">
-                <span>Opacity<em id="kos-mobile-opacity-val">0.6</em></span>
-                <input id="kos-mobile-opacity" type="range" min="0.15" max="1" step="0.05" value="0.6" />
-              </label>
-              <label class="kos-check">
-                <input id="kos-mobile-visible" type="checkbox" checked />
-                <span>Visible</span>
-              </label>
-              <button type="button" class="kos-btn kos-btn-primary" data-action="done-mobile-layout">Done</button>
-            </div>
             <div class="kos-mobile-list" id="kos-mobile-list"></div>
           </div>
         </div>
       </section>
+
+      <div class="kos-mobile-dock" id="kos-mobile-slot-panel" hidden>
+        <div class="kos-mobile-dock-grip" data-dock-drag="1">
+          <span class="kos-mobile-dock-bars"></span>
+          <em>Drag</em>
+        </div>
+        <div class="kos-mobile-dock-top">
+          <strong id="kos-mobile-slot-name">—</strong>
+          <button type="button" class="kos-mobile-done" data-action="done-mobile-layout">Done</button>
+        </div>
+        <label class="kos-slider kos-mobile-dock-slider">
+          <span>Size<em id="kos-mobile-size-val">1</em></span>
+          <input id="kos-mobile-size" type="range" min="0.55" max="1.8" step="0.05" value="1" />
+        </label>
+        <label class="kos-slider kos-mobile-dock-slider">
+          <span>Opacity<em id="kos-mobile-opacity-val">0.6</em></span>
+          <input id="kos-mobile-opacity" type="range" min="0.15" max="1" step="0.05" value="0.6" />
+        </label>
+        <label class="kos-check kos-mobile-dock-check">
+          <input id="kos-mobile-visible" type="checkbox" checked />
+          <span>Visible</span>
+        </label>
+      </div>
     `
+  }
+
+  public syncFpsControls(displayHz?: number): void {
+    if (typeof displayHz === 'number' && Number.isFinite(displayHz)) this.displayHz = displayHz
+    const hint = this.root.querySelector('#kos-fps-hint')
+    if (hint) {
+      hint.textContent =
+        this.displayHz >= 110
+          ? `Display ~${this.displayHz}Hz — Auto unlocks 120fps on this device.`
+          : `Display ~${this.displayHz}Hz — Auto matches your screen refresh.`
+    }
+    const current = this.settings.fpsMax === 60 || this.settings.fpsMax === 120 ? this.settings.fpsMax : 0
+    this.root.querySelectorAll('[data-fps]').forEach((el) => {
+      el.classList.toggle('is-on', Number((el as HTMLElement).getAttribute('data-fps')) === current)
+    })
   }
 
   private bind(): void {
@@ -453,9 +485,11 @@ export class MainMenu {
       true
     )
 
+    this.bindDockDrag()
+
     this.root.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-tab], [data-map], [data-res], [data-mobile-id]'
+        '[data-action], [data-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -486,6 +520,19 @@ export class MainMenu {
         this.mobileControls?.resetLayout()
         this.persist()
         this.syncMobileControlsPanel()
+      }
+
+      const fpsAttr = t.getAttribute('data-fps')
+      if (fpsAttr !== null) {
+        const fps = Number(fpsAttr)
+        this.settings.fpsMax = fps === 60 || fps === 120 ? fps : 0
+        try {
+          Game.getInstance().setFpsCap(this.settings.fpsMax)
+        } catch {
+          /* game may not exist yet */
+        }
+        this.syncFpsControls()
+        this.persist()
       }
 
       const res = t.getAttribute('data-res')
@@ -840,6 +887,12 @@ export class MainMenu {
     if (!this.mobileControls) return
     this.editingMobileLayout = true
     this.root.classList.add('is-layout-edit')
+    const dock = this.root.querySelector('#kos-mobile-slot-panel') as HTMLElement | null
+    if (dock) {
+      dock.hidden = false
+      if (!dock.style.left) dock.style.left = '12px'
+      if (!dock.style.top) dock.style.top = '12px'
+    }
     this.mobileControls.applySettings(this.settings.mobile)
     this.mobileControls.setEditMode(true, (layout) => {
       this.settings.mobile.layout = layout
@@ -860,6 +913,48 @@ export class MainMenu {
     const panel = this.root.querySelector('#kos-mobile-slot-panel') as HTMLElement | null
     if (panel) panel.hidden = true
     this.persist()
+  }
+
+  private bindDockDrag(): void {
+    const dock = this.root.querySelector('#kos-mobile-slot-panel') as HTMLElement | null
+    if (!dock) return
+    const onDown = (e: PointerEvent) => {
+      const grip = (e.target as HTMLElement).closest('[data-dock-drag]')
+      if (!grip || !this.editingMobileLayout) return
+      e.preventDefault()
+      e.stopPropagation()
+      const rect = dock.getBoundingClientRect()
+      this.dockDrag = {
+        pointerId: e.pointerId,
+        ox: e.clientX - rect.left,
+        oy: e.clientY - rect.top,
+        x: rect.left,
+        y: rect.top,
+      }
+      dock.setPointerCapture?.(e.pointerId)
+      dock.classList.add('is-dragging')
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!this.dockDrag || this.dockDrag.pointerId !== e.pointerId) return
+      e.preventDefault()
+      const w = dock.offsetWidth
+      const h = dock.offsetHeight
+      const x = Math.max(4, Math.min(window.innerWidth - w - 4, e.clientX - this.dockDrag.ox))
+      const y = Math.max(4, Math.min(window.innerHeight - h - 4, e.clientY - this.dockDrag.oy))
+      dock.style.left = `${x}px`
+      dock.style.top = `${y}px`
+      dock.style.right = 'auto'
+      dock.style.bottom = 'auto'
+    }
+    const onUp = (e: PointerEvent) => {
+      if (!this.dockDrag || this.dockDrag.pointerId !== e.pointerId) return
+      this.dockDrag = null
+      dock.classList.remove('is-dragging')
+    }
+    dock.addEventListener('pointerdown', onDown)
+    dock.addEventListener('pointermove', onMove)
+    dock.addEventListener('pointerup', onUp)
+    dock.addEventListener('pointercancel', onUp)
   }
 
   private ensureStyles(): void {
@@ -1263,48 +1358,80 @@ export class MainMenu {
       #kos-menu.is-layout-edit {
         z-index: 80;
         pointer-events: none;
+        background: transparent;
       }
-      #kos-menu.is-layout-edit .kos-bg { opacity: 0.2; filter: none; pointer-events: none; }
-      #kos-menu.is-layout-edit .kos-shell-settings {
-        position: fixed;
-        left: max(10px, env(safe-area-inset-left));
-        top: max(10px, env(safe-area-inset-top));
-        bottom: max(10px, env(safe-area-inset-bottom));
-        width: min(360px, 46vw);
-        z-index: 90;
-        overflow: auto;
+      #kos-menu.is-layout-edit .kos-bg,
+      #kos-menu.is-layout-edit .kos-screen { opacity: 0; visibility: hidden; pointer-events: none; }
+      #kos-menu.is-layout-edit .kos-mobile-dock {
+        display: flex !important;
         pointer-events: auto;
-        background: rgba(255,255,255,0.97);
-        border: 1px solid var(--kos-line);
-        border-radius: 16px;
-        padding: 14px 14px 18px;
-        box-shadow: 0 18px 40px rgba(0,0,0,0.28);
       }
-      #kos-menu.is-layout-edit .kos-back,
-      #kos-menu.is-layout-edit .kos-tabs,
-      #kos-menu.is-layout-edit .kos-sub-brand,
-      #kos-menu.is-layout-edit .kos-heading { display: none; }
-      #kos-menu.is-layout-edit .kos-tab-panel:not([data-panel="mobile"]) { display: none !important; }
-      #kos-menu.is-layout-edit .kos-tab-panel[data-panel="mobile"] { display: block !important; }
       .kos-mobile-editor-actions {
         display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0;
       }
       .kos-mobile-editor-actions .kos-btn { flex: 1; min-width: 120px; justify-content: center; margin-top: 0; }
-      .kos-mobile-slot-panel {
-        position: sticky;
-        bottom: 0;
-        margin: 10px 0 14px;
-        padding: 12px;
-        border: 1px solid var(--kos-line);
-        border-radius: 12px;
-        background: #eef4ff;
-        box-shadow: 0 -8px 20px rgba(255,255,255,0.85);
-        z-index: 2;
+      .kos-mobile-dock {
+        display: none;
+        position: fixed;
+        left: 12px;
+        top: max(12px, env(safe-area-inset-top));
+        z-index: 95;
+        width: min(200px, 58vw);
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 10px 10px;
+        border-radius: 14px;
+        background: rgba(10, 16, 28, 0.88);
+        border: 1px solid rgba(255,255,255,0.14);
+        box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+        color: #fff;
+        backdrop-filter: blur(10px);
+        touch-action: none;
       }
-      .kos-mobile-slot-panel .kos-btn {
-        width: 100%;
-        justify-content: center;
-        margin-top: 10px;
+      .kos-mobile-dock.is-dragging { opacity: 0.92; }
+      .kos-mobile-dock-grip {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        padding: 4px 0 2px;
+        cursor: grab;
+        color: rgba(255,255,255,0.55);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 700;
+      }
+      .kos-mobile-dock-grip em { font-style: normal; }
+      .kos-mobile-dock-bars {
+        width: 28px; height: 3px; border-radius: 99px;
+        background: rgba(255,255,255,0.35);
+        box-shadow: 0 5px 0 rgba(255,255,255,0.35);
+      }
+      .kos-mobile-dock-top {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      }
+      .kos-mobile-dock-top strong {
+        font-size: 12px; font-weight: 700;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .kos-mobile-done {
+        appearance: none; border: 0; border-radius: 999px;
+        background: #1a5fff; color: #fff;
+        font: inherit; font-size: 11px; font-weight: 800;
+        padding: 6px 12px; cursor: pointer;
+        flex-shrink: 0;
+      }
+      .kos-mobile-dock-slider {
+        margin: 0;
+        color: rgba(255,255,255,0.9);
+      }
+      .kos-mobile-dock-slider span {
+        display: flex; justify-content: space-between;
+        font-size: 11px; margin-bottom: 2px;
+      }
+      .kos-mobile-dock-slider input[type="range"] { width: 100%; }
+      .kos-mobile-dock-check {
+        color: rgba(255,255,255,0.9);
+        font-size: 11px;
+        gap: 6px;
       }
       .kos-mobile-list {
         display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto;

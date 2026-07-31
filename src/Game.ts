@@ -96,9 +96,10 @@ export class Game implements IUpdatable {
   private lastMatchConfig: BotMatchConfig | null = null
   /** Generic CS-style cvar store for values with no local system yet. */
   private cvars = new Map<string, string>()
-  /** 0 = uncapped; otherwise target frames per second for the render loop. */
+  /** 0 = uncapped (follows display, including 120Hz ProMotion); else hard cap. */
   private fpsCap = 0
   private lastFrameTS = 0
+  private displayHz = 60
   /** /editormode sandbox */
   public editorActive = false
   private editorMenu: EditorMenu | null = null
@@ -292,11 +293,19 @@ export class Game implements IUpdatable {
     return this.perfOverlay
   }
 
+  public setDisplayRefreshRate(hz: number): void {
+    this.displayHz = Math.max(30, Math.min(240, Math.round(hz) || 60))
+  }
+
+  public getDisplayRefreshRate(): number {
+    return this.displayHz
+  }
+
   /**
-   * fps_max: 0 = uncapped (as fast as the display allows), 1..24 clamp up to 24,
-   * 25..999 use that exact cap.
+   * fps_max: 0 = uncapped (matches display refresh — 120 on ProMotion iOS),
+   * 1..24 clamp up to 24, 25..999 use that exact cap.
    */
-  private setFpsCap(n: number): number {
+  public setFpsCap(n: number): number {
     if (n <= 0) this.fpsCap = 0
     else if (n <= 24) this.fpsCap = 24
     else this.fpsCap = Math.min(999, Math.floor(n))
@@ -479,12 +488,17 @@ export class Game implements IUpdatable {
       // ---- FPS cap (persisted) ----
       case 'fps_max': {
         if (arg1 === undefined) {
-          this.conPrint(`"fps_max" is "${this.fpsCap}"`)
+          this.conPrint(`"fps_max" is "${this.fpsCap}" (display ~${this.displayHz}Hz)`)
           return
         }
         const cap = this.setFpsCap(val)
         this.persistSettingsPatch({ fpsMax: cap })
-        this.conPrint(cap === 0 ? 'fps_max 0 (unlimited)' : `fps_max ${cap}`, 'ok')
+        this.conPrint(
+          cap === 0
+            ? `fps_max 0 (unlimited / ~${this.displayHz}Hz display)`
+            : `fps_max ${cap}`,
+          'ok'
+        )
         return
       }
 
@@ -1438,21 +1452,21 @@ export class Game implements IUpdatable {
     this.inputManager.setCurrentPlayer(this.currentPlayer)
   }
   public update() {
-    // Always queue the next animation frame first so early returns still loop.
     requestAnimationFrame(this.update)
 
     const now: number = performance.now()
 
-    // fps_max: skip this frame if we're ahead of the target interval.
     if (this.fpsCap > 0) {
       const minInterval = 1000 / this.fpsCap
-      if (now - this.lastFrameTS < minInterval - 1) return
+      if (now - this.lastFrameTS < minInterval - 0.5) return
     }
     this.lastFrameTS = now
 
-    // Cap dt so physics stays stable; allow a bigger step when fps_max is low
-    // (otherwise a 24 fps cap would run the sim in slow motion).
-    const maxDt = this.fpsCap > 0 ? Math.min(0.1, 1 / this.fpsCap + 0.005) : 0.02
+    const refresh = Math.max(60, this.displayHz)
+    const maxDt =
+      this.fpsCap > 0
+        ? Math.min(0.1, 1 / this.fpsCap + 0.005)
+        : Math.min(0.05, 2 / refresh)
     let dt = (now - this.lastUpdateTS) / 1000
     dt = Math.min(maxDt, dt)
     this.currentPlayer.player.prestep(dt)

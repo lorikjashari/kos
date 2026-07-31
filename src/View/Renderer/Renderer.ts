@@ -225,8 +225,9 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     })
   }
   private setRenderingConfig() {
+    const touch = typeof navigator !== 'undefined' && (navigator.maxTouchPoints || 0) > 0
     this.renderingConfig = {
-      resolution: Math.min(window.devicePixelRatio, 1.5),
+      resolution: Math.min(window.devicePixelRatio, touch ? 2 : 1.5),
       hasParticle: true,
       hasPostProcess: true,
       hasLight: true,
