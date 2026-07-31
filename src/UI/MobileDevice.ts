@@ -1,10 +1,22 @@
-export function isTouchDevice(): boolean {
+export function isMobileDevice(): boolean {
   if (typeof window === 'undefined') return false
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches
-  const noHover = window.matchMedia?.('(hover: none)').matches
-  const touchPoints = (navigator.maxTouchPoints || 0) > 0
-  const ua = /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(navigator.userAgent || '')
-  return !!(coarse || noHover || touchPoints || ua)
+  const ua = navigator.userAgent || ''
+
+  if (/Windows NT/i.test(ua) && !/Windows Phone/i.test(ua)) return false
+
+  if (/Android|iPhone|iPad|iPod|Mobile|Tablet|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua)) {
+    return true
+  }
+
+  if (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1) {
+    return true
+  }
+
+  return false
+}
+
+export function isTouchDevice(): boolean {
+  return isMobileDevice()
 }
 
 export function isStandalonePwa(): boolean {
@@ -16,9 +28,12 @@ export function isStandalonePwa(): boolean {
 }
 
 export function isIos(): boolean {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1)
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
+    (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1)
+  )
 }
 
 export function prefersLandscapeHint(): boolean {
-  return isTouchDevice() && window.matchMedia?.('(orientation: portrait)').matches
+  return isMobileDevice() && !!window.matchMedia?.('(orientation: portrait)').matches
 }

@@ -1,4 +1,4 @@
-import { isIos, isStandalonePwa, isTouchDevice } from './MobileDevice'
+import { isIos, isMobileDevice, isStandalonePwa } from './MobileDevice'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -33,7 +33,7 @@ export class PwaInstall {
   }
 
   public requiresInstall(): boolean {
-    return isTouchDevice() && !isStandalonePwa()
+    return isMobileDevice() && !isStandalonePwa()
   }
 
   public isReady(): boolean {
