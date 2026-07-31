@@ -119,16 +119,40 @@ export class InputManager implements IUpdatable {
   onLock(event?: MouseEvent): void {
     if (!this.gameplayEnabled || this.mobileMode) return
     if (event && this.clickedOnHud(event)) return
-    document.body.requestPointerLock()
+    const el = document.body as HTMLElement & {
+      requestPointerLock?: () => void
+      webkitRequestPointerLock?: () => void
+    }
+    const req = el.requestPointerLock || el.webkitRequestPointerLock
+    if (typeof req === 'function') {
+      try {
+        req.call(el)
+      } catch {
+        /* unsupported */
+      }
+    }
   }
   unlock(): void {
-    document.body.ownerDocument.exitPointerLock()
+    this.isLocked = false
+    const doc = document as Document & {
+      exitPointerLock?: () => void
+      webkitExitPointerLock?: () => void
+    }
+    const exit = doc.exitPointerLock || doc.webkitExitPointerLock
+    if (typeof exit === 'function') {
+      try {
+        exit.call(doc)
+      } catch {
+        /* unsupported on iOS / some mobile browsers */
+      }
+    }
   }
   onPointerlockError(_evt: any): void {
-    console.error('THREE.PointerLockControls: Unable to use Pointer Lock API')
+    this.isLocked = false
   }
   onPointerlockChange(_evt: any): void {
-    this.isLocked = document.body.ownerDocument.pointerLockElement === document.body
+    const doc = document as Document & { pointerLockElement?: Element | null }
+    this.isLocked = doc.pointerLockElement === document.body
   }
   onMouseMove(evt: any): void {
     if (!this.gameplayEnabled || !this.playerWrapper?.player.isCurrentPlayer) return
