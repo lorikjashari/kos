@@ -200,12 +200,7 @@ export class GameHUD {
         this.loadoutPickHandler = null
         handler(primary)
       }
-      btn.addEventListener('pointerup', pick)
-      btn.addEventListener('click', (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        if (this.loadoutPickHandler) pick(e)
-      })
+      btn.addEventListener('click', pick)
     })
     this.scoreboardEl = document.getElementById('hud-scoreboard')!
     this.sbRowsEl = document.getElementById('hud-sb-rows')!

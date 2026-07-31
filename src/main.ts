@@ -18,17 +18,19 @@ async function main() {
       }
       const game = Game.getInstance()
       game.audioManager.stopMenuMusic()
-      menu.hide()
       void (async () => {
         try {
           await game.audioManager.unlock()
           await game.ensureMap(config.mapId || 'pool_day')
           await game.prepareCombat()
+          menu.hide()
           game.startBotMatch(config)
         } catch (error) {
           console.error(error)
+          game.audioManager.stopMenuMusic()
           menu.show()
-          menu.showError(error instanceof Error ? error.message : 'Failed to start match.')
+          const msg = error instanceof Error ? error.message : 'Failed to start match.'
+          window.alert(msg)
         }
       })()
     },

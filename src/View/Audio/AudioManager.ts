@@ -174,16 +174,13 @@ export class AudioManager extends THREE.AudioListener {
         src.start(0)
         this.unlocked = true
       }
-      if (this.menuMusicWanted) void this.startMenuMusic()
+      if (this.menuMusicWanted) void this.resumeMenuMusicElement()
     } catch {
       /* ignore */
     }
   }
 
-  /** Looping menu theme — menus only, never during loading / match */
-  public async startMenuMusic(): Promise<void> {
-    this.menuMusicWanted = true
-    await this.unlock()
+  private async resumeMenuMusicElement(): Promise<void> {
     try {
       if (!this.menuMusic) {
         this.menuMusic = new Audio('/kosmenusong.mp3')
@@ -195,8 +192,14 @@ export class AudioManager extends THREE.AudioListener {
         await this.menuMusic.play()
       }
     } catch {
-      /* autoplay blocked until next gesture — unlock() retries */
+      /* autoplay blocked until next gesture */
     }
+  }
+
+  public async startMenuMusic(): Promise<void> {
+    this.menuMusicWanted = true
+    await this.unlock()
+    await this.resumeMenuMusicElement()
   }
 
   public stopMenuMusic(): void {
