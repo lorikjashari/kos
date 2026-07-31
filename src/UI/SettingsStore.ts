@@ -46,11 +46,17 @@ export interface MobileControlSlot {
 
 export type MobileLayoutMap = Record<MobileControlId, MobileControlSlot>
 
+export type MobileHoldMode = 'hold' | 'toggle'
+export type MobilePerfProfile = 'smooth' | 'balanced' | 'quality'
+
 export interface MobileControlsSettings {
   enabled: boolean
   lookSensitivity: number
   joystickDeadzone: number
   layout: MobileLayoutMap
+  crouchMode: MobileHoldMode
+  leanMode: MobileHoldMode
+  perfProfile: MobilePerfProfile
 }
 
 export interface PlayerSettings {
@@ -226,7 +232,18 @@ export function defaultMobileSettings(): MobileControlsSettings {
     lookSensitivity: 1.15,
     joystickDeadzone: 0.18,
     layout: normalizeMobileLayout(),
+    crouchMode: 'hold',
+    leanMode: 'hold',
+    perfProfile: 'smooth',
   }
+}
+
+function normalizeHoldMode(v: unknown, fallback: MobileHoldMode): MobileHoldMode {
+  return v === 'toggle' || v === 'hold' ? v : fallback
+}
+
+function normalizePerfProfile(v: unknown, fallback: MobilePerfProfile): MobilePerfProfile {
+  return v === 'smooth' || v === 'balanced' || v === 'quality' ? v : fallback
 }
 
 export function normalizeMobileSettings(raw?: Partial<MobileControlsSettings>): MobileControlsSettings {
@@ -236,6 +253,9 @@ export function normalizeMobileSettings(raw?: Partial<MobileControlsSettings>): 
     lookSensitivity: Math.max(0.2, Math.min(3, typeof raw?.lookSensitivity === 'number' ? raw.lookSensitivity : d.lookSensitivity)),
     joystickDeadzone: Math.max(0.05, Math.min(0.45, typeof raw?.joystickDeadzone === 'number' ? raw.joystickDeadzone : d.joystickDeadzone)),
     layout: normalizeMobileLayout(raw?.layout),
+    crouchMode: normalizeHoldMode(raw?.crouchMode, d.crouchMode),
+    leanMode: normalizeHoldMode(raw?.leanMode, d.leanMode),
+    perfProfile: normalizePerfProfile(raw?.perfProfile, d.perfProfile),
   }
 }
 

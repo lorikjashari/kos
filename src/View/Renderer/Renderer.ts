@@ -23,6 +23,8 @@ import { BulletHoleManager } from '../Effects/BulletHoleManager'
 import { BloodManager } from '../Effects/BloodManager'
 import { Game } from '../../Game'
 import { GameHUD } from '../HUD/GameHUD'
+import { isTouchDevice } from '../../UI/MobileDevice'
+import type { MobilePerfProfile } from '../../UI/SettingsStore'
 
 export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   public scene: THREE.Scene
@@ -44,13 +46,20 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   private sky!: Sky
   public sceneLighting!: SceneLighting
   public hud!: GameHUD
+  private readonly mobileGameplay: boolean
   constructor(players: Array<PlayerWrapper>) {
-    super({ antialias: true, powerPreference: 'high-performance' })
+    const mobile = isTouchDevice()
+    super({
+      antialias: !mobile,
+      powerPreference: 'high-performance',
+      stencil: false,
+    })
+    this.mobileGameplay = mobile
     this.autoClear = false
     this.shadowMap.autoUpdate = false
     this.players = players
     this.scene = new THREE.Scene()
-    this.scene.fog = new THREE.FogExp2(0xb8cfe4, 0.00035)
+    this.scene.fog = new THREE.FogExp2(0xb8cfe4, mobile ? 0.00055 : 0.00035)
     this.viewmodelRenderer = new ViewmodelRenderer()
     this.particleManager = new ParticleManager(this.scene)
     this.projectileManager = new ProjectileManager(this.scene, () => Game.getInstance().getPhysics())
@@ -59,8 +68,8 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.bloodManager = new BloodManager(this.scene)
     this.debugUI = new DebugUI()
     this.debugUI.addMonitor(this.info.render, 'calls')
-    this.gameResW = 1280
-    this.gameResH = 960
+    this.gameResW = mobile ? 960 : 1280
+    this.gameResH = mobile ? 540 : 960
     this.setRenderingConfig()
     this.onWindowResize = this.onWindowResize.bind(this)
     this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
@@ -225,17 +234,16 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     })
   }
   private setRenderingConfig() {
-    const touch = typeof navigator !== 'undefined' && (navigator.maxTouchPoints || 0) > 0
+    const mobile = this.mobileGameplay
     this.renderingConfig = {
-      resolution: Math.min(window.devicePixelRatio, touch ? 2 : 1.5),
-      hasParticle: true,
-      hasPostProcess: true,
+      resolution: Math.min(window.devicePixelRatio, mobile ? 1.25 : 1.5),
+      hasParticle: !mobile,
+      hasPostProcess: !mobile,
       hasLight: true,
-      hasShadow: true,
+      hasShadow: !mobile,
       debugCamera: false,
       updateViewmodel: true,
       showViewmodel: true,
-      // Separate viewmodel pass (clearDepth) so guns never clip into walls
       legacyViewmodel: false,
     }
     const folder = this.debugUI.addFolder({ title: 'Rendering config' })
@@ -281,6 +289,32 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     if (!camera.children.includes(audioManager)) {
       camera.add(audioManager)
     }
+  }
+
+  public applyMobilePerfProfile(profile: MobilePerfProfile): void {
+    if (!this.mobileGameplay) return
+    if (profile === 'smooth') {
+      this.renderingConfig.hasPostProcess = false
+      this.renderingConfig.hasParticle = false
+      this.renderingConfig.hasShadow = false
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.25)
+      this.setGameResolution(854, 480)
+    } else if (profile === 'balanced') {
+      this.renderingConfig.hasPostProcess = false
+      this.renderingConfig.hasParticle = true
+      this.renderingConfig.hasShadow = false
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.5)
+      this.setGameResolution(960, 540)
+    } else {
+      this.renderingConfig.hasPostProcess = false
+      this.renderingConfig.hasParticle = true
+      this.renderingConfig.hasShadow = true
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 2)
+      this.setGameResolution(1280, 720)
+    }
+    this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
+    this.sceneLighting?.enableShadow(this.renderingConfig.hasShadow)
+    if (this.renderingConfig.hasPostProcess && !this.composer) this.addPostProcess()
   }
   private onWindowResize(): void {
     // Keep the chosen game resolution; only refresh CSS fill + pixel ratio

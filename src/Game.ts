@@ -48,6 +48,7 @@ import {
 import { CameraManager } from './View/CameraManager/CameraManager'
 import type { MobileControls } from './UI/MobileControls'
 import { isTouchDevice } from './UI/MobileDevice'
+import type { MobilePerfProfile } from './UI/SettingsStore'
 
 export class Game implements IUpdatable {
   public static game: Game
@@ -235,9 +236,19 @@ export class Game implements IUpdatable {
     this.audioManager.setSfxVolume(clampVolume(s.volume))
     this.audioManager.setMusicVolume(clampVolume(s.musicVolume))
     this.setFpsCap(s.fpsMax)
-    this.applyResolution(s.resolutionWidth, s.resolutionHeight)
-    this.mobileControls?.applySettings(s.mobile)
+    if (isTouchDevice()) {
+      this.mobileControls?.applySettings(s.mobile)
+      this.applyMobilePerfProfile(s.mobile.perfProfile)
+    } else {
+      this.applyResolution(s.resolutionWidth, s.resolutionHeight)
+      this.mobileControls?.applySettings(s.mobile)
+    }
     this.syncMobileControls()
+  }
+
+  public applyMobilePerfProfile(profile: MobilePerfProfile): void {
+    if (!isTouchDevice()) return
+    this.renderer?.applyMobilePerfProfile(profile)
   }
 
   /** Apply internal render resolution from settings (persists when saved via menu). */
@@ -1266,6 +1277,11 @@ export class Game implements IUpdatable {
   }
 
   public async prepareCombat(): Promise<void> {
+    if (isTouchDevice()) {
+      await this.audioManager.unlock()
+      this.effectsWarmed = true
+      return
+    }
     await this.warmCombatSystems()
   }
 

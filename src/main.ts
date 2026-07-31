@@ -4,7 +4,7 @@ import { MainMenu } from './UI/MainMenu'
 import { MobileControls } from './UI/MobileControls'
 import { PwaInstall } from './UI/PwaInstall'
 import { loadSettings } from './UI/SettingsStore'
-import { isStandalonePwa, isTouchDevice } from './UI/MobileDevice'
+import { isTouchDevice } from './UI/MobileDevice'
 import { probeRefreshRate, supportsHighRefresh } from './UI/DisplayRefresh'
 
 async function main() {
@@ -13,10 +13,6 @@ async function main() {
 
   const menu = new MainMenu({
     onPlayBots: (config) => {
-      if (isTouchDevice() && !isStandalonePwa()) {
-        pwa.mount()
-        return
-      }
       const game = Game.getInstance()
       game.audioManager.stopMenuMusic()
       void (async () => {
@@ -40,8 +36,11 @@ async function main() {
       game.inputManager.applyKeybinds(settings.keybinds)
       game.inputManager.setJumpWithScrollWheel(settings.jumpWithScrollWheel)
       game.attachCrosshair(menu.getGameCrosshair(), settings)
-      game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)
+      if (!isTouchDevice()) {
+        game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)
+      }
       game.getMobileControls()?.applySettings(settings.mobile)
+      if (isTouchDevice()) game.applyMobilePerfProfile(settings.mobile.perfProfile)
     },
   })
 
@@ -77,7 +76,11 @@ async function main() {
 
     menu.setLoadingProgress('Preparing world…', 90)
     game.onLoad()
-    game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)
+    if (isTouchDevice()) {
+      game.applyMobilePerfProfile(settings.mobile.perfProfile)
+    } else {
+      game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)
+    }
     game.startUpdateLoop()
 
     menu.setLoadingProgress('Warming combat…', 96)
@@ -96,10 +99,6 @@ async function main() {
     await new Promise((r) => setTimeout(r, 280))
     menu.showMain()
     void game.audioManager.startMenuMusic()
-
-    if (pwa.requiresInstall()) {
-      pwa.mount()
-    }
   } catch (error) {
     console.error(error)
     menu.showError(error instanceof Error ? error.message : 'An unknown error occurred while loading the game.')

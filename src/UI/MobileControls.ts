@@ -45,6 +45,7 @@ export class MobileControls {
   private onLayoutChanged: ((layout: MobileLayoutMap) => void) | null = null
   private pressed = new Set<MobileControlId>()
   private holdPointers = new Map<number, MobileControlId>()
+  private toggled = new Set<MobileControlId>()
 
   constructor(input: InputManager, settings?: MobileControlsSettings) {
     this.input = input
@@ -241,6 +242,10 @@ export class MobileControls {
       this.updateJoystick(e.clientX, e.clientY, rect.width / 2)
       return
     }
+    if (this.isToggleControl(id)) {
+      this.flipToggle(id)
+      return
+    }
     this.holdPointers.set(e.pointerId, id)
     this.press(id, true)
   }
@@ -288,7 +293,28 @@ export class MobileControls {
     const id = this.holdPointers.get(e.pointerId)
     if (!id || id === 'joystick') return
     this.holdPointers.delete(e.pointerId)
+    if (this.isToggleControl(id)) return
     this.press(id, false)
+  }
+
+  private isToggleControl(id: MobileControlId): boolean {
+    if (id === 'crouch') return this.settings.crouchMode === 'toggle'
+    if (id === 'leanLeft' || id === 'leanRight') return this.settings.leanMode === 'toggle'
+    return false
+  }
+
+  private flipToggle(id: MobileControlId): void {
+    const next = !this.toggled.has(id)
+    if ((id === 'leanLeft' || id === 'leanRight') && next) {
+      const other: MobileControlId = id === 'leanLeft' ? 'leanRight' : 'leanLeft'
+      if (this.toggled.has(other)) {
+        this.toggled.delete(other)
+        this.press(other, false)
+      }
+    }
+    if (next) this.toggled.add(id)
+    else this.toggled.delete(id)
+    this.press(id, next)
   }
 
   private updateJoystick(x: number, y: number, radius: number): void {
@@ -332,6 +358,8 @@ export class MobileControls {
 
   private releaseAll(): void {
     for (const id of [...this.pressed]) this.press(id, false)
+    this.toggled.clear()
+    this.holdPointers.clear()
     this.clearJoystick()
     this.joyPointerId = null
     this.lookPointerId = null
@@ -363,9 +391,11 @@ export class MobileControls {
       #kos-mobile-controls .kos-mc-btn {
         position: absolute;
         transform: translate(-50%, -50%);
-        border: 1.5px solid rgba(255,255,255,0.35);
+        border: 1.5px solid rgba(255,255,255,0.38);
         border-radius: 999px;
-        background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.22), rgba(10,20,40,0.45));
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.02)),
+          radial-gradient(circle at 35% 28%, rgba(255,255,255,0.22), rgba(8,14,28,0.55));
         color: #fff;
         pointer-events: auto;
         touch-action: none;
@@ -374,12 +404,15 @@ export class MobileControls {
         justify-content: center;
         padding: 0;
         margin: 0;
-        box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25), 0 8px 18px rgba(0,0,0,0.28);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 22px rgba(0,0,0,0.32);
         -webkit-tap-highlight-color: transparent;
       }
       #kos-mobile-controls .kos-mc-btn.is-down {
-        background: radial-gradient(circle at 35% 30%, rgba(80,150,255,0.45), rgba(10,40,90,0.55));
-        border-color: rgba(120,180,255,0.75);
+        background:
+          linear-gradient(180deg, rgba(90,160,255,0.42), rgba(20,60,140,0.55)),
+          radial-gradient(circle at 35% 28%, rgba(140,190,255,0.35), rgba(10,30,70,0.6));
+        border-color: rgba(150,200,255,0.85);
+        transform: translate(-50%, -50%) scale(0.96);
       }
       #kos-mobile-controls .kos-mc-btn.is-selected {
         outline: 2px solid #5aa2ff;

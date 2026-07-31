@@ -21,6 +21,8 @@ import { CrosshairRenderer } from './CrosshairRenderer'
 import { Key } from '../Input/KeyBinding'
 import { Game } from '../Game'
 import type { MobileControls } from './MobileControls'
+import { isTouchDevice } from './MobileDevice'
+import type { MobileHoldMode, MobilePerfProfile } from './SettingsStore'
 
 export type BotMatchConfig = {
   difficulty: BotDifficulty
@@ -68,8 +70,15 @@ export class MainMenu {
     this.root.innerHTML = this.buildHtml()
     document.body.appendChild(this.root)
     this.bind()
+    this.applyDeviceUi()
     this.applyCrosshairToGame()
     this.showScreen('loading')
+  }
+
+  private applyDeviceUi(): void {
+    const mobile = isTouchDevice()
+    this.root.classList.toggle('is-desktop', !mobile)
+    this.root.classList.toggle('is-mobile-ui', mobile)
   }
 
   public getSettings(): PlayerSettings {
@@ -268,7 +277,7 @@ export class MainMenu {
             <button type="button" class="kos-tab is-on" data-tab="video">Video</button>
             <button type="button" class="kos-tab" data-tab="crosshair">Crosshair</button>
             <button type="button" class="kos-tab" data-tab="keybinds">Keybinds</button>
-            <button type="button" class="kos-tab" data-tab="mobile">Mobile</button>
+            <button type="button" class="kos-tab" data-tab="mobile" data-mobile-only>Mobile</button>
           </div>
 
           <div class="kos-tab-panel is-on" data-panel="video">
@@ -279,7 +288,7 @@ export class MainMenu {
             <div class="kos-chip-row" id="kos-fps-row">
               <button type="button" class="kos-chip" data-fps="0">Auto</button>
               <button type="button" class="kos-chip" data-fps="60">60</button>
-              <button type="button" class="kos-chip" data-fps="120">120</button>
+              <button type="button" class="kos-chip" data-fps="120" data-mobile-only>120</button>
             </div>
           </div>
 
@@ -309,28 +318,76 @@ export class MainMenu {
             <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-binds">Reset Keybinds</button>
           </div>
 
-          <div class="kos-tab-panel" data-panel="mobile">
-            <p class="kos-hint">Standoff-style touch layout. Drag buttons in the editor, tune size & opacity, then save. Right-side drag aims in-match.</p>
-            <label class="kos-check kos-match-opt">
-              <input id="kos-mobile-enabled" type="checkbox" />
-              <span>
-                <strong>Touch controls</strong>
-                <em>On-screen stick + action buttons for mobile</em>
-              </span>
-            </label>
-            <label class="kos-slider">
-              <span>Touch look sensitivity<em id="kos-mobile-look-val">1.15</em></span>
-              <input id="kos-mobile-look" type="range" min="0.2" max="3" step="0.05" value="1.15" />
-            </label>
-            <label class="kos-slider">
-              <span>Joystick deadzone<em id="kos-mobile-dead-val">0.18</em></span>
-              <input id="kos-mobile-dead" type="range" min="0.05" max="0.45" step="0.01" value="0.18" />
-            </label>
-            <div class="kos-mobile-editor-actions">
-              <button type="button" class="kos-btn kos-btn-primary" data-action="edit-mobile-layout">Edit Button Layout</button>
-              <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-mobile-layout">Reset Layout</button>
+          <div class="kos-tab-panel" data-panel="mobile" data-mobile-only>
+            <div class="kos-mset">
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Performance</strong>
+                  <em>Smooth keeps 120Hz devices playable</em>
+                </div>
+                <div class="kos-seg" data-seg="perfProfile">
+                  <button type="button" data-perf="smooth">Smooth</button>
+                  <button type="button" data-perf="balanced">Balanced</button>
+                  <button type="button" data-perf="quality">Quality</button>
+                </div>
+              </div>
+
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Touch look</strong>
+                  <em>Drag empty space to aim</em>
+                </div>
+                <label class="kos-slider">
+                  <span>Look sensitivity<em id="kos-mobile-look-val">1.15</em></span>
+                  <input id="kos-mobile-look" type="range" min="0.2" max="3" step="0.05" value="1.15" />
+                </label>
+                <label class="kos-slider">
+                  <span>Stick deadzone<em id="kos-mobile-dead-val">0.18</em></span>
+                  <input id="kos-mobile-dead" type="range" min="0.05" max="0.45" step="0.01" value="0.18" />
+                </label>
+                <label class="kos-check kos-match-opt">
+                  <input id="kos-mobile-enabled" type="checkbox" />
+                  <span>
+                    <strong>On-screen controls</strong>
+                    <em>Joystick + action buttons</em>
+                  </span>
+                </label>
+              </div>
+
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Crouch</strong>
+                  <em>Hold or tap-toggle</em>
+                </div>
+                <div class="kos-seg" data-seg="crouchMode">
+                  <button type="button" data-hold="hold">Hold</button>
+                  <button type="button" data-hold="toggle">Toggle</button>
+                </div>
+              </div>
+
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Lean / tilt</strong>
+                  <em>Hold or tap-toggle left & right</em>
+                </div>
+                <div class="kos-seg" data-seg="leanMode">
+                  <button type="button" data-hold="hold">Hold</button>
+                  <button type="button" data-hold="toggle">Toggle</button>
+                </div>
+              </div>
+
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Button layout</strong>
+                  <em>Standoff-style drag editor</em>
+                </div>
+                <div class="kos-mobile-editor-actions">
+                  <button type="button" class="kos-btn kos-btn-primary" data-action="edit-mobile-layout">Edit Layout</button>
+                  <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-mobile-layout">Reset</button>
+                </div>
+                <div class="kos-mobile-list" id="kos-mobile-list"></div>
+              </div>
             </div>
-            <div class="kos-mobile-list" id="kos-mobile-list"></div>
           </div>
         </div>
       </section>
@@ -489,7 +546,7 @@ export class MainMenu {
 
     this.root.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps]'
+        '[data-action], [data-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps], [data-hold], [data-perf]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -533,6 +590,28 @@ export class MainMenu {
         }
         this.syncFpsControls()
         this.persist()
+      }
+
+      const holdSeg = t.closest('[data-seg="crouchMode"], [data-seg="leanMode"]') as HTMLElement | null
+      const holdMode = t.getAttribute('data-hold') as MobileHoldMode | null
+      if (holdSeg && (holdMode === 'hold' || holdMode === 'toggle')) {
+        const seg = holdSeg.getAttribute('data-seg')
+        if (seg === 'crouchMode') this.settings.mobile.crouchMode = holdMode
+        if (seg === 'leanMode') this.settings.mobile.leanMode = holdMode
+        this.syncMobileModeSegs()
+        this.persist()
+      }
+
+      const perf = t.getAttribute('data-perf') as MobilePerfProfile | null
+      if (perf === 'smooth' || perf === 'balanced' || perf === 'quality') {
+        this.settings.mobile.perfProfile = perf
+        this.syncMobileModeSegs()
+        this.persist()
+        try {
+          Game.getInstance().applyMobilePerfProfile(perf)
+        } catch {
+          /* ignore */
+        }
       }
 
       const res = t.getAttribute('data-res')
@@ -835,8 +914,22 @@ export class MainMenu {
       deadInput.value = String(this.settings.mobile.joystickDeadzone)
       if (deadVal) deadVal.textContent = String(this.settings.mobile.joystickDeadzone)
     }
+    this.syncMobileModeSegs()
     this.renderMobileList()
     this.syncSelectedMobileSlot()
+  }
+
+  private syncMobileModeSegs(): void {
+    const m = this.settings.mobile
+    this.root.querySelectorAll('[data-seg="crouchMode"] [data-hold]').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-hold') === m.crouchMode)
+    })
+    this.root.querySelectorAll('[data-seg="leanMode"] [data-hold]').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-hold') === m.leanMode)
+    })
+    this.root.querySelectorAll('[data-seg="perfProfile"] [data-perf]').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-perf') === m.perfProfile)
+    })
   }
 
   private renderMobileList(): void {
@@ -1366,8 +1459,66 @@ export class MainMenu {
         display: flex !important;
         pointer-events: auto;
       }
+      #kos-menu.is-desktop [data-mobile-only] { display: none !important; }
+
+      .kos-mset {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 100%;
+      }
+      .kos-mset-card {
+        background: #fff;
+        border: 1px solid var(--kos-line);
+        border-radius: 14px;
+        padding: 14px 14px 12px;
+        box-shadow: 0 8px 18px rgba(10, 30, 80, 0.04);
+      }
+      .kos-mset-head {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-bottom: 10px;
+      }
+      .kos-mset-head strong {
+        font-size: 14px;
+        font-weight: 750;
+        color: var(--kos-ink);
+      }
+      .kos-mset-head em {
+        font-style: normal;
+        font-size: 12px;
+        color: var(--kos-muted);
+      }
+      .kos-seg {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+        gap: 6px;
+        padding: 4px;
+        border-radius: 12px;
+        background: var(--kos-blue-soft);
+      }
+      .kos-seg button {
+        appearance: none;
+        border: 0;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--kos-muted);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 750;
+        padding: 10px 8px;
+        cursor: pointer;
+        transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+      }
+      .kos-seg button.is-on {
+        background: #fff;
+        color: var(--kos-blue-deep);
+        box-shadow: 0 4px 12px rgba(26, 95, 255, 0.16);
+      }
+
       .kos-mobile-editor-actions {
-        display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0;
+        display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px;
       }
       .kos-mobile-editor-actions .kos-btn { flex: 1; min-width: 120px; justify-content: center; margin-top: 0; }
       .kos-mobile-dock {
