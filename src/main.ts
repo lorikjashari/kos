@@ -13,6 +13,10 @@ async function main() {
 
   const menu = new MainMenu({
     onPlayBots: (config) => {
+      if (pwa.requiresInstall()) {
+        pwa.mount()
+        return
+      }
       const game = Game.getInstance()
       game.audioManager.stopMenuMusic()
       void (async () => {
@@ -99,6 +103,10 @@ async function main() {
     await new Promise((r) => setTimeout(r, 280))
     menu.showMain()
     void game.audioManager.startMenuMusic()
+
+    if (pwa.requiresInstall()) {
+      pwa.mount()
+    }
   } catch (error) {
     console.error(error)
     menu.showError(error instanceof Error ? error.message : 'An unknown error occurred while loading the game.')

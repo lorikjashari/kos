@@ -33,10 +33,6 @@ export class PwaInstall {
   }
 
   public requiresInstall(): boolean {
-    return false
-  }
-
-  public canOfferInstall(): boolean {
     return isTouchDevice() && !isStandalonePwa()
   }
 
