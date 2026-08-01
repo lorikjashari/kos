@@ -48,6 +48,7 @@ async function main() {
           await game.audioManager.unlock()
           await game.ensureMap('pool_day')
           await game.prepareCombat()
+          menu.hide()
           const code = await game.startMultiplayerMatch({
             mode: config.mode,
             roomCode: config.roomCode,
@@ -56,7 +57,6 @@ async function main() {
             botCount: config.botCount,
           })
           menu.setMultiplayerStatus(config.mode === 'host' ? `Room ${code}` : `Joined ${code}`)
-          menu.hide()
         } catch (error) {
           console.error(error)
           game.multiplayer?.stop()

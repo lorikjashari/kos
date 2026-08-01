@@ -2,6 +2,7 @@ import { Player } from '../../Core/Player'
 import { WeaponIconRenderer } from './WeaponIconRenderer'
 import { Game } from '../../Game'
 import { isTouchDevice } from '../../UI/MobileDevice'
+import { FPSRenderer } from '../Renderer/PlayerRenderer/FPSRenderer'
 
 type FeedPush = {
   killer: string
@@ -203,6 +204,50 @@ export class GameHUD {
     if (this.killFeedEl) this.killFeedEl.innerHTML = ''
     this.setScoreboardVisible(false)
     this.setPauseMenuOpen(false)
+    this.adoptCrosshair()
+    this.setCrosshairVisible(true, false)
+  }
+
+  /** Keep the aim canvas above the WebGL layer and under loadout/scope UI. */
+  private adoptCrosshair(): void {
+    const el = document.getElementById('game-crosshair')
+    if (!el) return
+    if (el.parentElement !== this.root) {
+      this.root.appendChild(el)
+    }
+    try {
+      Game.getInstance().getCrosshairRenderer()?.resize()
+    } catch {
+      /* game may not be ready */
+    }
+  }
+
+  /**
+   * @param on match / menu visibility
+   * @param hideForScope true while AWP ADS (scope reticle replaces it)
+   */
+  public setCrosshairVisible(on: boolean, hideForScope = false): void {
+    this.adoptCrosshair()
+    const el = document.getElementById('game-crosshair') as HTMLElement | null
+    if (!el) return
+    el.style.removeProperty('display')
+    el.classList.toggle('is-on', on)
+    el.classList.toggle('is-awp-hidden', hideForScope)
+  }
+
+  private syncCrosshairForWeapon(player: Player): void {
+    const game = Game.getInstance()
+    if (!game.matchStarted) {
+      this.setCrosshairVisible(false, false)
+      return
+    }
+    if (game.isAwaitingLoadout()) {
+      this.setCrosshairVisible(true, true)
+      return
+    }
+    const fps = game.currentPlayer?.renderer as FPSRenderer | undefined
+    const hide = player.currentWeapon.key === 'AWP' && !!fps?.isScoped()
+    this.setCrosshairVisible(true, hide)
   }
 
   private bind(): void {
@@ -416,7 +461,7 @@ export class GameHUD {
     })
     this.loadoutEl.classList.add('is-on')
     this.loadoutEl.setAttribute('aria-hidden', 'false')
-    document.getElementById('game-crosshair')?.classList.add('is-awp-hidden')
+    this.setCrosshairVisible(true, true)
   }
 
   public hideLoadoutPicker(): void {
@@ -424,8 +469,7 @@ export class GameHUD {
     if (!this.loadoutEl) return
     this.loadoutEl.classList.remove('is-on')
     this.loadoutEl.setAttribute('aria-hidden', 'true')
-    // Crosshair visibility follows equipped weapon again in update()
-    document.getElementById('game-crosshair')?.classList.remove('is-awp-hidden')
+    this.setCrosshairVisible(true, false)
   }
 
   public showHitMarker(isHead = false): void {
@@ -552,6 +596,29 @@ export class GameHUD {
         -webkit-tap-highlight-color: transparent;
       }
       #game-hud-top:not(.is-touch) [data-touch-only] { display: none !important; }
+
+      #game-hud > #game-crosshair {
+        position: absolute !important;
+        left: 50% !important;
+        top: 50% !important;
+        right: auto !important;
+        bottom: auto !important;
+        inset: auto !important;
+        width: 48px !important;
+        height: 48px !important;
+        max-width: 48px !important;
+        max-height: 48px !important;
+        transform: translate(-50%, -50%);
+        z-index: 12;
+        pointer-events: none;
+        background: transparent !important;
+        opacity: 0;
+        visibility: hidden;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+      #game-hud > #game-crosshair.is-on { opacity: 1; visibility: visible; }
+      #game-hud > #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; }
 
       .kos-brand {
         position: absolute;
@@ -1419,8 +1486,8 @@ export class GameHUD {
     const weapon = player.currentWeapon
     const isMelee = weapon.fireMode === 'melee'
 
-    // AWP uses the scope reticle — hide the normal crosshair while equipped
-    document.getElementById('game-crosshair')?.classList.toggle('is-awp-hidden', weapon.key === 'AWP')
+    // Hipfire always shows the crosshair; only AWP ADS uses the scope reticle
+    this.syncCrosshairForWeapon(player)
 
     this.healthText.textContent = String(Math.round(player.health))
     this.healthFill.style.transform = `scaleX(${Math.max(0, Math.min(1, player.health / 100))})`
