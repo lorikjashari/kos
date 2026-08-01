@@ -88,11 +88,15 @@ async function main() {
     }
     game.startUpdateLoop()
 
-    menu.setLoadingProgress('Warming combat…', 96)
-    await game.audioManager.unlock()
+    menu.setLoadingProgress('Finishing setup…', 96)
+    // Never block boot on audio unlock — iOS often has no gesture yet
+    await Promise.race([
+      game.audioManager.unlock(),
+      new Promise<void>((r) => setTimeout(r, 450)),
+    ])
 
     menu.setLoadingProgress('Detecting display…', 98)
-    const hz = await probeRefreshRate(isTouchDevice() ? 55 : 40)
+    const hz = await probeRefreshRate(isTouchDevice() ? 40 : 40)
     game.setDisplayRefreshRate(hz)
     game.setFpsCap(settings.fpsMax === 999 ? 0 : settings.fpsMax)
     if (settings.fpsMax === 0 && supportsHighRefresh()) {

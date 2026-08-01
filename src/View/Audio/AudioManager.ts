@@ -166,13 +166,23 @@ export class AudioManager extends THREE.AudioListener {
   public async unlock(): Promise<void> {
     try {
       const ctx = this.getCtx()
-      if (ctx.state === 'suspended') await ctx.resume()
+      if (ctx.state === 'suspended') {
+        // iOS Safari can hang forever on resume() without a user gesture
+        await Promise.race([
+          ctx.resume().then(() => undefined).catch(() => undefined),
+          new Promise<void>((r) => setTimeout(r, 400)),
+        ])
+      }
       if (!this.unlocked) {
-        const silent = ctx.createBuffer(1, 1, ctx.sampleRate)
-        const src = ctx.createBufferSource()
-        src.buffer = silent
-        src.connect(this.masterGain)
-        src.start(0)
+        try {
+          const silent = ctx.createBuffer(1, 1, ctx.sampleRate)
+          const src = ctx.createBufferSource()
+          src.buffer = silent
+          src.connect(this.masterGain)
+          src.start(0)
+        } catch {
+          /* context may still be suspended — unlock on next gesture */
+        }
         this.unlocked = true
       }
       if (this.menuMusicWanted) void this.resumeMenuMusicElement()
@@ -231,18 +241,28 @@ export class AudioManager extends THREE.AudioListener {
 
   public async loadPriority(): Promise<void> {
     this.startLoading()
-    await Promise.all(PRIORITY.map((id) => this.ensureBuffer(id)))
+    // Don't let one stalled decode hang the whole boot (common on flaky mobile nets)
+    await Promise.race([
+      Promise.allSettled(PRIORITY.map((id) => this.ensureBuffer(id))),
+      new Promise<void>((r) => setTimeout(r, 12000)),
+    ])
   }
 
   public async warmPlayback(): Promise<void> {
     await this.unlock()
-    // Ensure every combat buffer is decoded before first shot/hit
-    await Promise.all(PRIORITY.map((id) => this.ensureBuffer(id)))
+    await Promise.race([
+      Promise.allSettled(PRIORITY.map((id) => this.ensureBuffer(id))),
+      new Promise<void>((r) => setTimeout(r, 8000)),
+    ])
 
     const ctx = this.getCtx()
-    if (ctx.state === 'suspended') await ctx.resume()
+    if (ctx.state === 'suspended') {
+      await Promise.race([
+        ctx.resume().then(() => undefined).catch(() => undefined),
+        new Promise<void>((r) => setTimeout(r, 300)),
+      ])
+    }
 
-    // Touch every buffer through the graph (incl. HRTF path used by bot shots)
     for (const id of PRIORITY) {
       const buffer = this.buffers.get(id)
       if (!buffer) continue

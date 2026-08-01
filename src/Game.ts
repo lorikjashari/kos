@@ -1288,7 +1288,10 @@ export class Game implements IUpdatable {
 
   public async prepareCombat(): Promise<void> {
     if (isTouchDevice()) {
-      await this.audioManager.unlock()
+      await Promise.race([
+        this.audioManager.unlock(),
+        new Promise<void>((r) => setTimeout(r, 500)),
+      ])
       this.effectsWarmed = true
       return
     }
