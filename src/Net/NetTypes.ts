@@ -57,9 +57,11 @@ export const MP_FILL_BOTS = 10
 export const MP_MAX_HUMANS = 15
 export const MP_TICK_HZ = 20
 
-export function botTargetForHumans(humanCount: number): number {
+/** Host-chosen fill (0 = pure PvP). Extra humans replace bots: 2 players + fill 10 → 9 bots. */
+export function botTargetForHumans(humanCount: number, fillBots = MP_FILL_BOTS): number {
   const n = Math.max(1, Math.min(MP_MAX_HUMANS, humanCount))
-  return Math.max(0, MP_FILL_BOTS - (n - 1))
+  const fill = Math.max(0, Math.min(MP_FILL_BOTS, Math.round(fillBots)))
+  return Math.max(0, fill - (n - 1))
 }
 
 export function makeRoomCode(): string {

@@ -5,6 +5,7 @@ import { Game } from '../Game'
 import { NetSession } from './NetSession'
 import {
   botTargetForHumans,
+  MP_FILL_BOTS,
   MP_TICK_HZ,
   type NetMsg,
   type NetRole,
@@ -15,6 +16,8 @@ export type MultiplayerStartConfig = {
   roomCode?: string
   playerName: string
   difficulty?: 'easy' | 'medium' | 'hard'
+  /** Host-only: how many bots to fill with (0–10). 0 = 1v1 / pure PvP. */
+  botCount?: number
 }
 
 type HumanRec = { id: string; name: string }
@@ -28,6 +31,7 @@ export class MultiplayerMatch {
   private role: NetRole = 'offline'
   private roomCode = ''
   private localName = 'Player'
+  private fillBots = MP_FILL_BOTS
   private humans = new Map<string, HumanRec>()
   private acc = 0
   private lastShootSent = 0
@@ -50,9 +54,14 @@ export class MultiplayerMatch {
     return Math.max(1, this.humans.size)
   }
 
+  public getFillBots(): number {
+    return this.fillBots
+  }
+
   public async start(config: MultiplayerStartConfig): Promise<{ code: string; role: NetRole }> {
     this.stop()
     this.localName = (config.playerName || 'Player').slice(0, 24)
+    this.fillBots = Math.max(0, Math.min(MP_FILL_BOTS, Math.round(config.botCount ?? MP_FILL_BOTS)))
     this.enabled = true
     this.humans.clear()
 
@@ -161,7 +170,7 @@ export class MultiplayerMatch {
           t: 'welcome',
           hostName: this.localName,
           humans: [...this.humans.values()],
-          botTarget: botTargetForHumans(this.humans.size),
+          botTarget: botTargetForHumans(this.humans.size, this.fillBots),
         })
         this.broadcastRoster()
         this.reconcileBotCount()
@@ -295,7 +304,7 @@ export class MultiplayerMatch {
     const msg: NetMsg = {
       t: 'roster',
       humans: [...this.humans.values()],
-      botTarget: botTargetForHumans(this.humans.size),
+      botTarget: botTargetForHumans(this.humans.size, this.fillBots),
     }
     this.session.broadcast(msg)
   }
@@ -314,7 +323,7 @@ export class MultiplayerMatch {
       id: this.session.localPeerId,
       name: this.localName,
       x: player.position.x,
-      y: player.position.y,
+      y: player.getFeetY(),
       z: player.position.z,
       yaw,
       pitch,
@@ -440,7 +449,7 @@ export class MultiplayerMatch {
     if (!this.isHost) return
     const game = Game.getInstance()
     if (!game.matchStarted) return
-    const desired = botTargetForHumans(this.humans.size)
+    const desired = botTargetForHumans(this.humans.size, this.fillBots)
     game.reconcileAiBotCount(desired)
   }
 }

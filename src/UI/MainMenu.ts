@@ -41,6 +41,7 @@ type MenuCallbacks = {
     roomCode?: string
     playerName: string
     difficulty: BotDifficulty
+    botCount: number
   }) => void
   onSettingsChanged: (settings: PlayerSettings) => void
 }
@@ -263,6 +264,12 @@ export class MainMenu {
             <button type="button" class="kos-chip is-on" data-mp-diff="medium">Medium</button>
             <button type="button" class="kos-chip" data-mp-diff="hard">Hard</button>
           </div>
+
+          <label class="kos-field kos-field-inline">
+            <span>How many bots</span>
+            <input id="kos-mp-bot-count" type="number" min="0" max="10" step="1" value="10" inputmode="numeric" />
+          </label>
+          <p class="kos-hint tight-left">0 = pure 1v1 / friends only. Friends still replace bots as they join.</p>
 
           <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="mp-host">
             <span class="kos-btn-label">Create Room</span>
@@ -823,7 +830,10 @@ export class MainMenu {
     this.persist()
     const status = this.root.querySelector('#kos-mp-status') as HTMLElement | null
     const codeInput = this.root.querySelector('#kos-mp-code') as HTMLInputElement | null
+    const botInput = this.root.querySelector('#kos-mp-bot-count') as HTMLInputElement | null
     const roomCode = (codeInput?.value || '').trim().toUpperCase()
+    const rawBots = Number(botInput?.value)
+    const botCount = Number.isFinite(rawBots) ? Math.max(0, Math.min(10, Math.round(rawBots))) : 10
     if (mode === 'join' && roomCode.length < 4) {
       if (status) status.textContent = 'Enter the host room code first.'
       return
@@ -835,6 +845,7 @@ export class MainMenu {
       roomCode: mode === 'join' ? roomCode : undefined,
       playerName: this.settings.playerName,
       difficulty: this.selectedDifficulty,
+      botCount,
     })
   }
 

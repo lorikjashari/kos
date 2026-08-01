@@ -68,11 +68,8 @@ export class GameHUD {
 
       <div class="cs-bottom-left">
         <div class="cs-vital">
-          <div class="cs-vital-badge" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
-          </div>
+          <div class="cs-vital-icon">+</div>
           <div class="cs-vital-main">
-            <div class="cs-vital-label">Health</div>
             <div class="cs-vital-num" id="hud-hp">100</div>
             <div class="cs-vital-bar"><div class="cs-vital-fill" id="hud-hp-fill"></div></div>
           </div>
@@ -80,18 +77,13 @@ export class GameHUD {
       </div>
 
       <div class="cs-bottom-right">
-        <div class="cs-ammo">
-          <img id="hud-weapon-icon" class="cs-weapon-icon" alt="" draggable="false" />
-          <div class="cs-ammo-main">
-            <div class="cs-ammo-label">Ammo</div>
-            <div class="cs-ammo-row">
-              <span class="cs-ammo-mag" id="hud-ammo">30</span>
-              <span class="cs-ammo-sep">/</span>
-              <span class="cs-ammo-reserve" id="hud-reserve">90</span>
-            </div>
-          </div>
-          <img id="hud-knife-icon" class="cs-knife-icon" alt="" draggable="false" />
+        <img id="hud-weapon-icon" class="cs-weapon-icon" alt="" draggable="false" />
+        <div class="cs-ammo-row">
+          <span class="cs-ammo-mag" id="hud-ammo">30</span>
+          <span class="cs-ammo-sep">/</span>
+          <span class="cs-ammo-reserve" id="hud-reserve">90</span>
         </div>
+        <img id="hud-knife-icon" class="cs-knife-icon" alt="" draggable="false" />
       </div>
 
       <div class="cs-killfeed" id="hud-killfeed" aria-live="polite"></div>
@@ -671,127 +663,72 @@ export class GameHUD {
 
       .cs-bottom-left {
         position: absolute;
-        left: max(14px, env(safe-area-inset-left));
-        bottom: max(14px, env(safe-area-inset-bottom));
+        left: max(16px, env(safe-area-inset-left));
+        bottom: max(16px, env(safe-area-inset-bottom));
         pointer-events: none;
       }
       .cs-vital {
         display: flex;
         align-items: center;
-        gap: 10px;
-        padding: 10px 14px 10px 10px;
-        min-width: 132px;
-        border-radius: 14px;
-        background:
-          linear-gradient(155deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(6,12,24,0.38)),
-          rgba(8, 14, 26, 0.42);
-        border: 1px solid rgba(255,255,255,0.14);
-        box-shadow:
-          inset 0 1px 0 rgba(255,255,255,0.12),
-          0 10px 28px rgba(0,0,0,0.28);
-        backdrop-filter: blur(10px);
+        gap: 8px;
       }
-      .cs-vital-badge {
-        width: 34px;
-        height: 34px;
-        border-radius: 10px;
+      .cs-vital-icon {
+        width: 22px;
+        height: 22px;
         display: flex;
         align-items: center;
         justify-content: center;
+        font-size: 22px;
+        font-weight: 800;
+        line-height: 1;
         color: #fff;
-        background: linear-gradient(160deg, rgba(90,160,255,0.35), rgba(26,95,255,0.18));
-        border: 1px solid rgba(140,190,255,0.35);
         flex-shrink: 0;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
-      }
-      .cs-vital-badge svg {
-        width: 16px;
-        height: 16px;
-        display: block;
       }
       .cs-vital-main {
         display: flex;
         flex-direction: column;
         gap: 3px;
-        min-width: 78px;
-      }
-      .cs-vital-label {
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-        color: rgba(255,255,255,0.48);
-        text-shadow: none;
+        min-width: 72px;
       }
       .cs-vital-num {
-        font-size: 28px;
+        font-size: 32px;
         font-weight: 800;
         line-height: 1;
         font-variant-numeric: tabular-nums;
-        letter-spacing: -0.03em;
+        letter-spacing: -0.02em;
       }
       .cs-vital-bar {
         height: 3px;
-        width: 86px;
-        margin-top: 2px;
-        border-radius: 999px;
-        background: rgba(255,255,255,0.14);
+        width: 78px;
+        background: rgba(255,255,255,0.18);
         overflow: hidden;
       }
       .cs-vital-fill {
         height: 100%;
         width: 100%;
         transform-origin: left center;
-        border-radius: inherit;
-        background: linear-gradient(90deg, #9ec5ff, #ffffff);
+        background: #fff;
         transition: transform 120ms linear;
       }
-      .cs-vital-fill.is-low { background: linear-gradient(90deg, #ff6b6b, #ff3030); }
+      .cs-vital-fill.is-low { background: #ff4d4d; }
 
       .cs-bottom-right {
         position: absolute;
-        right: max(14px, env(safe-area-inset-right));
-        bottom: max(14px, env(safe-area-inset-bottom));
-        pointer-events: none;
-      }
-      .cs-ammo {
-        display: flex;
-        align-items: flex-end;
-        gap: 10px;
-        padding: 10px 12px 10px 14px;
-        border-radius: 14px;
-        background:
-          linear-gradient(205deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02) 42%, rgba(6,12,24,0.38)),
-          rgba(8, 14, 26, 0.42);
-        border: 1px solid rgba(255,255,255,0.14);
-        box-shadow:
-          inset 0 1px 0 rgba(255,255,255,0.12),
-          0 10px 28px rgba(0,0,0,0.28);
-        backdrop-filter: blur(10px);
-      }
-      .cs-weapon-icon {
-        height: 36px;
-        width: auto;
-        max-width: 120px;
-        object-fit: contain;
-        object-position: right center;
-        filter: brightness(0) invert(1) drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-        opacity: 0.92;
-        margin-bottom: 2px;
-      }
-      .cs-ammo-main {
+        right: max(16px, env(safe-area-inset-right));
+        bottom: max(16px, env(safe-area-inset-bottom));
         display: flex;
         flex-direction: column;
         align-items: flex-end;
-        gap: 2px;
+        gap: 4px;
+        pointer-events: none;
       }
-      .cs-ammo-label {
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-        color: rgba(255,255,255,0.48);
-        text-shadow: none;
+      .cs-weapon-icon {
+        height: 44px;
+        width: auto;
+        max-width: 150px;
+        object-fit: contain;
+        object-position: right center;
+        filter: brightness(0) invert(1) drop-shadow(0 2px 4px rgba(0,0,0,0.5));
       }
       .cs-ammo-row {
         display: flex;
@@ -800,32 +737,31 @@ export class GameHUD {
         font-variant-numeric: tabular-nums;
       }
       .cs-ammo-mag {
-        font-size: 34px;
+        font-size: 40px;
         font-weight: 800;
         line-height: 1;
         letter-spacing: -0.03em;
       }
       .cs-ammo-mag.is-low { color: #ff5555; text-shadow: 0 0 12px rgba(255,60,60,0.45); }
       .cs-ammo-sep {
-        font-size: 18px;
-        opacity: 0.45;
+        font-size: 20px;
+        opacity: 0.55;
         margin: 0 3px;
         font-weight: 600;
       }
       .cs-ammo-reserve {
-        font-size: 18px;
+        font-size: 20px;
         font-weight: 700;
-        opacity: 0.78;
+        opacity: 0.85;
       }
       .cs-knife-icon {
-        height: 18px;
+        height: 20px;
         width: auto;
-        max-width: 40px;
+        max-width: 44px;
         object-fit: contain;
         filter: brightness(0) saturate(100%) invert(72%) sepia(55%) saturate(500%) hue-rotate(5deg);
-        opacity: 0.88;
+        opacity: 0.9;
         align-self: flex-end;
-        margin-bottom: 4px;
       }
 
       .cs-hitmarker {
@@ -1238,10 +1174,8 @@ export class GameHUD {
         .cs-sb-col { font-size: clamp(11px, 1.4vh, 13px); }
       }
       @media (max-width: 520px) {
-        .cs-vital-num { font-size: 24px; }
-        .cs-ammo-mag { font-size: 28px; }
-        .cs-vital { min-width: 118px; padding: 8px 12px 8px 8px; }
-        .cs-ammo { padding: 8px 10px; gap: 8px; }
+        .cs-vital-num { font-size: 26px; }
+        .cs-ammo-mag { font-size: 32px; }
         .cs-sb-panel { width: min(96vw, 560px); }
         .cs-sb-head, .cs-sb-row { grid-template-columns: 22px 1fr 34px 34px 34px; }
       }
@@ -1249,8 +1183,8 @@ export class GameHUD {
       #game-hud:not(.is-touch) [data-touch-only] { display: none !important; }
       #game-hud.is-touch .cs-bottom-left,
       #game-hud.is-touch .cs-bottom-right {
-        bottom: calc(env(safe-area-inset-bottom) + 78px);
-        transform: scale(0.92);
+        bottom: calc(env(safe-area-inset-bottom) + 72px);
+        transform: scale(0.88);
         transform-origin: bottom left;
       }
       #game-hud.is-touch .cs-bottom-right {
@@ -1259,7 +1193,7 @@ export class GameHUD {
       @media (pointer: coarse) and (orientation: portrait) {
         #game-hud.is-touch .cs-bottom-left,
         #game-hud.is-touch .cs-bottom-right {
-          bottom: calc(env(safe-area-inset-bottom) + 96px);
+          bottom: calc(env(safe-area-inset-bottom) + 88px);
         }
       }
 

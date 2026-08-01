@@ -199,8 +199,8 @@ export class Player extends Pawn implements IUpdatable {
     this.position.set(origin.x(), origin.y(), origin.z())
   }
 
-  /** World Y of the capsule's lowest point. */
-  private getFeetY(): number {
+  /** World Y of the capsule's lowest point (feet). */
+  public getFeetY(): number {
     return this.position.y - this.shapeHalfCyl - this.shapeRadius
   }
 

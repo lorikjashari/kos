@@ -1027,7 +1027,7 @@ export class Game implements IUpdatable {
     this.multiplayer = mp
     const { code, role } = await mp.start(config)
     const botCount =
-      role === 'host' ? botTargetForHumans(1) : 0
+      role === 'host' ? botTargetForHumans(1, config.botCount ?? 10) : 0
     this.startBotMatch({
       difficulty: config.difficulty || 'medium',
       botCount,
@@ -1599,7 +1599,8 @@ export class Game implements IUpdatable {
 
       const botsActive = this.combatLive
       for (let i = 0; i < this.trainingBots.length; i++) {
-        if (botsActive) this.trainingBots[i].update(dt)
+        const bot = this.trainingBots[i]
+        if (botsActive || bot.isNetworkPuppet) bot.update(dt)
         this.botRenderers[i]?.update(dt)
       }
       this.multiplayer?.update(dt)

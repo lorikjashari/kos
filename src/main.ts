@@ -53,6 +53,7 @@ async function main() {
             roomCode: config.roomCode,
             playerName: config.playerName,
             difficulty: config.difficulty,
+            botCount: config.botCount,
           })
           menu.setMultiplayerStatus(config.mode === 'host' ? `Room ${code}` : `Joined ${code}`)
           menu.hide()
