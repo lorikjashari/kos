@@ -24,15 +24,18 @@ const ACTION_KEYS: Partial<Record<MobileControlId, Key>> = {
   leanRight: Key.LeanRight,
 }
 
+const imgIcon = (src: string, wide = false) =>
+  `<img class="kos-mc-img${wide ? ' is-wide' : ''}" src="${src}" alt="" draggable="false" />`
+
 const ICONS: Partial<Record<MobileControlId, string>> = {
-  fire: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/></svg>`,
+  fire: imgIcon('/icons/fire.png'),
   aim: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>`,
   jump: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V7M12 7l-4.2 4.2M12 7l4.2 4.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   crouch: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v12M12 17l-4.2-4.2M12 17l4.2-4.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   reload: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.1-5.2" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M19.5 4.8v4.4h-4.4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  weapon1: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14.5h11.5l3.2-3.2H21v2.2h-1.4l-1.5 1.5H14l-1.2 2.3H8.8L7.5 14.5H4z" fill="currentColor"/></svg>`,
-  weapon2: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 15.2h7.2l2-2H19v1.7h-1.1l-.9.9h-2.3l-.8 1.6H9.3L8.4 15.2H7z" fill="currentColor"/><circle cx="9.2" cy="10.2" r="1.3" fill="currentColor"/></svg>`,
-  weapon3: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5l8.8 8.8M15.2 6.8l2 2-7.6 7.6-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  weapon1: imgIcon('/icons/weapon-ak.png', true),
+  weapon2: imgIcon('/icons/weapon-pistol.png', true),
+  weapon3: imgIcon('/icons/weapon-knife.png', true),
   leanLeft: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   leanRight: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 }
@@ -628,8 +631,8 @@ export class MobileControls {
       #kos-mobile-controls .kos-mc-glyph {
         position: relative;
         z-index: 1;
-        width: 46%;
-        height: 46%;
+        width: 52%;
+        height: 52%;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -640,6 +643,28 @@ export class MobileControls {
         width: 100%;
         height: 100%;
         display: block;
+      }
+      #kos-mobile-controls .kos-mc-img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        pointer-events: none;
+        -webkit-user-drag: none;
+        user-select: none;
+      }
+      #kos-mobile-controls .kos-mc-img.is-wide {
+        width: 118%;
+        height: 72%;
+      }
+      #kos-mobile-controls .kos-mc-btn[data-id="fire"] .kos-mc-glyph {
+        width: 48%;
+        height: 48%;
+      }
+      #kos-mobile-controls .kos-mc-btn[data-id="weapon1"] .kos-mc-glyph,
+      #kos-mobile-controls .kos-mc-btn[data-id="weapon2"] .kos-mc-glyph,
+      #kos-mobile-controls .kos-mc-btn[data-id="weapon3"] .kos-mc-glyph {
+        width: 70%;
+        height: 48%;
       }
       #kos-mobile-controls .kos-mc-fallback {
         font-size: 18px;

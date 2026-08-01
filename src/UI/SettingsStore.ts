@@ -185,9 +185,9 @@ export const MOBILE_CONTROL_META: Array<{ id: MobileControlId; label: string; gl
   { id: 'jump', label: 'Jump', glyph: '⤒' },
   { id: 'crouch', label: 'Crouch', glyph: '⤓' },
   { id: 'reload', label: 'Reload', glyph: '↻' },
-  { id: 'weapon1', label: 'Primary', glyph: '1' },
-  { id: 'weapon2', label: 'Secondary', glyph: '2' },
-  { id: 'weapon3', label: 'Knife', glyph: '3' },
+  { id: 'weapon1', label: 'AK / Primary', glyph: 'AK' },
+  { id: 'weapon2', label: 'Pistol', glyph: 'P' },
+  { id: 'weapon3', label: 'Knife', glyph: 'K' },
   { id: 'leanLeft', label: 'Lean Left', glyph: '◁' },
   { id: 'leanRight', label: 'Lean Right', glyph: '▷' },
 ]
