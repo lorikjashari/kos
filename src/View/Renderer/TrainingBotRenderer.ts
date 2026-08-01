@@ -1290,14 +1290,19 @@ export class TrainingBotRenderer implements IUpdatable {
     this.mesh.visible = true
     // While editor gizmo is dragging, Game owns the mesh transform
     if (!this.game.isEditorTransformDragging()) {
-      this.mesh.position.set(this.bot.position.x, this.bot.position.y, this.bot.position.z)
+      this.mesh.position.set(
+        this.bot.position.x,
+        this.bot.position.y - (this.bot.isCrouching ? 0.95 : 0),
+        this.bot.position.z
+      )
       this.mesh.rotation.order = 'YXZ'
       this.mesh.rotation.y = this.bot.yaw
-      this.mesh.rotation.x = 0
+      this.mesh.rotation.x = this.bot.isCrouching ? 0.12 : 0
       this.mesh.rotation.z = 0
       const vs = this.bot.visualScale || 1
       if (this.staticModel) {
-        this.mesh.scale.setScalar(vs)
+        const crouchScale = this.bot.isCrouching ? 0.82 : 1
+        this.mesh.scale.set(vs, vs * crouchScale, vs)
       }
     }
 

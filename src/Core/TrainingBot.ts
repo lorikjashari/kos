@@ -79,6 +79,7 @@ export class TrainingBot implements IUpdatable {
   public readonly deathDuration = 4.0
   public readonly fallDuration = 0.75
   /** Driven by multiplayer snapshots — no local AI */
+  public isCrouching = false
   public isNetworkPuppet = false
   public netKey = ''
   public netPeerId: string | undefined

@@ -61,11 +61,6 @@ export class GameHUD {
     this.root.innerHTML = `
       <div class="kos-brand">KoS</div>
 
-      <div class="cs-pause-backdrop" id="hud-pause-backdrop" aria-hidden="true">
-        <div class="cs-pause-label">PAUSED</div>
-        <div class="cs-pause-sub" id="hud-pause-sub">Esc or Resume to continue</div>
-      </div>
-
       <div class="cs-bottom-left">
         <div class="cs-vital">
           <div class="cs-vital-icon">+</div>
@@ -87,23 +82,6 @@ export class GameHUD {
       </div>
 
       <div class="cs-killfeed" id="hud-killfeed" aria-live="polite"></div>
-
-      <div class="cs-scoreboard" id="hud-scoreboard" aria-hidden="true">
-        <div class="cs-sb-panel">
-          <div class="cs-sb-top">
-            <div class="cs-sb-title">Scoreboard</div>
-            <div class="cs-sb-hint" id="hud-sb-hint">Hold Tab</div>
-          </div>
-          <div class="cs-sb-head">
-            <span class="cs-sb-col rank">#</span>
-            <span class="cs-sb-col name">Player</span>
-            <span class="cs-sb-col">K</span>
-            <span class="cs-sb-col">D</span>
-            <span class="cs-sb-col">A</span>
-          </div>
-          <div class="cs-sb-rows" id="hud-sb-rows"></div>
-        </div>
-      </div>
 
       <div class="cs-lockdown" id="hud-lockdown" aria-hidden="true">
         <div class="cs-lockdown-num" id="hud-lockdown-num">3</div>
@@ -133,6 +111,11 @@ export class GameHUD {
     this.topRoot = document.createElement('div')
     this.topRoot.id = 'game-hud-top'
     this.topRoot.innerHTML = `
+      <div class="cs-pause-backdrop" id="hud-pause-backdrop" aria-hidden="true">
+        <div class="cs-pause-label">PAUSED</div>
+        <div class="cs-pause-sub" id="hud-pause-sub">Esc or Resume to continue</div>
+      </div>
+
       <div class="cs-pause-menu" id="hud-pause">
         <button type="button" class="cs-pause-btn" id="hud-pause-btn" title="Menu" aria-label="Open menu">
           <span></span><span></span>
@@ -141,6 +124,23 @@ export class GameHUD {
           <button type="button" class="cs-pause-opt" data-pause="resume">Resume</button>
           <button type="button" class="cs-pause-opt" data-pause="scores" data-touch-only>Scores</button>
           <button type="button" class="cs-pause-opt" data-pause="menu">Back to menu</button>
+        </div>
+      </div>
+
+      <div class="cs-scoreboard" id="hud-scoreboard" aria-hidden="true">
+        <div class="cs-sb-panel">
+          <div class="cs-sb-top">
+            <div class="cs-sb-title">Scoreboard</div>
+            <div class="cs-sb-hint" id="hud-sb-hint">Hold Tab</div>
+          </div>
+          <div class="cs-sb-head">
+            <span class="cs-sb-col rank">#</span>
+            <span class="cs-sb-col name">Player</span>
+            <span class="cs-sb-col">K</span>
+            <span class="cs-sb-col">D</span>
+            <span class="cs-sb-col">A</span>
+          </div>
+          <div class="cs-sb-rows" id="hud-sb-rows"></div>
         </div>
       </div>
 
@@ -296,9 +296,13 @@ export class GameHUD {
     const backdrop = document.getElementById('hud-pause-backdrop')
     backdrop?.classList.toggle('is-on', open)
     backdrop?.setAttribute('aria-hidden', open ? 'false' : 'true')
-    // Cover mobile controls while paused (death uses same boost)
-    if (!this.deathShown) this.root.style.zIndex = open ? '50' : ''
+    this.syncTopLayer()
     if (!open) this.setScoreboardVisible(false)
+  }
+
+  public toggleScoreboard(): void {
+    const on = !this.scoreboardEl?.classList.contains('is-on')
+    this.setScoreboardVisible(on)
   }
 
   public setScoreboardVisible(visible: boolean): void {
@@ -306,6 +310,13 @@ export class GameHUD {
     this.scoreboardEl.classList.toggle('is-on', visible)
     this.scoreboardEl.setAttribute('aria-hidden', visible ? 'false' : 'true')
     if (visible) this.refreshScoreboard()
+    this.syncTopLayer()
+  }
+
+  private syncTopLayer(): void {
+    const pauseOn = !!this.pauseMenuEl?.classList.contains('is-open')
+    const scoresOn = !!this.scoreboardEl?.classList.contains('is-on')
+    this.topRoot.style.zIndex = pauseOn || scoresOn ? '50' : ''
   }
 
   private refreshScoreboard(): void {
@@ -548,7 +559,7 @@ export class GameHUD {
       .cs-pause-backdrop {
         position: absolute;
         inset: 0;
-        z-index: 18;
+        z-index: 1;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -565,6 +576,17 @@ export class GameHUD {
         opacity: 1;
         visibility: visible;
       }
+      .cs-pause-menu {
+        position: absolute;
+        top: max(12px, env(safe-area-inset-top));
+        left: max(14px, env(safe-area-inset-left));
+        z-index: 5;
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
       .cs-pause-label {
         font-size: clamp(28px, 5vw, 42px);
         font-weight: 800;
@@ -580,17 +602,6 @@ export class GameHUD {
         color: rgba(255,255,255,0.62);
       }
 
-      .cs-pause-menu {
-        position: absolute;
-        top: max(12px, env(safe-area-inset-top));
-        left: max(14px, env(safe-area-inset-left));
-        z-index: 20;
-        pointer-events: auto;
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 8px;
-      }
       .cs-pause-btn {
         width: 44px;
         height: 44px;
@@ -1050,11 +1061,12 @@ export class GameHUD {
         visibility: hidden;
         pointer-events: none;
         transition: opacity 140ms ease, visibility 140ms ease;
-        z-index: 12;
+        z-index: 6;
       }
       .cs-scoreboard.is-on {
         opacity: 1;
         visibility: visible;
+        pointer-events: auto;
       }
       .cs-sb-panel {
         width: min(560px, 94vw);

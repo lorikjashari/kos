@@ -35,6 +35,7 @@ export type MobileControlId =
   | 'weapon3'
   | 'leanLeft'
   | 'leanRight'
+  | 'scoreboard'
 
 export interface MobileControlSlot {
   x: number
@@ -190,6 +191,7 @@ export const MOBILE_CONTROL_META: Array<{ id: MobileControlId; label: string; gl
   { id: 'weapon3', label: 'Knife', glyph: 'K' },
   { id: 'leanLeft', label: 'Lean Left', glyph: '◁' },
   { id: 'leanRight', label: 'Lean Right', glyph: '▷' },
+  { id: 'scoreboard', label: 'Scoreboard', glyph: '☰' },
 ]
 
 export const DEFAULT_MOBILE_LAYOUT: MobileLayoutMap = {
@@ -205,6 +207,7 @@ export const DEFAULT_MOBILE_LAYOUT: MobileLayoutMap = {
   weapon3: { x: 82, y: 17, size: 0.8, opacity: 0.6, visible: true },
   leanLeft: { x: 8, y: 48, size: 0.78, opacity: 0.52, visible: true },
   leanRight: { x: 22, y: 48, size: 0.78, opacity: 0.52, visible: true },
+  scoreboard: { x: 50, y: 12, size: 0.78, opacity: 0.62, visible: true },
 }
 
 export function clampMobileSlot(slot: Partial<MobileControlSlot> | undefined, fallback: MobileControlSlot): MobileControlSlot {

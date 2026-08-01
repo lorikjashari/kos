@@ -18,6 +18,7 @@ export type NetMsg =
       alive: boolean
       weapon: string
       moving: boolean
+      crouch?: boolean
       shoot?: boolean
     }
   | {

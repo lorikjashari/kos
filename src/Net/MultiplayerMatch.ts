@@ -332,6 +332,7 @@ export class MultiplayerMatch {
       alive: !player.isDead,
       weapon: player.currentWeapon.key,
       moving: player.velocity.length() > 0.4,
+      crouch: player.isCrouching,
       shoot: shoot || undefined,
     }
     if (this.isHost) this.session.broadcast(msg)
@@ -371,7 +372,20 @@ export class MultiplayerMatch {
     bot.isAlive = msg.alive
     bot.weaponKey = msg.weapon
     bot.isMoving = msg.moving
-    if (msg.shoot) bot.shootFlash = 0.12
+    bot.isCrouching = !!msg.crouch
+    if (msg.shoot) {
+      bot.shootFlash = 0.14
+      void Game.getInstance().audioManager.playShot(msg.weapon, {
+        x: msg.x,
+        y: msg.y + 1.4,
+        z: msg.z,
+      })
+      const dir = new Vector3D(Math.sin(msg.yaw), 0, Math.cos(msg.yaw))
+      Game.getInstance().renderer?.muzzleFlashManager.spawn(
+        new Vector3D(msg.x, msg.y + (msg.crouch ? 1.0 : 1.45), msg.z).add(dir.clone().multiplyScalar(0.45)),
+        dir
+      )
+    }
     const idx = Game.getInstance().trainingBots.indexOf(bot)
     const renderer = Game.getInstance().botRenderers[idx]
     renderer?.setWeapon(TrainingBotRenderer.visualWeaponFor(msg.weapon))

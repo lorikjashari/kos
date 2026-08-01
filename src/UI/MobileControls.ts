@@ -9,6 +9,7 @@ import {
   type MobileLayoutMap,
 } from './SettingsStore'
 import { isTouchDevice } from './MobileDevice'
+import { Game } from '../Game'
 
 const ACTION_KEYS: Partial<Record<MobileControlId, Key>> = {
   fire: Key.Left_Click,
@@ -38,6 +39,7 @@ const ICONS: Partial<Record<MobileControlId, string>> = {
   weapon3: imgIcon('/icons/weapon-knife.png', true),
   leanLeft: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   leanRight: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  scoreboard: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`,
 }
 
 /**
@@ -420,6 +422,14 @@ export class MobileControls {
       this.joyOriginY = rect.top + rect.height / 2
       this.joyRadius = rect.width / 2
       this.updateJoystick(e.clientX, e.clientY, this.joyRadius)
+      this.vibrateLight()
+      return
+    }
+
+    if (id === 'scoreboard') {
+      Game.getInstance().renderer?.hud?.toggleScoreboard()
+      btn.classList.add('is-down')
+      window.setTimeout(() => btn.classList.remove('is-down'), 140)
       this.vibrateLight()
       return
     }
