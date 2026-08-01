@@ -1185,6 +1185,8 @@ export class Game implements IUpdatable {
     this.renderer.hud?.setScoreboardVisible(false)
     const hudRoot = document.getElementById('game-hud')
     if (hudRoot) hudRoot.style.display = 'none'
+    const hudTop = document.getElementById('game-hud-top')
+    if (hudTop) hudTop.style.display = 'none'
     document.getElementById('game-crosshair')?.classList.remove('is-on', 'is-awp-hidden')
     document.getElementById('awp-scope')?.classList.remove('is-on')
     this.onReturnToMenu?.()

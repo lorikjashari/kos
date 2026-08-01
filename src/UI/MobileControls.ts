@@ -69,6 +69,9 @@ export class MobileControls {
   private holdPointers = new Map<number, MobileControlId>()
   private toggled = new Set<MobileControlId>()
   private boundVis = false
+  private windowBound = false
+  private onWinMove = (e: PointerEvent) => this.onWindowPointerMove(e)
+  private onWinUp = (e: PointerEvent) => this.onWindowPointerUp(e)
 
   constructor(input: InputManager, settings?: MobileControlsSettings) {
     this.input = input
@@ -116,6 +119,7 @@ export class MobileControls {
 
   public destroy(): void {
     this.releaseAll()
+    this.unbindWindowPointers()
     this.root?.remove()
     this.root = null
   }
@@ -177,19 +181,62 @@ export class MobileControls {
     const opts: AddEventListenerOptions = { passive: false }
 
     look.addEventListener('pointerdown', (e) => this.onLookDown(e), opts)
-    look.addEventListener('pointermove', (e) => this.onLookMove(e), opts)
-    look.addEventListener('pointerup', (e) => this.onLookUp(e), opts)
-    look.addEventListener('pointercancel', (e) => this.onLookUp(e), opts)
-    look.addEventListener('lostpointercapture', (e) => this.onLookUp(e as PointerEvent), opts)
+    // Never end look on lost capture — iOS selection/loupe can steal capture mid-swipe
+    look.addEventListener('lostpointercapture', (e) => this.onLookLostCapture(e as PointerEvent), opts)
 
     this.root.addEventListener('pointerdown', (e) => this.onUiPointerDown(e), opts)
-    this.root.addEventListener('pointermove', (e) => this.onUiPointerMove(e), opts)
-    this.root.addEventListener('pointerup', (e) => this.onUiPointerUp(e), opts)
-    this.root.addEventListener('pointercancel', (e) => this.onUiPointerUp(e), opts)
     this.root.addEventListener('lostpointercapture', (e) => this.onLostCapture(e as PointerEvent), opts)
     this.root.addEventListener('contextmenu', (e) => e.preventDefault())
     this.root.addEventListener('selectstart', (e) => e.preventDefault())
     this.root.addEventListener('dragstart', (e) => e.preventDefault())
+    this.bindWindowPointers()
+  }
+
+  private bindWindowPointers(): void {
+    if (this.windowBound || typeof window === 'undefined') return
+    this.windowBound = true
+    const opts: AddEventListenerOptions = { passive: false }
+    window.addEventListener('pointermove', this.onWinMove, opts)
+    window.addEventListener('pointerup', this.onWinUp, opts)
+    window.addEventListener('pointercancel', this.onWinUp, opts)
+  }
+
+  private unbindWindowPointers(): void {
+    if (!this.windowBound) return
+    this.windowBound = false
+    window.removeEventListener('pointermove', this.onWinMove)
+    window.removeEventListener('pointerup', this.onWinUp)
+    window.removeEventListener('pointercancel', this.onWinUp)
+  }
+
+  private onWindowPointerMove(e: PointerEvent): void {
+    if (!this.active && !this.editMode) return
+    if (this.lookPointerId === e.pointerId) {
+      this.onLookMove(e)
+      return
+    }
+    if (
+      this.joyPointerId === e.pointerId ||
+      this.holdPointers.has(e.pointerId) ||
+      this.btnLook.has(e.pointerId) ||
+      this.dragPointerId === e.pointerId
+    ) {
+      this.onUiPointerMove(e)
+    }
+  }
+
+  private onWindowPointerUp(e: PointerEvent): void {
+    if (this.lookPointerId === e.pointerId) {
+      this.onLookUp(e)
+      return
+    }
+    if (
+      this.joyPointerId === e.pointerId ||
+      this.holdPointers.has(e.pointerId) ||
+      this.dragPointerId === e.pointerId
+    ) {
+      this.onUiPointerUp(e)
+    }
   }
 
   private renderButtons(): void {
@@ -301,8 +348,37 @@ export class MobileControls {
     this.lookPointerId = null
   }
 
+  private onLookLostCapture(e: PointerEvent): void {
+    if (this.lookPointerId !== e.pointerId || !this.active || this.editMode) return
+    const look = this.root?.querySelector('.kos-mc-look') as HTMLElement | null
+    try {
+      look?.setPointerCapture?.(e.pointerId)
+    } catch {
+      /* keep tracking via window listeners */
+    }
+  }
+
   private onLostCapture(e: PointerEvent): void {
-    this.onUiPointerUp(e)
+    // Re-capture holds instead of dropping mid multi-touch (iOS loupe / focus steals)
+    const id = this.holdPointers.get(e.pointerId)
+    if (id && this.active && !this.editMode) {
+      const el = this.root?.querySelector(`[data-id="${id}"]`) as HTMLElement | null
+      try {
+        el?.setPointerCapture?.(e.pointerId)
+        return
+      } catch {
+        /* fall through */
+      }
+    }
+    if (this.joyPointerId === e.pointerId && this.active) {
+      const joy = this.root?.querySelector('[data-id="joystick"]') as HTMLElement | null
+      try {
+        joy?.setPointerCapture?.(e.pointerId)
+        return
+      } catch {
+        /* fall through */
+      }
+    }
   }
 
   private onUiPointerDown(e: PointerEvent): void {
@@ -524,7 +600,7 @@ export class MobileControls {
     style.id = 'kos-mc-styles'
     style.textContent = `
       #kos-mobile-controls {
-        position: fixed; inset: 0; z-index: 25;
+        position: fixed; inset: 0; z-index: 32;
         pointer-events: none;
         touch-action: none;
         user-select: none;

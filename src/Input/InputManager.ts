@@ -411,6 +411,7 @@ export class InputManager implements IUpdatable {
     const target = event.target as HTMLElement
     if (target?.closest?.('#kos-editor')) return true
     if (target?.closest?.('#kos-mobile-controls')) return true
+    if (target?.closest?.('#game-hud-top')) return true
     if (target.nodeName === 'BODY' || target.nodeName === 'CANVAS') return false
     return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu, .cs-loadout, #kos-con, #kos-editor')
   }
