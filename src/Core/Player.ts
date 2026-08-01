@@ -10,6 +10,7 @@ import { GroundRaycastProperty, HitscanProperty, HitscanResult } from '../Interf
 import { AmmoInstance } from '../Physics/Ammo'
 import { WeaponConfig, getWeaponConfig } from './Weapon'
 import { raycastBotMeshes } from './BotMeshHit'
+import { damageForBodyPart } from './BodyPart'
 import { FPSMesh } from '../View/Mesh/FPSMesh'
 import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
 
@@ -783,7 +784,18 @@ export class Player extends Pawn implements IUpdatable {
       hitScanResult.bodyPart = meshHit.part
       hitScanResult.botIndex = meshHit.botIndex
       const bot = game.trainingBots[meshHit.botIndex]
-      if (bot) {
+      if (bot?.isNetworkPuppet) {
+        const damage = damageForBodyPart(meshHit.part, this.currentWeapon.key)
+        hitScanResult.damageDealt = damage
+        const headshot = meshHit.part === 'head'
+        game.getMultiplayer()?.sendHitToTarget({
+          targetPeerId: bot.netPeerId,
+          botName: bot.netPeerId ? undefined : bot.name,
+          damage,
+          headshot,
+          weapon: this.currentWeapon.key,
+        })
+      } else if (bot) {
         const result = bot.takeDamage(meshHit.part, this.currentWeapon.key, true)
         hitScanResult.damageDealt = result.damage
         hitScanResult.killed = result.killed
@@ -814,6 +826,7 @@ export class Player extends Pawn implements IUpdatable {
       this.refillCurrentMag()
     }
     this.lastShootTimeStamp = new Date()
+    Game.getInstance().getMultiplayer()?.noteLocalShot()
     return hitScanResult
   }
 

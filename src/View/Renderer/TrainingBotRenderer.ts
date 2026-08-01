@@ -95,7 +95,7 @@ export class TrainingBotRenderer implements IUpdatable {
   }
 
   /** Map logic weapon keys to third-person prop keys */
-  private static visualWeaponFor(weaponKey: string): string {
+  public static visualWeaponFor(weaponKey: string): string {
     if (weaponKey === 'AK47') return 'AK'
     if (weaponKey === 'AWP') return 'AWP'
     return 'Usp'
@@ -1343,5 +1343,14 @@ export class TrainingBotRenderer implements IUpdatable {
     window.setTimeout(() => {
       for (const entry of previous) entry.mat.emissive.setHex(entry.hex)
     }, 70)
+  }
+
+  public dispose(): void {
+    try {
+      this.game.renderer.bloodManager?.clearOn(this.mesh)
+    } catch {
+      /* ignore */
+    }
+    this.mesh.removeFromParent()
   }
 }

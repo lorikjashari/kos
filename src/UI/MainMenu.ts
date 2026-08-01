@@ -36,6 +36,12 @@ export type BotMatchConfig = {
 
 type MenuCallbacks = {
   onPlayBots: (config: BotMatchConfig) => void
+  onPlayMultiplayer: (config: {
+    mode: 'host' | 'join'
+    roomCode?: string
+    playerName: string
+    difficulty: BotDifficulty
+  }) => void
   onSettingsChanged: (settings: PlayerSettings) => void
 }
 
@@ -53,7 +59,7 @@ export class MainMenu {
   private selectedDifficulty: BotDifficulty = 'medium'
   private selectedBotCount = 5
   private selectedMapId: MapId = DEFAULT_MAP_ID
-  private currentScreen: 'loading' | 'main' | 'bots' | 'settings' = 'loading'
+  private currentScreen: 'loading' | 'main' | 'bots' | 'mp' | 'settings' = 'loading'
   private mobileControls: MobileControls | null = null
   private editingMobileLayout = false
   private selectedMobileId: MobileControlId | null = null
@@ -148,7 +154,7 @@ export class MainMenu {
     this.showScreen('main')
   }
 
-  private showScreen(id: 'loading' | 'main' | 'bots' | 'settings'): void {
+  public showScreen(id: 'loading' | 'main' | 'bots' | 'mp' | 'settings'): void {
     this.currentScreen = id
     this.root.querySelectorAll('.kos-screen').forEach((el) => {
       el.classList.toggle('is-active', el.getAttribute('data-screen') === id)
@@ -231,15 +237,47 @@ export class MainMenu {
               <button type="button" class="kos-btn kos-btn-primary" data-action="bots">
                 <span class="kos-btn-label">Play with Bots</span>
               </button>
-              <button type="button" class="kos-btn kos-btn-ghost-line" data-action="mp" disabled title="Coming soon">
+              <button type="button" class="kos-btn kos-btn-ghost-line" data-action="mp">
                 <span class="kos-btn-label">Multiplayer</span>
-                <span class="kos-soon">Soon</span>
               </button>
               <button type="button" class="kos-btn kos-btn-ghost-line" data-action="settings">
                 <span class="kos-btn-label">Settings</span>
               </button>
             </nav>
           </div>
+        </div>
+      </section>
+
+      <section class="kos-screen" data-screen="mp">
+        <div class="kos-shell kos-shell-sub">
+          <button type="button" class="kos-back" data-action="back-main">← Back</button>
+          <div class="kos-sub-brand">
+            <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
+          </div>
+          <h2 class="kos-heading">Friends Multiplayer</h2>
+          <p class="kos-hint">Free guest rooms on Pool Day. Bots fill the lobby — friends replace them as they join. Max ~15.</p>
+
+          <div class="kos-section-label">Difficulty (bots)</div>
+          <div class="kos-chip-row" id="kos-mp-diff">
+            <button type="button" class="kos-chip" data-mp-diff="easy">Easy</button>
+            <button type="button" class="kos-chip is-on" data-mp-diff="medium">Medium</button>
+            <button type="button" class="kos-chip" data-mp-diff="hard">Hard</button>
+          </div>
+
+          <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="mp-host">
+            <span class="kos-btn-label">Create Room</span>
+          </button>
+          <p class="kos-hint tight-left">Host stays online and shares the room code.</p>
+
+          <div class="kos-section-label">Join with code</div>
+          <label class="kos-field">
+            <span>Room code</span>
+            <input id="kos-mp-code" type="text" maxlength="8" placeholder="e.g. A7K2QM" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:0.14em;font-weight:800" />
+          </label>
+          <button type="button" class="kos-btn kos-btn-ghost-line kos-start" data-action="mp-join">
+            <span class="kos-btn-label">Join Room</span>
+          </button>
+          <p class="kos-hint" id="kos-mp-status"></p>
         </div>
       </section>
 
@@ -579,15 +617,18 @@ export class MainMenu {
 
     this.root.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
+        '[data-action], [data-diff], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
       const action = t.getAttribute('data-action')
       if (action === 'bots') this.showScreen('bots')
+      if (action === 'mp') this.showScreen('mp')
       if (action === 'settings') this.showScreen('settings')
       if (action === 'back-main') this.showScreen('main')
       if (action === 'start-bots') this.startBots()
+      if (action === 'mp-host') this.startMultiplayer('host')
+      if (action === 'mp-join') this.startMultiplayer('join')
       if (action === 'reset-xhair') {
         this.settings.crosshair = { ...DEFAULT_CROSSHAIR }
         this.settings.crosshair.style = 2
@@ -690,6 +731,12 @@ export class MainMenu {
         this.root.querySelectorAll('[data-diff]').forEach((el) => el.classList.toggle('is-on', el === t))
       }
 
+      const mpDiff = t.getAttribute('data-mp-diff') as BotDifficulty | null
+      if (mpDiff) {
+        this.selectedDifficulty = mpDiff
+        this.root.querySelectorAll('[data-mp-diff]').forEach((el) => el.classList.toggle('is-on', el === t))
+      }
+
       const tab = t.getAttribute('data-tab')
       if (tab) {
         if (tab !== 'mobile') this.stopMobileLayoutEdit()
@@ -768,6 +815,32 @@ export class MainMenu {
       refillAmmoOnKill: refill,
       mapId: this.selectedMapId,
     })
+  }
+
+  private startMultiplayer(mode: 'host' | 'join'): void {
+    const name = (this.root.querySelector('#kos-name') as HTMLInputElement).value.trim().slice(0, 24)
+    this.settings.playerName = name || 'Player'
+    this.persist()
+    const status = this.root.querySelector('#kos-mp-status') as HTMLElement | null
+    const codeInput = this.root.querySelector('#kos-mp-code') as HTMLInputElement | null
+    const roomCode = (codeInput?.value || '').trim().toUpperCase()
+    if (mode === 'join' && roomCode.length < 4) {
+      if (status) status.textContent = 'Enter the host room code first.'
+      return
+    }
+    if (status) status.textContent = mode === 'host' ? 'Creating room…' : `Joining ${roomCode}…`
+    this.stopMenuAudio()
+    this.callbacks.onPlayMultiplayer({
+      mode,
+      roomCode: mode === 'join' ? roomCode : undefined,
+      playerName: this.settings.playerName,
+      difficulty: this.selectedDifficulty,
+    })
+  }
+
+  public setMultiplayerStatus(text: string): void {
+    const status = this.root.querySelector('#kos-mp-status') as HTMLElement | null
+    if (status) status.textContent = text
   }
 
   private persist(): void {

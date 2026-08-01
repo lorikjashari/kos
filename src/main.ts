@@ -35,6 +35,41 @@ async function main() {
         }
       })()
     },
+    onPlayMultiplayer: (config) => {
+      if (pwa.requiresInstall()) {
+        pwa.mount()
+        return
+      }
+      const game = Game.getInstance()
+      game.audioManager.stopMenuMusic()
+      void (async () => {
+        try {
+          menu.setMultiplayerStatus(config.mode === 'host' ? 'Opening room…' : 'Connecting…')
+          await game.audioManager.unlock()
+          await game.ensureMap('pool_day')
+          await game.prepareCombat()
+          const code = await game.startMultiplayerMatch({
+            mode: config.mode,
+            roomCode: config.roomCode,
+            playerName: config.playerName,
+            difficulty: config.difficulty,
+          })
+          menu.setMultiplayerStatus(config.mode === 'host' ? `Room ${code}` : `Joined ${code}`)
+          menu.hide()
+        } catch (error) {
+          console.error(error)
+          game.multiplayer?.stop()
+          game.multiplayer = null
+          game.audioManager.stopMenuMusic()
+          void game.audioManager.startMenuMusic()
+          menu.show()
+          menu.showScreen('mp')
+          const msg = error instanceof Error ? error.message : 'Multiplayer failed.'
+          menu.setMultiplayerStatus(msg)
+          window.alert(msg)
+        }
+      })()
+    },
     onSettingsChanged: (settings) => {
       const game = Game.getInstance()
       game.inputManager.applyKeybinds(settings.keybinds)

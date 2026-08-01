@@ -48,6 +48,8 @@ import {
 import { CameraManager } from './View/CameraManager/CameraManager'
 import type { MobileControls } from './UI/MobileControls'
 import { isTouchDevice } from './UI/MobileDevice'
+import { MultiplayerMatch, type MultiplayerStartConfig } from './Net/MultiplayerMatch'
+import { botTargetForHumans } from './Net/NetTypes'
 import type { MobilePerfProfile } from './UI/SettingsStore'
 
 export class Game implements IUpdatable {
@@ -95,6 +97,8 @@ export class Game implements IUpdatable {
   private crosshairSettings: PlayerSettings['crosshair'] | null = null
   private playerSettings: PlayerSettings | null = null
   private lastMatchConfig: BotMatchConfig | null = null
+  public multiplayer: MultiplayerMatch | null = null
+  private mpBanner: HTMLElement | null = null
   /** Generic CS-style cvar store for values with no local system yet. */
   private cvars = new Map<string, string>()
   /** 0 = uncapped (follows display, including 120Hz ProMotion); else hard cap. */
@@ -1017,6 +1021,80 @@ export class Game implements IUpdatable {
     void this.warmCombatSystems()
   }
 
+  public async startMultiplayerMatch(config: MultiplayerStartConfig): Promise<string> {
+    const mp = new MultiplayerMatch()
+    this.multiplayer?.stop()
+    this.multiplayer = mp
+    const { code, role } = await mp.start(config)
+    const botCount =
+      role === 'host' ? botTargetForHumans(1) : 0
+    this.startBotMatch({
+      difficulty: config.difficulty || 'medium',
+      botCount,
+      playerName: config.playerName,
+      refillAmmoOnKill: false,
+      mapId: 'pool_day',
+    })
+    this.showMpBanner(code, role === 'host')
+    return code
+  }
+
+  public getMultiplayer(): MultiplayerMatch | null {
+    return this.multiplayer
+  }
+
+  public reconcileAiBotCount(desired: number): void {
+    const live = this.trainingBots.filter((b) => !b.isNetworkPuppet)
+    let have = live.length + this.pendingBotSpawns.length
+    if (have > desired) {
+      let remove = have - desired
+      while (remove > 0 && this.pendingBotSpawns.length) {
+        this.pendingBotSpawns.pop()
+        remove--
+        have--
+      }
+      for (let i = this.trainingBots.length - 1; i >= 0 && remove > 0; i--) {
+        const b = this.trainingBots[i]
+        if (b.isNetworkPuppet) continue
+        this.trainingBots.splice(i, 1)
+        const ren = this.botRenderers.splice(i, 1)[0]
+        ren?.dispose()
+        remove--
+      }
+      return
+    }
+    if (have < desired) {
+      const need = desired - have
+      const difficulty = this.lastMatchConfig?.difficulty || 'medium'
+      const names = pickBotNames(need)
+      for (let i = 0; i < need; i++) {
+        const pos = this.pickRespawnPosition(new Vector3D(0, 2, 0), true)
+        this.pendingBotSpawns.push({
+          pos,
+          yaw: Math.random() * Math.PI * 2,
+          difficulty,
+          name: names[i] || `BOT ${live.length + i + 1}`,
+        })
+      }
+    }
+  }
+
+  private showMpBanner(code: string, isHost: boolean): void {
+    this.hideMpBanner()
+    const el = document.createElement('div')
+    el.id = 'kos-mp-banner'
+    el.textContent = isHost ? `ROOM ${code} · share to join` : `JOINED ${code}`
+    el.style.cssText =
+      'position:fixed;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:46;pointer-events:none;user-select:none;-webkit-user-select:none;padding:8px 14px;border-radius:999px;font:700 12px Outfit,Segoe UI,sans-serif;letter-spacing:0.08em;color:#fff;background:rgba(8,14,28,0.72);border:1px solid rgba(90,160,255,0.45);backdrop-filter:blur(8px);text-shadow:0 1px 2px #000'
+    document.body.appendChild(el)
+    this.mpBanner = el
+  }
+
+  private hideMpBanner(): void {
+    this.mpBanner?.remove()
+    this.mpBanner = null
+  }
+
   public isAwaitingLoadout(): boolean {
     return this.awaitingLoadout
   }
@@ -1169,6 +1247,9 @@ export class Game implements IUpdatable {
 
   public returnToMenu(): void {
     this.teardownEditorTools()
+    this.multiplayer?.stop()
+    this.multiplayer = null
+    this.hideMpBanner()
     this.matchPaused = false
     this.matchStarted = false
     this.combatLive = false
@@ -1521,6 +1602,7 @@ export class Game implements IUpdatable {
         if (botsActive) this.trainingBots[i].update(dt)
         this.botRenderers[i]?.update(dt)
       }
+      this.multiplayer?.update(dt)
     }
 
     this.inputManager.update(dt)

@@ -78,6 +78,15 @@ export class TrainingBot implements IUpdatable {
   public deathAge = 0
   public readonly deathDuration = 4.0
   public readonly fallDuration = 0.75
+  /** Driven by multiplayer snapshots — no local AI */
+  public isNetworkPuppet = false
+  public netKey = ''
+  public netPeerId: string | undefined
+  public netTX = 0
+  public netTY = 0
+  public netTZ = 0
+  public netTYaw = 0
+  public hasNetTarget = false
   public readonly fadeStart = 2.8
   public readonly fadeDuration = 0.7
 
@@ -208,6 +217,25 @@ export class TrainingBot implements IUpdatable {
   }
 
   public update(dt: number): void {
+    if (this.isNetworkPuppet) {
+      if (this.hasNetTarget) {
+        const k = Math.min(1, dt * 14)
+        this.position.x += (this.netTX - this.position.x) * k
+        this.position.y += (this.netTY - this.position.y) * k
+        this.position.z += (this.netTZ - this.position.z) * k
+        let dy = this.netTYaw - this.yaw
+        while (dy > Math.PI) dy -= Math.PI * 2
+        while (dy < -Math.PI) dy += Math.PI * 2
+        this.yaw += dy * k
+      }
+      if (!this.isAlive) {
+        this.deathAge += dt
+      } else if (this.shootFlash > 0) {
+        this.shootFlash = Math.max(0, this.shootFlash - dt)
+      }
+      return
+    }
+
     if (!this.isAlive) {
       this.deathAge += dt
       if (this.deathAge >= this.deathDuration) {
