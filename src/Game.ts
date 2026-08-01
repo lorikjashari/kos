@@ -399,8 +399,8 @@ export class Game implements IUpdatable {
 
       // ---- Crosshair ----
       case 'crosshair': {
-        const on = val > 0
-        this.renderer.hud?.setCrosshairVisible(on, !on)
+        const canvas = document.getElementById('game-crosshair') as HTMLElement | null
+        if (canvas) canvas.style.display = val > 0 ? '' : 'none'
         this.conPrint(`crosshair ${onOff(val)}`, 'ok')
         return
       }
@@ -1116,7 +1116,6 @@ export class Game implements IUpdatable {
     this.combatLive = false
     this.renderer.hud?.hideLoadoutPicker()
     this.renderer.hud?.setLockdown(this.lockdownTimer)
-    this.renderer.hud?.setCrosshairVisible(true, false)
     this.crosshairRenderer?.resize()
     void this.audioManager.playSwitch(primary)
     this.syncMobileControls()
@@ -1281,7 +1280,6 @@ export class Game implements IUpdatable {
     if (hudTop) hudTop.style.display = 'none'
     document.getElementById('game-crosshair')?.classList.remove('is-on', 'is-awp-hidden')
     document.getElementById('awp-scope')?.classList.remove('is-on')
-    this.renderer.hud?.setCrosshairVisible(false, false)
     this.onReturnToMenu?.()
   }
 

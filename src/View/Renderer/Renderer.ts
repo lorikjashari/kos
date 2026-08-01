@@ -161,6 +161,7 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
 
   private styleCanvas(): void {
     const canvas = this.domElement
+    canvas.id = 'kos-gl'
     canvas.style.position = 'fixed'
     canvas.style.left = '0'
     canvas.style.top = '0'

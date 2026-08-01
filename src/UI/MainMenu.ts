@@ -148,39 +148,15 @@ export class MainMenu {
     this.stopRoomWatch()
     this.root.classList.add('is-hidden')
     this.root.setAttribute('aria-hidden', 'true')
-    // Match start will sync via GameHUD; still force the reticle ready now
-    const xhair = document.getElementById('game-crosshair') as HTMLElement | null
-    if (xhair) {
-      if (xhair.parentElement !== document.body) document.body.appendChild(xhair)
-      xhair.classList.add('is-on')
-      xhair.classList.remove('is-awp-hidden')
-      xhair.style.setProperty('position', 'fixed', 'important')
-      xhair.style.setProperty('left', '50%', 'important')
-      xhair.style.setProperty('top', '50%', 'important')
-      xhair.style.setProperty('width', '48px', 'important')
-      xhair.style.setProperty('height', '48px', 'important')
-      xhair.style.setProperty('transform', 'translate(-50%, -50%)', 'important')
-      xhair.style.setProperty('z-index', '10000', 'important')
-      xhair.style.setProperty('opacity', '1', 'important')
-      xhair.style.setProperty('visibility', 'visible', 'important')
-      xhair.style.setProperty('display', 'block', 'important')
-      xhair.style.setProperty('pointer-events', 'none', 'important')
-      xhair.style.setProperty('background', 'transparent', 'important')
-    }
-    this.gameCrosshair?.draw()
+    document.getElementById('game-crosshair')?.classList.add('is-on')
+    document.getElementById('game-crosshair')?.classList.remove('is-awp-hidden')
+    this.gameCrosshair?.resize()
   }
 
   public show(): void {
     this.root.classList.remove('is-hidden')
     this.root.setAttribute('aria-hidden', 'false')
-    const xhair = document.getElementById('game-crosshair') as HTMLElement | null
-    if (xhair) {
-      xhair.classList.remove('is-on')
-      xhair.classList.add('is-awp-hidden')
-      xhair.style.setProperty('opacity', '0', 'important')
-      xhair.style.setProperty('visibility', 'hidden', 'important')
-      xhair.style.setProperty('display', 'none', 'important')
-    }
+    document.getElementById('game-crosshair')?.classList.remove('is-on')
     this.showScreen('main')
   }
 
@@ -808,14 +784,14 @@ export class MainMenu {
     this.crosshairPreview = new CrosshairRenderer(previewCanvas, this.settings.crosshair)
     this.buildCrosshairControls()
 
-    // In-game crosshair MUST be a <div>, never <canvas> — canvas fullscreen CSS
-    // was stretching it into the blue rectangle and hiding the reticle.
+    // Game crosshair canvas (hidden until match). Must stay a dedicated
+    // canvas — never share the WebGL #kos-gl fullscreen rules.
     document.getElementById('game-crosshair')?.remove()
-    const gameXhair = document.createElement('div')
-    gameXhair.id = 'game-crosshair'
-    gameXhair.setAttribute('aria-hidden', 'true')
-    document.body.appendChild(gameXhair)
-    this.gameCrosshair = new CrosshairRenderer(gameXhair, this.settings.crosshair, 48)
+    document.getElementById('kos-xh-styles')?.remove()
+    const gameCanvas = document.createElement('canvas')
+    gameCanvas.id = 'game-crosshair'
+    document.body.appendChild(gameCanvas)
+    this.gameCrosshair = new CrosshairRenderer(gameCanvas, this.settings.crosshair, 48)
     window.addEventListener('resize', () => {
       this.crosshairPreview.resize()
       this.gameCrosshair.resize()
@@ -2170,35 +2146,22 @@ export class MainMenu {
       }
 
       #game-crosshair {
-        position: fixed !important;
-        left: 50% !important;
-        top: 50% !important;
-        right: auto !important;
-        bottom: auto !important;
-        inset: auto !important;
-        width: 48px !important;
-        height: 48px !important;
-        max-width: 48px !important;
-        max-height: 48px !important;
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 48px;
+        height: 48px;
         transform: translate(-50%, -50%);
-        z-index: 10000 !important;
-        pointer-events: none !important;
-        background: transparent !important;
+        z-index: 25;
+        pointer-events: none;
+        background: transparent;
         opacity: 0;
         visibility: hidden;
-        display: none;
-        overflow: visible;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
       }
-      #game-crosshair.is-on {
-        opacity: 1 !important;
-        visibility: visible !important;
-        display: block !important;
-      }
-      #game-crosshair.is-awp-hidden {
-        opacity: 0 !important;
-        visibility: hidden !important;
-        display: none !important;
-      }
+      #game-crosshair.is-on { opacity: 1; visibility: visible; }
+      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; }
 
       @media (max-width: 900px) {
         .kos-shell-main {

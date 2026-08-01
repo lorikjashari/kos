@@ -655,7 +655,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     }
     style.textContent = `
       #awp-scope {
-        position: fixed; inset: 0; z-index: 10001; pointer-events: none;
+        position: fixed; inset: 0; z-index: 26; pointer-events: none;
         opacity: 0; visibility: hidden;
         transition: opacity 0.1s ease-out, visibility 0.1s;
       }
