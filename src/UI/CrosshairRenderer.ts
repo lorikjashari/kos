@@ -8,11 +8,13 @@ export class CrosshairRenderer {
   private canvas: HTMLCanvasElement
   private ctx: CanvasRenderingContext2D
   private settings: CrosshairSettings
+  private logicalSize: number
 
-  constructor(canvas: HTMLCanvasElement, settings: CrosshairSettings) {
+  constructor(canvas: HTMLCanvasElement, settings: CrosshairSettings, logicalSize = 120) {
     this.canvas = canvas
     this.ctx = canvas.getContext('2d')!
     this.settings = settings
+    this.logicalSize = logicalSize
     this.resize()
     this.draw()
   }
@@ -24,29 +26,30 @@ export class CrosshairRenderer {
 
   public resize(): void {
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const size = 120
-    this.canvas.width = size * dpr
-    this.canvas.height = size * dpr
+    const size = this.logicalSize
+    this.canvas.width = Math.round(size * dpr)
+    this.canvas.height = Math.round(size * dpr)
     this.canvas.style.width = `${size}px`
     this.canvas.style.height = `${size}px`
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    this.ctx.imageSmoothingEnabled = false
     this.draw()
   }
 
   public draw(): void {
     const ctx = this.ctx
-    const w = 120
-    const h = 120
+    const w = this.logicalSize
+    const h = this.logicalSize
     const cx = w / 2
     const cy = h / 2
     ctx.clearRect(0, 0, w, h)
+    ctx.imageSmoothingEnabled = false
 
     const s = this.settings
     const color = `rgba(${s.colorR}, ${s.colorG}, ${s.colorB}, ${s.alpha})`
     const outline = `rgba(0, 0, 0, ${s.outlineOpacity})`
 
-    // CS gap/size are in "crosshair units" — scale for screen
-    const unit = 2.2
+    const unit = this.logicalSize >= 100 ? 2.2 : 1.15
     const length = Math.max(0.5, s.size) * unit
     const thick = Math.max(0.5, s.thickness) * unit * 0.55
     const gap = s.gap * unit * 0.55
@@ -62,20 +65,15 @@ export class CrosshairRenderer {
       ctx.fillRect(x, y, bw, bh)
     }
 
-    // Classic cross only (style UI removed — always draw bars)
     const drawCross = true
     const drawDot = s.centerDot
 
     if (drawCross) {
-      // Top (skip if T-style)
       if (!s.tStyle) {
         drawBar(cx - thick / 2, cy - halfGap - length, thick, length)
       }
-      // Bottom
       drawBar(cx - thick / 2, cy + halfGap, thick, length)
-      // Left
       drawBar(cx - halfGap - length, cy - thick / 2, length, thick)
-      // Right
       drawBar(cx + halfGap, cy - thick / 2, length, thick)
     }
 

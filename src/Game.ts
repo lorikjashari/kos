@@ -235,7 +235,7 @@ export class Game implements IUpdatable {
     CameraManager.zoomSensitivity = clampZoomSensitivity(s.zoomSensitivity)
     this.audioManager.setSfxVolume(clampVolume(s.volume))
     this.audioManager.setMusicVolume(clampVolume(s.musicVolume))
-    this.setFpsCap(s.fpsMax)
+    this.setFpsCap(s.fpsMax === 999 ? 0 : s.fpsMax)
     if (isTouchDevice()) {
       this.mobileControls?.applySettings(s.mobile)
       this.applyMobilePerfProfile(s.mobile.perfProfile)
@@ -1015,6 +1015,10 @@ export class Game implements IUpdatable {
 
     this.inputManager.unlock()
     void this.warmCombatSystems()
+  }
+
+  public isAwaitingLoadout(): boolean {
+    return this.awaitingLoadout
   }
 
   public confirmMatchLoadout(primary: 'AK47' | 'AWP'): void {

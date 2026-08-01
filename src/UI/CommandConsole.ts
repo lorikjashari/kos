@@ -45,7 +45,7 @@ export class CommandConsole {
             <input id="kos-con-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" />
             <div class="kos-con-suggest" id="kos-con-suggest" aria-hidden="true"></div>
           </div>
-          <button type="button" class="kos-con-submit" id="kos-con-submit">Submit</button>
+          <button type="button" class="kos-con-submit" id="kos-con-submit">OK</button>
         </div>
       </div>
     `
@@ -55,22 +55,31 @@ export class CommandConsole {
       #kos-con {
         display: none;
         position: fixed;
-        left: 50%;
-        top: 6%;
-        transform: translateX(-50%);
+        inset: 0;
         z-index: 10050;
         pointer-events: auto;
+        background: rgba(0,0,0,0.4);
       }
       #kos-con.is-open { display: block; }
       .kos-con-win {
         display: flex;
         flex-direction: column;
+        position: absolute;
+        left: 50%;
+        top: 6%;
+        transform: translateX(-50%);
         width: min(660px, 94vw);
         height: min(460px, 74vh);
         background: #0b0b0d;
         border: 1px solid #3a3f45;
-        box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+        border-left: 3px solid #1a5fff;
+        box-shadow: 0 18px 60px rgba(0,0,0,0.6), 0 1px 0 rgba(201,162,39,0.35) inset;
         font-family: "Lucida Console", Consolas, "Courier New", monospace;
+        animation: kos-con-slide 120ms ease-out;
+      }
+      @keyframes kos-con-slide {
+        from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+        to { opacity: 1; transform: translateX(-50%) translateY(0); }
       }
       .kos-con-title {
         display: flex;
@@ -80,6 +89,7 @@ export class CommandConsole {
         padding: 0 6px;
         background: linear-gradient(#2b3138, #1c2126);
         border-bottom: 1px solid #000;
+        box-shadow: inset 0 -1px 0 rgba(201,162,39,0.28);
         user-select: none;
       }
       .kos-con-ico {

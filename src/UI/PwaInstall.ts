@@ -1,4 +1,4 @@
-import { isIos, isMobileDevice, isStandalonePwa } from './MobileDevice'
+import { isIos, isInAppBrowser, isMobileDevice, isStandalonePwa } from './MobileDevice'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -63,6 +63,11 @@ export class PwaInstall {
 
   private buildHtml(): string {
     const ios = isIos()
+    const inApp = isInAppBrowser()
+    const shareIcon = `
+      <svg class="kos-pwa-share" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path fill="currentColor" d="M12 3l4 4h-3v6h-2V7H8l4-4zm-7 10v6h14v-6h2v8H3v-8h2z"/>
+      </svg>`
     return `
       <div class="kos-pwa-card">
         <img class="kos-pwa-logo" src="/logo.png" alt="KoS" width="160" height="160" />
@@ -73,11 +78,20 @@ export class PwaInstall {
             ios
               ? `
             <ol>
-              <li>Tap the <strong>Share</strong> button in Safari</li>
+              <li>In <strong>Safari</strong>, tap ${shareIcon} <strong>Share</strong> in the toolbar</li>
               <li>Scroll and tap <strong>Add to Home Screen</strong></li>
-              <li>Tap <strong>Add</strong>, then open KoS from your home screen</li>
-            </ol>`
-              : `
+              <li>Tap <strong>Add</strong>, then open the <strong>KoS</strong> icon</li>
+            </ol>
+            <p class="kos-pwa-alt">Add to Home Screen appears in Safari — not Chrome or Firefox on iPhone.</p>`
+              : inApp
+                ? `
+            <ol>
+              <li>This in-app browser cannot install apps</li>
+              <li>Tap the menu and choose <strong>Open in Chrome</strong> / <strong>Open in browser</strong></li>
+              <li>Then install KoS from the real browser</li>
+            </ol>
+            <p class="kos-pwa-alt">Or copy this page link and paste it into Chrome.</p>`
+                : `
             <ol>
               <li>Tap <strong>Install KoS</strong> below</li>
               <li>Confirm install on your device</li>
@@ -86,7 +100,8 @@ export class PwaInstall {
             <p class="kos-pwa-alt">If Install is unavailable: open the browser menu → <strong>Install app</strong> / <strong>Add to Home screen</strong>.</p>`
           }
         </div>
-        <button type="button" class="kos-pwa-install" data-action="install" ${ios ? 'hidden' : ''}>Install KoS</button>
+        <button type="button" class="kos-pwa-install" data-action="install" ${ios || inApp ? 'hidden' : ''}>Install KoS</button>
+        ${inApp && !ios ? `<button type="button" class="kos-pwa-check" data-action="copy">Copy page link</button>` : ''}
         <button type="button" class="kos-pwa-check" data-action="recheck">I added it — Recheck</button>
         <p class="kos-pwa-status" hidden></p>
       </div>
@@ -101,6 +116,14 @@ export class PwaInstall {
       const action = t.getAttribute('data-action')
       if (action === 'install') await this.promptInstall()
       if (action === 'recheck') this.refreshUi(true)
+      if (action === 'copy') {
+        try {
+          await navigator.clipboard.writeText(location.href)
+          this.setStatus('Link copied. Paste it in Chrome or Safari.')
+        } catch {
+          this.setStatus(location.href)
+        }
+      }
     })
   }
 
@@ -113,7 +136,7 @@ export class PwaInstall {
     try {
       const choice = await this.deferred.userChoice
       if (choice.outcome === 'accepted') {
-        this.setStatus('Installed. Open KoS from your home screen.')
+        this.setStatus('Installed. Close this tab and open KoS from your home screen.')
       } else {
         this.setStatus('Install dismissed. You need the home screen icon to play.')
       }
@@ -132,13 +155,15 @@ export class PwaInstall {
     }
     if (!this.root) return
     const btn = this.root.querySelector('[data-action="install"]') as HTMLButtonElement | null
-    if (btn && !isIos()) {
+    if (btn && !isIos() && !isInAppBrowser()) {
       btn.hidden = false
       btn.disabled = !this.deferred
-      btn.textContent = this.deferred ? 'Install KoS' : 'Waiting for install…'
+      btn.textContent = this.deferred ? 'Install KoS' : 'Open in Chrome, then Install'
     }
     if (fromRecheck) {
-      this.setStatus('Still in the browser. Open the KoS icon from your home screen.')
+      this.setStatus(
+        'Still in the browser tab. Close this page and open the KoS home-screen icon.'
+      )
     }
   }
 
@@ -178,6 +203,7 @@ export class PwaInstall {
       #kos-pwa-gate h1 { margin: 0 0 8px; font-size: 1.55rem; letter-spacing: -0.02em; }
       #kos-pwa-gate .kos-pwa-lead { margin: 0 0 16px; color: rgba(230,238,255,0.78); font-size: 0.95rem; line-height: 1.45; }
       #kos-pwa-gate ol { margin: 0 0 14px; padding-left: 1.2rem; text-align: left; color: rgba(230,238,255,0.9); line-height: 1.55; }
+      #kos-pwa-gate .kos-pwa-share { display: inline-block; vertical-align: -3px; color: #7eb6ff; margin: 0 2px; }
       #kos-pwa-gate .kos-pwa-alt { margin: 0 0 14px; font-size: 0.82rem; color: rgba(230,238,255,0.65); line-height: 1.4; }
       #kos-pwa-gate button {
         width: 100%; border: 0; border-radius: 12px; padding: 13px 16px; margin-top: 8px;

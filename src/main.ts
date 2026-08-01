@@ -4,7 +4,7 @@ import { MainMenu } from './UI/MainMenu'
 import { MobileControls } from './UI/MobileControls'
 import { PwaInstall } from './UI/PwaInstall'
 import { loadSettings } from './UI/SettingsStore'
-import { isTouchDevice } from './UI/MobileDevice'
+import { isTouchDevice, mountLandscapeHint } from './UI/MobileDevice'
 import { probeRefreshRate, supportsHighRefresh } from './UI/DisplayRefresh'
 
 async function main() {
@@ -94,7 +94,7 @@ async function main() {
     menu.setLoadingProgress('Detecting display…', 98)
     const hz = await probeRefreshRate(isTouchDevice() ? 55 : 40)
     game.setDisplayRefreshRate(hz)
-    game.setFpsCap(settings.fpsMax)
+    game.setFpsCap(settings.fpsMax === 999 ? 0 : settings.fpsMax)
     if (settings.fpsMax === 0 && supportsHighRefresh()) {
       document.documentElement.dataset.kosHz = String(hz)
     }
@@ -104,6 +104,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 280))
     menu.showMain()
     void game.audioManager.startMenuMusic()
+    mountLandscapeHint()
 
     if (pwa.requiresInstall()) {
       pwa.mount()

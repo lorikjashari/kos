@@ -81,6 +81,25 @@ export class MainMenu {
     this.root.classList.toggle('is-mobile-ui', mobile)
   }
 
+  private readSafeInset(side: 'top' | 'right' | 'bottom' | 'left'): number {
+    const probe = document.createElement('div')
+    probe.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;padding-${side}:env(safe-area-inset-${side});`
+    document.body.appendChild(probe)
+    const val = parseFloat(getComputedStyle(probe).getPropertyValue(`padding-${side}`)) || 0
+    probe.remove()
+    return val
+  }
+
+  private selectSettingsTab(tab: string): void {
+    this.root.querySelectorAll('.kos-tab').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-tab') === tab)
+    })
+    this.root.querySelectorAll('.kos-tab-panel').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-panel') === tab)
+    })
+    if (tab === 'mobile') this.syncMobileControlsPanel()
+  }
+
   public getSettings(): PlayerSettings {
     return this.settings
   }
@@ -144,6 +163,8 @@ export class MainMenu {
       this.syncMobileControlsPanel()
       this.syncFpsControls()
       this.crosshairPreview?.draw()
+      if (isTouchDevice()) this.selectSettingsTab('mobile')
+      else this.selectSettingsTab('video')
     } else {
       this.stopMobileLayoutEdit()
     }
@@ -273,29 +294,33 @@ export class MainMenu {
           </div>
           <h2 class="kos-heading">Settings</h2>
 
-          <div class="kos-tabs" role="tablist">
+            <div class="kos-tabs" role="tablist">
             <button type="button" class="kos-tab is-on" data-tab="video">Video</button>
             <button type="button" class="kos-tab" data-tab="crosshair">Crosshair</button>
-            <button type="button" class="kos-tab" data-tab="keybinds">Keybinds</button>
+            <button type="button" class="kos-tab" data-tab="keybinds" data-desktop-only>Keybinds</button>
             <button type="button" class="kos-tab" data-tab="mobile" data-mobile-only>Mobile</button>
           </div>
 
           <div class="kos-tab-panel is-on" data-panel="video">
-            <p class="kos-hint">Render resolution is stretched to fill your screen (CS-style). Switching aspect (4:3 ↔ 16:9) changes the stretch.</p>
-            <p class="kos-hint tight" id="kos-res-active">Active: 1280×960</p>
-            <div class="kos-res-groups" id="kos-res-groups"></div>
-            <p class="kos-section-label" style="margin-top:18px">Graphics</p>
+            <p class="kos-hint" data-desktop-only>Render resolution is stretched to fill your screen (CS-style). Switching aspect (4:3 ↔ 16:9) changes the stretch.</p>
+            <p class="kos-hint" data-mobile-only>Native display resolution is used on mobile. Frame rate and Performance control smoothness.</p>
+            <p class="kos-hint tight" id="kos-res-active" data-desktop-only>Active: 1280×960</p>
+            <div class="kos-res-groups" id="kos-res-groups" data-desktop-only></div>
+            <p class="kos-section-label" style="margin-top:18px" data-desktop-only>Graphics</p>
             <div class="kos-chip-row" id="kos-gfx-row" data-desktop-only>
               <button type="button" class="kos-chip" data-gfx="low">Low</button>
               <button type="button" class="kos-chip" data-gfx="medium">Medium</button>
               <button type="button" class="kos-chip" data-gfx="high">High</button>
             </div>
             <p class="kos-section-label" style="margin-top:18px">Frame rate</p>
-            <p class="kos-hint tight" id="kos-fps-hint">Auto follows your display (120Hz on ProMotion iPhones).</p>
+            <p class="kos-hint tight" id="kos-fps-hint">Auto matches your display refresh.</p>
             <div class="kos-chip-row" id="kos-fps-row">
               <button type="button" class="kos-chip" data-fps="0">Auto</button>
               <button type="button" class="kos-chip" data-fps="60">60</button>
               <button type="button" class="kos-chip" data-fps="120" data-mobile-only>120</button>
+              <button type="button" class="kos-chip" data-fps="120" data-desktop-only>120</button>
+              <button type="button" class="kos-chip" data-fps="144" data-desktop-only>144</button>
+              <button type="button" class="kos-chip" data-fps="999" data-desktop-only>Unlimited</button>
             </div>
           </div>
 
@@ -308,7 +333,7 @@ export class MainMenu {
             <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-xhair">Reset Crosshair</button>
           </div>
 
-          <div class="kos-tab-panel" data-panel="keybinds">
+          <div class="kos-tab-panel" data-panel="keybinds" data-desktop-only>
             <p class="kos-hint">Click a bind, then press a new key. Esc cancels.</p>
             <label class="kos-slider kos-sens-slider">
               <span>Mouse Sensitivity<em id="kos-sens-val">3</em></span>
@@ -430,10 +455,11 @@ export class MainMenu {
     if (hint) {
       hint.textContent =
         this.displayHz >= 110
-          ? `Display ~${this.displayHz}Hz — Auto unlocks 120fps on this device.`
+          ? `Display ~${this.displayHz}Hz — Auto unlocks high refresh on this device.`
           : `Display ~${this.displayHz}Hz — Auto matches your screen refresh.`
     }
-    const current = this.settings.fpsMax === 60 || this.settings.fpsMax === 120 ? this.settings.fpsMax : 0
+    const v = this.settings.fpsMax
+    const current = v === 60 || v === 120 || v === 144 || v === 999 ? v : 0
     this.root.querySelectorAll('[data-fps]').forEach((el) => {
       el.classList.toggle('is-on', Number((el as HTMLElement).getAttribute('data-fps')) === current)
     })
@@ -589,9 +615,10 @@ export class MainMenu {
       const fpsAttr = t.getAttribute('data-fps')
       if (fpsAttr !== null) {
         const fps = Number(fpsAttr)
-        this.settings.fpsMax = fps === 60 || fps === 120 ? fps : 0
+        this.settings.fpsMax =
+          fps === 60 || fps === 120 || fps === 144 || fps === 999 ? fps : 0
         try {
-          Game.getInstance().setFpsCap(this.settings.fpsMax)
+          Game.getInstance().setFpsCap(this.settings.fpsMax === 999 ? 0 : this.settings.fpsMax)
         } catch {
           /* game may not exist yet */
         }
@@ -698,7 +725,7 @@ export class MainMenu {
       gameCanvas.id = 'game-crosshair'
       document.body.appendChild(gameCanvas)
     }
-    this.gameCrosshair = new CrosshairRenderer(gameCanvas, this.settings.crosshair)
+    this.gameCrosshair = new CrosshairRenderer(gameCanvas, this.settings.crosshair, 48)
     window.addEventListener('resize', () => {
       this.crosshairPreview.resize()
       this.gameCrosshair.resize()
@@ -1068,8 +1095,18 @@ export class MainMenu {
       e.preventDefault()
       const w = dock.offsetWidth
       const h = dock.offsetHeight
-      const x = Math.max(4, Math.min(window.innerWidth - w - 4, e.clientX - this.dockDrag.ox))
-      const y = Math.max(4, Math.min(window.innerHeight - h - 4, e.clientY - this.dockDrag.oy))
+      const safeL = Math.max(4, this.readSafeInset('left'))
+      const safeR = Math.max(4, this.readSafeInset('right'))
+      const safeT = Math.max(4, this.readSafeInset('top'))
+      const safeB = Math.max(4, this.readSafeInset('bottom'))
+      const x = Math.max(
+        safeL,
+        Math.min(window.innerWidth - w - safeR, e.clientX - this.dockDrag.ox)
+      )
+      const y = Math.max(
+        safeT,
+        Math.min(window.innerHeight - h - safeB, e.clientY - this.dockDrag.oy)
+      )
       dock.style.left = `${x}px`
       dock.style.top = `${y}px`
       dock.style.right = 'auto'
@@ -1286,7 +1323,10 @@ export class MainMenu {
       }
       .kos-hint.tight {
         margin: 10px 0 0; text-align: center;
-        font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700;
+        font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700;
+        color: var(--kos-muted);
+      }
+      .kos-xhair-preview-wrap .kos-hint.tight {
         color: rgba(226, 232, 240, 0.55);
       }
       .kos-hint.tight-left { margin: -8px 0 18px; font-size: 12.5px; }
@@ -1329,6 +1369,13 @@ export class MainMenu {
         border-radius: 0;
         padding: 10px 8px;
         background: #fff;
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+      .kos-field-inline input[type=number]::-webkit-inner-spin-button,
+      .kos-field-inline input[type=number]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
       }
       .kos-field-inline input[type=number]:focus {
         border-color: var(--kos-blue);
@@ -1377,6 +1424,16 @@ export class MainMenu {
       }
       .kos-btn:active:not(:disabled) { transform: translateX(2px) scale(0.99); }
       .kos-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+      .kos-btn:focus-visible,
+      .kos-chip:focus-visible,
+      .kos-tab:focus-visible,
+      .kos-back:focus-visible,
+      .kos-bind:focus-visible,
+      .kos-res:focus-visible,
+      .kos-seg button:focus-visible {
+        outline: 2px solid var(--kos-gold);
+        outline-offset: 2px;
+      }
 
       .kos-btn-primary {
         background: linear-gradient(90deg, var(--kos-blue-deep) 0%, var(--kos-blue) 100%);
@@ -1608,9 +1665,10 @@ export class MainMenu {
       .kos-mobile-done {
         appearance: none; border: 0; border-radius: 999px;
         background: #1a5fff; color: #fff;
-        font: inherit; font-size: 11px; font-weight: 800;
-        padding: 6px 12px; cursor: pointer;
+        font: inherit; font-size: 13px; font-weight: 800;
+        padding: 10px 16px; cursor: pointer;
         flex-shrink: 0;
+        min-height: 44px;
       }
       .kos-mobile-dock-slider {
         margin: 0;
@@ -1620,7 +1678,10 @@ export class MainMenu {
         display: flex; justify-content: space-between;
         font-size: 11px; margin-bottom: 2px;
       }
-      .kos-mobile-dock-slider input[type="range"] { width: 100%; }
+      .kos-mobile-dock-slider input[type="range"] {
+        width: 100%;
+        height: 28px;
+      }
       .kos-mobile-dock-check {
         color: rgba(255,255,255,0.9);
         font-size: 11px;
@@ -1641,6 +1702,16 @@ export class MainMenu {
         border-color: rgba(26,95,255,0.45);
         background: #eef4ff;
         color: var(--kos-blue-deep);
+      }
+      .kos-mobile-editor-actions {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 0 4px;
+        background: linear-gradient(180deg, rgba(255,255,255,0), #fff 28%);
       }
 
       .kos-tabs {
@@ -1689,26 +1760,27 @@ export class MainMenu {
       }
       .kos-res {
         appearance: none;
-        border: 1px solid rgba(26, 95, 255, 0.16);
-        background: rgba(255, 255, 255, 0.85);
-        color: var(--kos-ink);
+        border: 1.5px solid var(--kos-line);
+        background: #fff;
+        color: var(--kos-muted);
         font-family: inherit;
         font-size: 12px;
         font-weight: 700;
         letter-spacing: 0.02em;
-        padding: 9px 12px;
+        padding: 10px 12px;
         cursor: pointer;
-        transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+        clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+        transition: all 160ms var(--kos-ease);
       }
       .kos-res:hover {
-        border-color: rgba(26, 95, 255, 0.45);
+        border-color: rgba(26, 95, 255, 0.35);
         color: var(--kos-blue-deep);
       }
       .kos-res.is-on {
-        background: linear-gradient(180deg, rgba(26, 95, 255, 0.12), rgba(26, 95, 255, 0.06));
-        border-color: var(--kos-blue);
-        color: var(--kos-blue-deep);
-        box-shadow: inset 0 0 0 1px rgba(26, 95, 255, 0.15);
+        background: var(--kos-blue);
+        border-color: transparent;
+        color: #fff;
+        box-shadow: 0 8px 20px rgba(26, 95, 255, 0.28);
       }
       .kos-res-star {
         color: #c9a227;
@@ -1738,7 +1810,45 @@ export class MainMenu {
         font-variant-numeric: tabular-nums; font-weight: 800;
       }
       .kos-slider input[type=range] {
-        width: 100%; accent-color: var(--kos-blue); height: 4px; cursor: pointer;
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 28px;
+        margin: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      .kos-slider input[type=range]::-webkit-slider-runnable-track {
+        height: 4px;
+        background: var(--kos-line);
+        border: none;
+      }
+      .kos-slider input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        margin-top: -5px;
+        background: var(--kos-blue);
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 1px rgba(201, 162, 39, 0.55), 0 2px 8px rgba(26, 95, 255, 0.35);
+        clip-path: polygon(0 0, calc(100% - 3px) 0, 100% 3px, 100% 100%, 0 100%);
+      }
+      .kos-slider input[type=range]:active::-webkit-slider-thumb {
+        box-shadow: 0 0 0 2px var(--kos-gold), 0 2px 10px rgba(26, 95, 255, 0.45);
+      }
+      .kos-slider input[type=range]::-moz-range-track {
+        height: 4px;
+        background: var(--kos-line);
+        border: none;
+      }
+      .kos-slider input[type=range]::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        background: var(--kos-blue);
+        border: 2px solid #fff;
+        border-radius: 0;
+        box-shadow: 0 0 0 1px rgba(201, 162, 39, 0.55);
       }
       .kos-sens-slider { margin-bottom: 10px; }
 
@@ -1818,6 +1928,8 @@ export class MainMenu {
         transform: translate(-50%, -50%);
         z-index: 6; pointer-events: none;
         opacity: 0; visibility: hidden;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
       }
       #game-crosshair.is-on { opacity: 1; visibility: visible; }
       #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; }

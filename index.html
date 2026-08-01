@@ -31,17 +31,22 @@
       }
 
       #fps {
+        display: none;
         position: absolute;
-        background: rgba(0, 0, 0, 0);
-        top: 12px;
-        left: 64px;
+        top: max(12px, env(safe-area-inset-top));
+        left: max(64px, calc(env(safe-area-inset-left) + 58px));
         font-weight: 500;
         font-size: 13px;
         letter-spacing: 0.06em;
-        font-family: 'Segoe UI', 'Gill Sans', Calibri, sans-serif;
-        color: rgba(255, 255, 255, 0.75);
+        font-family: 'Lucida Console', Consolas, monospace;
+        color: #7cfc00;
+        background: rgba(0, 0, 0, 0.45);
+        padding: 4px 8px;
         z-index: 6;
         pointer-events: none;
+      }
+      @media (pointer: coarse) {
+        #fps { display: none !important; }
       }
 
       canvas {

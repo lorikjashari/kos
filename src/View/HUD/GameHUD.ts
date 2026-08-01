@@ -1,6 +1,7 @@
 import { Player } from '../../Core/Player'
 import { WeaponIconRenderer } from './WeaponIconRenderer'
 import { Game } from '../../Game'
+import { isTouchDevice } from '../../UI/MobileDevice'
 
 type FeedPush = {
   killer: string
@@ -58,12 +59,18 @@ export class GameHUD {
     this.root.innerHTML = `
       <div class="kos-brand">KoS</div>
 
+      <div class="cs-pause-backdrop" id="hud-pause-backdrop" aria-hidden="true">
+        <div class="cs-pause-label">PAUSED</div>
+        <div class="cs-pause-sub" id="hud-pause-sub">Esc or Resume to continue</div>
+      </div>
+
       <div class="cs-pause-menu" id="hud-pause">
         <button type="button" class="cs-pause-btn" id="hud-pause-btn" title="Menu" aria-label="Open menu">
           <span></span><span></span>
         </button>
         <div class="cs-pause-panel" id="hud-pause-panel" aria-hidden="true">
-          <button type="button" class="cs-pause-opt" data-pause="resume">Back to game</button>
+          <button type="button" class="cs-pause-opt" data-pause="resume">Resume</button>
+          <button type="button" class="cs-pause-opt" data-pause="scores" data-touch-only>Scores</button>
           <button type="button" class="cs-pause-opt" data-pause="menu">Back to menu</button>
         </div>
       </div>
@@ -94,7 +101,7 @@ export class GameHUD {
         <div class="cs-sb-panel">
           <div class="cs-sb-top">
             <div class="cs-sb-title">Scoreboard</div>
-            <div class="cs-sb-hint">Hold Tab</div>
+            <div class="cs-sb-hint" id="hud-sb-hint">Hold Tab</div>
           </div>
           <div class="cs-sb-head">
             <span class="cs-sb-col rank">#</span>
@@ -114,7 +121,7 @@ export class GameHUD {
 
       <div class="cs-loadout" id="hud-loadout" aria-hidden="true">
         <div class="cs-loadout-title">Choose loadout</div>
-        <div class="cs-loadout-sub">Primary on <kbd>1</kbd> · USP on <kbd>2</kbd></div>
+        <div class="cs-loadout-sub" id="hud-loadout-sub">Press <kbd>1</kbd> for AWP · <kbd>2</kbd> for AK</div>
         <div class="cs-loadout-row">
           <button type="button" class="cs-loadout-box" data-primary="AWP">
             <div class="cs-loadout-guns">
@@ -159,7 +166,25 @@ export class GameHUD {
     document.body.appendChild(this.root)
     this.root.style.display = 'none'
     this.bind()
+    this.applyTouchUiHints()
     requestAnimationFrame(() => this.bakeIcons())
+  }
+
+  private applyTouchUiHints(): void {
+    const touch = isTouchDevice()
+    this.root.classList.toggle('is-touch', touch)
+    const hint = document.getElementById('hud-sb-hint')
+    if (hint) hint.textContent = touch ? 'Pause → Scores' : 'Hold Tab'
+    const loadoutSub = document.getElementById('hud-loadout-sub')
+    if (loadoutSub) {
+      loadoutSub.innerHTML = touch
+        ? 'Tap a loadout below'
+        : 'Press <kbd>1</kbd> for AWP · <kbd>2</kbd> for AK'
+    }
+    const pauseSub = document.getElementById('hud-pause-sub')
+    if (pauseSub) {
+      pauseSub.textContent = touch ? 'Tap Resume to continue' : 'Esc or Resume to continue'
+    }
   }
 
   /** Show HUD once a match starts from the main menu */
@@ -232,6 +257,10 @@ export class GameHUD {
         const action = (btn as HTMLElement).getAttribute('data-pause')
         const game = Game.getInstance()
         if (action === 'resume') game.resumeMatch()
+        if (action === 'scores') {
+          const on = !this.scoreboardEl?.classList.contains('is-on')
+          this.setScoreboardVisible(on)
+        }
         if (action === 'menu') game.returnToMenu()
       }
       btn.addEventListener('pointerup', run)
@@ -248,6 +277,10 @@ export class GameHUD {
     this.pauseBtnEl?.classList.toggle('is-active', open)
     const panel = document.getElementById('hud-pause-panel')
     panel?.setAttribute('aria-hidden', open ? 'false' : 'true')
+    const backdrop = document.getElementById('hud-pause-backdrop')
+    backdrop?.classList.toggle('is-on', open)
+    backdrop?.setAttribute('aria-hidden', open ? 'false' : 'true')
+    if (!open) this.setScoreboardVisible(false)
   }
 
   public setScoreboardVisible(visible: boolean): void {
@@ -360,8 +393,10 @@ export class GameHUD {
   public showHitMarker(isHead = false): void {
     if (!this.hitmarkerEl) return
     this.hitmarkerEl.classList.toggle('is-head', isHead)
+    this.hitmarkerEl.classList.remove('is-on')
+    void this.hitmarkerEl.offsetWidth
     this.hitmarkerEl.classList.add('is-on')
-    this.hitmarkerTimer = performance.now() + 120
+    this.hitmarkerTimer = performance.now() + 140
   }
 
   public flashDamage(amount = 20): void {
@@ -453,8 +488,8 @@ export class GameHUD {
 
       .kos-brand {
         position: absolute;
-        top: 12px;
-        right: 16px;
+        top: max(12px, env(safe-area-inset-top));
+        right: max(16px, env(safe-area-inset-right));
         font-size: 11px;
         font-weight: 800;
         letter-spacing: 0.28em;
@@ -462,10 +497,45 @@ export class GameHUD {
         text-shadow: none;
       }
 
+      .cs-pause-backdrop {
+        position: absolute;
+        inset: 0;
+        z-index: 18;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(6px);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 160ms ease, visibility 160ms ease;
+      }
+      .cs-pause-backdrop.is-on {
+        opacity: 1;
+        visibility: visible;
+      }
+      .cs-pause-label {
+        font-size: clamp(28px, 5vw, 42px);
+        font-weight: 800;
+        letter-spacing: 0.28em;
+        color: #e8c56a;
+        text-shadow: 0 2px 0 rgba(0,0,0,0.55);
+      }
+      .cs-pause-sub {
+        font-size: 12px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.62);
+      }
+
       .cs-pause-menu {
         position: absolute;
-        top: 12px;
-        left: 14px;
+        top: max(12px, env(safe-area-inset-top));
+        left: max(14px, env(safe-area-inset-left));
         z-index: 20;
         pointer-events: auto;
         display: flex;
@@ -543,8 +613,8 @@ export class GameHUD {
 
       .cs-bottom-left {
         position: absolute;
-        left: 16px;
-        bottom: 16px;
+        left: max(16px, env(safe-area-inset-left));
+        bottom: max(16px, env(safe-area-inset-bottom));
       }
       .cs-vital {
         display: flex;
@@ -593,8 +663,8 @@ export class GameHUD {
 
       .cs-bottom-right {
         position: absolute;
-        right: 16px;
-        bottom: 16px;
+        right: max(16px, env(safe-area-inset-right));
+        bottom: max(16px, env(safe-area-inset-bottom));
         display: flex;
         flex-direction: column;
         align-items: flex-end;
@@ -648,12 +718,19 @@ export class GameHUD {
         top: 50%;
         width: 18px;
         height: 18px;
-        margin: -9px 0 0 -9px;
+        margin: 0;
+        transform: translate(-50%, -50%) scale(1);
         opacity: 0;
         pointer-events: none;
-        transition: opacity 40ms linear;
       }
-      .cs-hitmarker.is-on { opacity: 1; }
+      .cs-hitmarker.is-on {
+        opacity: 1;
+        animation: cs-hit-pop 140ms ease-out;
+      }
+      @keyframes cs-hit-pop {
+        0% { transform: translate(-50%, -50%) scale(1.32); opacity: 1; }
+        100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+      }
       .cs-hitmarker::before,
       .cs-hitmarker::after {
         content: '';
@@ -678,6 +755,7 @@ export class GameHUD {
       .cs-hitmarker.is-head::before,
       .cs-hitmarker.is-head::after {
         background: #ff3333;
+        box-shadow: 0 0 3px rgba(0,0,0,0.85);
       }
 
       .cs-damage-flash {
@@ -763,6 +841,11 @@ export class GameHUD {
         transform: translateY(-2px);
         background: linear-gradient(180deg, rgba(40,36,24,0.95), rgba(16,14,10,0.96));
       }
+      .cs-loadout-box.is-selected {
+        border-color: #e8c454;
+        box-shadow: 0 0 0 1px rgba(232,196,84,0.4), 0 16px 40px rgba(0,0,0,0.35);
+        transform: scale(1.02);
+      }
       .cs-loadout-box:focus-visible {
         outline: 2px solid #e8c454;
         outline-offset: 3px;
@@ -846,8 +929,8 @@ export class GameHUD {
 
       .cs-killfeed {
         position: absolute;
-        top: 52px;
-        right: 16px;
+        top: calc(52px + env(safe-area-inset-top));
+        right: max(16px, env(safe-area-inset-right));
         display: flex;
         flex-direction: column;
         align-items: flex-end;
@@ -1043,6 +1126,23 @@ export class GameHUD {
         .cs-ammo-mag { font-size: 32px; }
         .cs-sb-panel { width: min(96vw, 560px); }
         .cs-sb-head, .cs-sb-row { grid-template-columns: 22px 1fr 34px 34px 34px; }
+      }
+
+      #game-hud:not(.is-touch) [data-touch-only] { display: none !important; }
+      #game-hud.is-touch .cs-bottom-left,
+      #game-hud.is-touch .cs-bottom-right {
+        bottom: calc(env(safe-area-inset-bottom) + 72px);
+        transform: scale(0.88);
+        transform-origin: bottom left;
+      }
+      #game-hud.is-touch .cs-bottom-right {
+        transform-origin: bottom right;
+      }
+      @media (pointer: coarse) and (orientation: portrait) {
+        #game-hud.is-touch .cs-bottom-left,
+        #game-hud.is-touch .cs-bottom-right {
+          bottom: calc(env(safe-area-inset-bottom) + 88px);
+        }
       }
 
       #game-hud.is-dead .cs-bottom-left,

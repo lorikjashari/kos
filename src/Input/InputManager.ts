@@ -254,21 +254,24 @@ export class InputManager implements IUpdatable {
     }
 
     // 1 = match primary (AK or AWP), 2 = USP, 3 = knife
-    if (this.keys.get(Key.One)?.justReleased) {
+    const game = Game.getInstance()
+    if (game.isAwaitingLoadout()) {
+      if (this.keys.get(Key.One)?.justReleased) game.confirmMatchLoadout('AWP')
+      else if (this.keys.get(Key.Two)?.justReleased) game.confirmMatchLoadout('AK47')
+    } else if (this.keys.get(Key.One)?.justReleased) {
       const primary = player.primaryWeaponKey
       if (player.setWeapon(primary)) {
         ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh(primary)
-        void Game.getInstance().audioManager.playSwitch(primary)
+        void game.audioManager.playSwitch(primary)
       }
-    }
-    if (this.keys.get(Key.Two)?.justReleased) {
+    } else if (this.keys.get(Key.Two)?.justReleased) {
       if (player.setWeapon('Usp')) {
         ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('Usp')
-        void Game.getInstance().audioManager.playSwitch('Usp')
+        void game.audioManager.playSwitch('Usp')
       }
     }
 
-    if (this.keys.get(Key.Three)?.justReleased) {
+    if (!game.isAwaitingLoadout() && this.keys.get(Key.Three)?.justReleased) {
       if (player.setWeapon('Knife')) {
         ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('Knife')
         void Game.getInstance().audioManager.playSwitch('Knife')

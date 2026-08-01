@@ -370,7 +370,9 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   }
   private updateFpsScreenText(dt: number) {
     this.updateFps(dt)
-    document.getElementById('fps')!.innerText = this.fps + ' FPS'
+    const el = document.getElementById('fps')
+    if (!el || el.style.display === 'none' || getComputedStyle(el).display === 'none') return
+    el.innerText = this.fps + ' FPS'
   }
 
   public update(dt: number = 1 / 60): void {

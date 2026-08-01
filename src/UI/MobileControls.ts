@@ -130,7 +130,7 @@ export class MobileControls {
       <div class="kos-mc-look" data-look="1"></div>
       <div class="kos-mc-layer" data-layer="1"></div>
       <div class="kos-mc-editbar" hidden>
-        <span class="kos-mc-edit-hint">Drag buttons · tap to select · pinch scale in settings</span>
+        <span class="kos-mc-edit-hint">Drag buttons · tap to select · adjust size in the dock</span>
       </div>
     `
     document.body.appendChild(this.root)
