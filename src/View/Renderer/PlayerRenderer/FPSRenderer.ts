@@ -200,8 +200,9 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   /**
-   * Seat the baked CS2 AWP on the Galil Armature Root with a fixed local pose.
-   * Only runs once per mesh — never re-seat from a live animated world pose.
+   * Seat the baked CS2 AWP once: pose is tuned in viewmodel-root space, then
+   * Object3D.attach() reparents onto Armature/Root while keeping that world pose.
+   * Never re-seat later — live bone matrices would bake a wrong orientation.
    */
   private attachAwpProp(fps: FPSMesh): void {
     const root = fps.mesh as unknown as THREE.Object3D
@@ -220,6 +221,12 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       c.visible = true
     })
 
+    prop.position.set(0.39, -0.25, -1.62)
+    prop.rotation.set(0, Math.PI, 0)
+    prop.scale.setScalar(3.7 / 1.36)
+    root.add(prop)
+    root.updateMatrixWorld(true)
+
     let seat: THREE.Object3D | undefined
     root.traverse((c) => {
       if (seat) return
@@ -230,12 +237,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
         if (!seat && c.name === 'Armature') seat = c
       })
     }
-
-    const parent = seat || root
-    prop.position.set(0.39, -0.25, -1.62)
-    prop.rotation.set(0, Math.PI, 0)
-    prop.scale.setScalar(3.7 / 1.36)
-    parent.add(prop)
+    if (seat) seat.attach(prop)
   }
 
   /**

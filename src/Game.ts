@@ -1477,33 +1477,21 @@ export class Game implements IUpdatable {
     requestAnimationFrame(this.update)
 
     const now: number = performance.now()
-
-    if (this.fpsCap > 0) {
-      const minInterval = 1000 / this.fpsCap
-      if (now - this.lastFrameTS < minInterval - 0.5) return
-    }
-    this.lastFrameTS = now
-
-    const refresh = Math.max(60, this.displayHz)
-    const maxDt =
-      this.fpsCap > 0
-        ? Math.min(0.1, 1 / this.fpsCap + 0.005)
-        : Math.min(0.05, 2 / refresh)
     let dt = (now - this.lastUpdateTS) / 1000
-    dt = Math.min(maxDt, dt)
+    this.lastUpdateTS = now
+    if (!Number.isFinite(dt) || dt < 0) dt = 0
+    if (dt > 0.05) dt = 0.05
+
+    if (this.matchStarted && this.matchPaused) {
+      if (this.shouldRenderFrame(now)) this.renderer.update(0)
+      return
+    }
+
     this.currentPlayer.player.prestep(dt)
 
     if (this.matchStarted) {
-      if (this.matchPaused) {
-        this.renderer.update(0)
-        this.lastUpdateTS = now
-        return
-      }
-
-      // Stagger bot mesh creation across lockdown frames
       if (this.pendingBotSpawns.length > 0) {
         this.botSpawnAcc += dt
-        // ~8 bots/sec during lockdown, burst a few each frame
         const budget = Math.max(1, Math.floor(this.botSpawnAcc * 10))
         this.botSpawnAcc = 0
         this.flushPendingBots(Math.min(3, budget))
@@ -1515,7 +1503,6 @@ export class Game implements IUpdatable {
         if (this.lockdownTimer <= 0) {
           this.combatLive = true
           this.renderer.hud?.setLockdown(null)
-          // Finish any leftover spawns quickly once live
           this.flushPendingBots(8)
         }
       }
@@ -1539,11 +1526,25 @@ export class Game implements IUpdatable {
     this.currentPlayer.player.updateDeath(dt)
     this.physics.update(dt)
     this.currentPlayer.player.postPhysics(dt)
+
+    if (!this.shouldRenderFrame(now)) return
     this.renderer.update(dt)
-    this.lastUpdateTS = now
   }
+
+  private shouldRenderFrame(now: number): boolean {
+    if (this.fpsCap <= 0) {
+      this.lastFrameTS = now
+      return true
+    }
+    const minInterval = 1000 / this.fpsCap
+    if (now - this.lastFrameTS < minInterval - 0.5) return false
+    this.lastFrameTS = now
+    return true
+  }
+
   public startUpdateLoop() {
     this.lastUpdateTS = performance.now()
+    this.lastFrameTS = 0
     this.update()
   }
   public addPlayer(playerWrapper: PlayerWrapper) {
