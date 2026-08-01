@@ -427,9 +427,11 @@ export class MobileControls {
     }
 
     if (id === 'scoreboard') {
-      Game.getInstance().renderer?.hud?.toggleScoreboard()
+      const prev = this.holdPointers.get(e.pointerId)
+      if (prev && prev !== id) this.releaseHold(e.pointerId)
+      this.holdPointers.set(e.pointerId, id)
+      Game.getInstance().renderer?.hud?.setScoreboardVisible(true)
       btn.classList.add('is-down')
-      window.setTimeout(() => btn.classList.remove('is-down'), 140)
       this.vibrateLight()
       return
     }
@@ -517,10 +519,18 @@ export class MobileControls {
     if (!id || id === 'joystick') return
     this.holdPointers.delete(pointerId)
     if (this.isToggleControl(id)) return
+
     // Keep pressed if another finger still holds the same control
     for (const held of this.holdPointers.values()) {
       if (held === id) return
     }
+
+    if (id === 'scoreboard') {
+      Game.getInstance().renderer?.hud?.setScoreboardVisible(false)
+      this.root?.querySelector(`[data-id="scoreboard"]`)?.classList.remove('is-down')
+      return
+    }
+
     this.press(id, false)
   }
 
@@ -601,6 +611,12 @@ export class MobileControls {
     this.clearJoystick()
     this.joyPointerId = null
     this.lookPointerId = null
+    this.root?.querySelector(`[data-id="scoreboard"]`)?.classList.remove('is-down')
+    try {
+      Game.getInstance().renderer?.hud?.setScoreboardVisible(false)
+    } catch {
+      /* ignore */
+    }
   }
 
   private ensureStyles(): void {

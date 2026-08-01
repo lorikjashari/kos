@@ -1,4 +1,4 @@
-import { Peer, type DataConnection } from 'peerjs'
+import { Peer, type DataConnection, type PeerJSOption } from 'peerjs'
 import {
   makeRoomCode,
   peerIdForRoom,
@@ -13,6 +13,36 @@ type SessionHandlers = {
   onPeerLeft: (peerId: string) => void
   onMessage: (fromId: string, msg: NetMsg) => void
 }
+
+const PEER_OPTS: PeerJSOption = {
+  debug: 0,
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ],
+  },
+}
+
+const OPEN_TIMEOUT_MS = 20000
+const JOIN_TIMEOUT_MS = 18000
+const MAX_OPEN_ATTEMPTS = 3
+const MAX_JOIN_ATTEMPTS = 3
 
 /**
  * Free friends networking via PeerJS public brokers (no paid server).
@@ -33,28 +63,56 @@ export class NetSession {
   }
 
   public async createRoom(): Promise<string> {
-    const code = makeRoomCode()
-    const id = peerIdForRoom(code)
-    await this.openPeer(id)
-    this.role = 'host'
-    this.code = code
-    this.hostPeerId = id
-    this.localPeerId = id
-    this.handlers.onReady({ role: 'host', code, peerId: id })
-    return code
+    let lastErr: Error = new Error('Network timeout — try again')
+    for (let attempt = 0; attempt < MAX_OPEN_ATTEMPTS; attempt++) {
+      if (this.closed) throw new Error('Cancelled')
+      const code = makeRoomCode()
+      const id = peerIdForRoom(code)
+      try {
+        await this.openPeerOnce(id)
+        this.role = 'host'
+        this.code = code
+        this.hostPeerId = id
+        this.localPeerId = id
+        this.handlers.onReady({ role: 'host', code, peerId: id })
+        return code
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error('Failed to open room')
+        this.teardownPeer()
+        if (attempt + 1 < MAX_OPEN_ATTEMPTS) {
+          await sleep(350 + attempt * 400)
+        }
+      }
+    }
+    throw lastErr
   }
 
   public async joinRoom(rawCode: string): Promise<void> {
     const code = rawCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
     if (code.length < 4) throw new Error('Enter a valid room code')
     const hostId = peerIdForRoom(code)
-    await this.openPeer()
-    this.role = 'client'
-    this.code = code
-    this.hostPeerId = hostId
-    this.localPeerId = this.peer!.id
-    this.handlers.onReady({ role: 'client', code, peerId: this.localPeerId })
-    await this.connectTo(hostId)
+
+    let lastErr: Error = new Error('Network timeout — try again')
+    for (let attempt = 0; attempt < MAX_OPEN_ATTEMPTS; attempt++) {
+      if (this.closed) throw new Error('Cancelled')
+      try {
+        await this.openPeerOnce()
+        this.role = 'client'
+        this.code = code
+        this.hostPeerId = hostId
+        this.localPeerId = this.peer!.id
+        this.handlers.onReady({ role: 'client', code, peerId: this.localPeerId })
+        await this.connectToWithRetry(hostId)
+        return
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error('Join failed')
+        this.teardownPeer()
+        if (attempt + 1 < MAX_OPEN_ATTEMPTS) {
+          await sleep(350 + attempt * 400)
+        }
+      }
+    }
+    throw lastErr
   }
 
   public send(toId: string, msg: NetMsg): void {
@@ -102,28 +160,49 @@ export class NetSession {
       }
     }
     this.connections.clear()
-    try {
-      this.peer?.destroy()
-    } catch {
-      /* ignore */
-    }
-    this.peer = null
+    this.teardownPeer()
     this.role = 'offline'
   }
 
-  private openPeer(fixedId?: string): Promise<void> {
+  private teardownPeer(): void {
+    const peer = this.peer
+    this.peer = null
+    if (!peer) return
+    try {
+      peer.destroy()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private openPeerOnce(fixedId?: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const peer = fixedId
-        ? new Peer(fixedId, { debug: 0 })
-        : new Peer({ debug: 0 })
+      let settled = false
+      const peer = fixedId ? new Peer(fixedId, PEER_OPTS) : new Peer(PEER_OPTS)
       this.peer = peer
+
+      const finish = (err?: Error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        if (err) {
+          try {
+            peer.destroy()
+          } catch {
+            /* ignore */
+          }
+          if (this.peer === peer) this.peer = null
+          reject(err)
+        } else {
+          resolve()
+        }
+      }
+
       const timer = window.setTimeout(() => {
-        reject(new Error('Network timeout — try again'))
-        peer.destroy()
-      }, 12000)
+        finish(new Error('Network timeout — try again'))
+      }, OPEN_TIMEOUT_MS)
 
       peer.on('open', (id) => {
-        window.clearTimeout(timer)
         this.localPeerId = id
         peer.on('connection', (conn) => this.attachConn(conn, true))
         peer.on('disconnected', () => {
@@ -136,41 +215,74 @@ export class NetSession {
           }
         })
         peer.on('error', (err) => {
-          const msg = err?.type === 'unavailable-id'
-            ? 'Room code already in use — create again'
-            : err?.message || 'Network error'
+          const msg =
+            err?.type === 'unavailable-id'
+              ? 'Room code already in use — create again'
+              : err?.message || 'Network error'
           this.handlers.onError(msg)
         })
-        resolve()
+        finish()
       })
 
       peer.on('error', (err) => {
-        window.clearTimeout(timer)
-        reject(new Error(err?.message || 'Failed to connect to lobby'))
+        const msg =
+          err?.type === 'unavailable-id'
+            ? 'Room code already in use — create again'
+            : err?.message || 'Failed to connect to lobby'
+        finish(new Error(msg))
       })
     })
   }
 
-  private connectTo(remoteId: string): Promise<void> {
+  private async connectToWithRetry(remoteId: string): Promise<void> {
+    let lastErr: Error = new Error('Could not reach host — check code / host is online')
+    for (let attempt = 0; attempt < MAX_JOIN_ATTEMPTS; attempt++) {
+      if (this.closed) throw new Error('Cancelled')
+      try {
+        await this.connectToOnce(remoteId)
+        return
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error('Join failed')
+        if (attempt + 1 < MAX_JOIN_ATTEMPTS) {
+          await sleep(300 + attempt * 350)
+        }
+      }
+    }
+    throw lastErr
+  }
+
+  private connectToOnce(remoteId: string): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.peer) return reject(new Error('No peer'))
+      let settled = false
       const conn = this.peer.connect(remoteId, { reliable: true })
-      const timer = window.setTimeout(() => {
-        reject(new Error('Could not reach host — check code / host is online'))
-        try {
-          conn.close()
-        } catch {
-          /* ignore */
-        }
-      }, 12000)
-      conn.on('open', () => {
+
+      const finish = (err?: Error) => {
+        if (settled) return
+        settled = true
         window.clearTimeout(timer)
+        if (err) {
+          try {
+            conn.close()
+          } catch {
+            /* ignore */
+          }
+          reject(err)
+        } else {
+          resolve()
+        }
+      }
+
+      const timer = window.setTimeout(() => {
+        finish(new Error('Could not reach host — check code / host is online'))
+      }, JOIN_TIMEOUT_MS)
+
+      conn.on('open', () => {
         this.attachConn(conn, false)
-        resolve()
+        finish()
       })
       conn.on('error', (err) => {
-        window.clearTimeout(timer)
-        reject(new Error(err?.message || 'Join failed'))
+        finish(new Error(err?.message || 'Join failed'))
       })
     })
   }
@@ -195,4 +307,8 @@ export class NetSession {
       conn.on('open', () => this.handlers.onPeerJoined(id))
     }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => window.setTimeout(r, ms))
 }
