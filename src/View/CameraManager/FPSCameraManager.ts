@@ -40,6 +40,10 @@ export class FPSCameraManager extends CameraManager {
   private sprayYaw = 0
   private aimInitialized = false
 
+  private scopeSwayPitch = 0
+  private scopeSwayYaw = 0
+  private scopeSwayPhase = 0
+
   private wasDead = false
   private deathFallSide = 1
   private deathStartY = 0
@@ -60,6 +64,30 @@ export class FPSCameraManager extends CameraManager {
     return Math.sin(this.idlePhase * 1.1) * IDLE_SWAY_ROLL
   }
 
+  private updateScopeSway(dt: number): void {
+    const renderer = Game.getInstance().currentPlayer?.renderer
+    const scoped = renderer instanceof FPSRenderer && renderer.isScoped()
+    if (!scoped) {
+      this.scopeSwayPitch = lerp(this.scopeSwayPitch, 0, Math.min(1, dt * 8))
+      this.scopeSwayYaw = lerp(this.scopeSwayYaw, 0, Math.min(1, dt * 8))
+      return
+    }
+
+    this.scopeSwayPhase += dt
+    const speed = Math.sqrt(
+      this.player.velocity.x * this.player.velocity.x + this.player.velocity.z * this.player.velocity.z
+    )
+    const stillFactor = 1 - Math.min(1, speed / 10) * 0.65
+    const levelMult = renderer.getScopeLevel() === 2 ? 1.15 : 1
+    const pitchAmp = 0.0022 * stillFactor * levelMult
+    const yawAmp = 0.0016 * stillFactor * levelMult
+    const p = this.scopeSwayPhase
+    this.scopeSwayPitch =
+      (Math.sin(p * 0.72) * 0.55 + Math.sin(p * 1.85) * 0.3 + Math.sin(p * 3.1) * 0.15) * pitchAmp
+    this.scopeSwayYaw =
+      (Math.cos(p * 0.58) * 0.5 + Math.sin(p * 1.42) * 0.35 + Math.cos(p * 2.6) * 0.15) * yawAmp
+  }
+
   private syncAimFromCamera(): void {
     this.euler.setFromQuaternion(this.camera.quaternion)
     this.aimPitch = this.euler.x
@@ -71,12 +99,14 @@ export class FPSCameraManager extends CameraManager {
     if (!this.aimInitialized) this.syncAimFromCamera()
     this.deathFallSide = Math.random() < 0.5 ? -1 : 1
     this.deathStartY = this.player.position.y + this.player.eyeOffsetY
-    this.deathStartPitch = this.aimPitch + this.punchPitch + this.sprayPitch
+    this.deathStartPitch = this.aimPitch + this.punchPitch + this.sprayPitch + this.scopeSwayPitch
     this.deathStartRoll = this.roll + this.getIdleSwayRoll()
     this.punchPitch = 0
     this.punchYaw = 0
     this.sprayPitch = 0
     this.sprayYaw = 0
+    this.scopeSwayPitch = 0
+    this.scopeSwayYaw = 0
     this.player.recoilIndex = 0
   }
 
@@ -84,7 +114,6 @@ export class FPSCameraManager extends CameraManager {
     const t = easeOutCubic(this.player.deathAge / this.deathFallDuration)
     const groundY = this.player.position.y + this.deathGroundEye
     const camY = this.deathStartY + (groundY - this.deathStartY) * t
-    // Tip forward toward the floor + roll onto one side
     const pitch = this.deathStartPitch + (0.72 - this.deathStartPitch) * t
     const roll = this.deathStartRoll + this.deathFallSide * (Math.PI / 2.05) * t
 
@@ -97,18 +126,17 @@ export class FPSCameraManager extends CameraManager {
     if (!this.aimInitialized) this.syncAimFromCamera()
 
     this.euler.set(
-      this.aimPitch + this.punchPitch + this.sprayPitch,
-      this.aimYaw + this.punchYaw + this.sprayYaw,
+      this.aimPitch + this.punchPitch + this.sprayPitch + this.scopeSwayPitch,
+      this.aimYaw + this.punchYaw + this.sprayYaw + this.scopeSwayYaw,
       this.roll + this.getIdleSwayRoll(),
       'YXZ'
     )
     this.euler.x = Math.max(PI_2 - maxPolarAngle, Math.min(PI_2 - minPolarAngle, this.euler.x))
     this.camera.quaternion.setFromEuler(this.euler)
 
-    // Hitscan follows recovered aim + current spray (not temporary punch)
     const shootEuler = new THREE.Euler(
-      this.aimPitch + this.sprayPitch,
-      this.aimYaw + this.sprayYaw,
+      this.aimPitch + this.sprayPitch + this.scopeSwayPitch,
+      this.aimYaw + this.sprayYaw + this.scopeSwayYaw,
       0,
       'YXZ'
     )
@@ -141,23 +169,21 @@ export class FPSCameraManager extends CameraManager {
     }
 
     this.idlePhase += dt
+    this.updateScopeSway(dt)
 
     const targetRoll = this.leanDirection * LEAN_ANGLE
     this.roll = lerp(this.roll, targetRoll, Math.min(1, dt * 10))
 
-    // viewOffsetY lags behind vertical teleports (steps, ground snaps) so the view eases
     this.camera.position.set(
       this.player.position.x,
       this.player.position.y + this.player.eyeOffsetY + this.player.viewOffsetY,
       this.player.position.z
     )
 
-    // Fast visual punch recovery (CS view kick)
     const punchRecover = Math.min(1, dt * 14)
     this.punchPitch = lerp(this.punchPitch, 0, punchRecover)
     this.punchYaw = lerp(this.punchYaw, 0, punchRecover)
 
-    // Spray recovers when not firing so single shots return to look direction
     if (this.player.canResetRecoil()) {
       const sprayRecover = Math.min(1, dt * 6)
       this.sprayPitch = lerp(this.sprayPitch, 0, sprayRecover)

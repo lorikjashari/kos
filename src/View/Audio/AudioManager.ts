@@ -115,6 +115,7 @@ export class AudioManager extends THREE.AudioListener {
   private unlocked = false
   private footIndex = 0
   private reloadTimers: number[] = []
+  private awpBoltTimers: number[] = []
   private masterGain!: GainNode
   private masterVolume = 1
   private musicVolume = 0.38
@@ -438,6 +439,24 @@ export class AudioManager extends THREE.AudioListener {
     this.reloadTimers = []
   }
 
+  public clearAwpBoltTimers(): void {
+    for (const t of this.awpBoltTimers) window.clearTimeout(t)
+    this.awpBoltTimers = []
+  }
+
+  /** Post-shot AWP bolt: unscope window → bolt SFX → onComplete (re-zoom). */
+  public playAwpBoltCycle(onComplete: () => void): void {
+    this.clearAwpBoltTimers()
+    this.awpBoltTimers.push(
+      window.setTimeout(() => this.playId('awp_boltback'), 380),
+      window.setTimeout(() => this.playId('awp_boltforward'), 620),
+      window.setTimeout(() => {
+        this.awpBoltTimers = []
+        onComplete()
+      }, 780)
+    )
+  }
+
   /**
    * Gunshot. Pass world position for spatial / distance audio (bots).
    * Omit position for local player shots (full volume, no panning).
@@ -497,6 +516,7 @@ export class AudioManager extends THREE.AudioListener {
 
   public playReload(weaponKey = 'AK47'): Promise<void> {
     this.clearReloadTimers()
+    this.clearAwpBoltTimers()
     if (weaponKey === 'Usp') {
       this.playId('usp_clipout')
       this.reloadTimers.push(
@@ -527,6 +547,7 @@ export class AudioManager extends THREE.AudioListener {
 
   public playSwitch(weaponKey = 'AK47'): Promise<void> {
     this.clearReloadTimers()
+    this.clearAwpBoltTimers()
     this.playId('weapon_select', 0.7)
     if (weaponKey === 'Usp') this.playId('usp_draw')
     else if (weaponKey === 'Knife') this.playId('knife_deploy')
@@ -535,8 +556,8 @@ export class AudioManager extends THREE.AudioListener {
     return Promise.resolve()
   }
 
-  public playZoom(): Promise<void> {
-    this.playId('awp_zoom')
+  public playZoom(volumeScale = 1): Promise<void> {
+    this.playId('awp_zoom', volumeScale)
     return Promise.resolve()
   }
 

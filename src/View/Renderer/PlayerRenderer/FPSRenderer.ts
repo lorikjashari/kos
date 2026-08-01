@@ -57,11 +57,12 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
   // Left click given by InputManager
   public handleShoot(hitscanResult: HitscanResult): void {
+    const scopedAwp = this.player.currentWeapon.key === 'AWP' && this.scopeLevel > 0
+    const rezoomLevel = this.scopeLevel
     super.handleShoot(hitscanResult)
     this.fpsMesh.playAnimation('Shoot')
     const isMelee = this.player.currentWeapon.fireMode === 'melee'
     this.recoilEffect = isMelee ? 0.06 : 0.12
-    // Recoil after the shot so this bullet matches the crosshair (KoS)
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.createRecoil()
     }
@@ -72,9 +73,13 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
         this.tempEmitter.setRate(new Rate(0, 0))
       }, this.playerCameraManager.player.rateOfFire)
     }
+    if (scopedAwp && rezoomLevel > 0) {
+      this.beginScopedBoltCycle(rezoomLevel as 1 | 2)
+    }
   }
 
   public handleReload(): void {
+    this.clearScope(false)
     const meshKey = this.fpsMesh?.key
     this.fpsMesh.playAnimation('Reload')
     if (this.playerCameraManager instanceof FPSCameraManager) {
@@ -116,11 +121,20 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   private idleSwayTime = 0
   /** 0 hipfire, 1 first zoom, 2 second zoom — AWP only */
   private scopeLevel = 0
+  private pendingRezoomLevel = 0
+  private boltCycleToken = 0
   private scopeOverlay: HTMLElement | null = null
-  private static readonly SCOPE_FOVS = [40, 15] as const
+  private targetFov = 80
+  private static readonly SCOPE_FOVS = [38, 12] as const
+  private static readonly FOV_LERP_IN = 12
+  private static readonly FOV_LERP_OUT = 16
 
   public isScoped(): boolean {
     return this.scopeLevel > 0
+  }
+
+  public getScopeLevel(): number {
+    return this.scopeLevel
   }
 
   private bobbingAmount = 0.0008
@@ -347,14 +361,13 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
   update(dt: number): void {
     super.update(dt)
+    this.updateFovTransition(dt)
 
-    // Keep overlay camera matched to player look; keep hip FOV while scoped (gun hidden)
     this.viewmodelCamera.quaternion.copy(this.camera.quaternion)
     this.viewmodelCamera.fov =
       this.scopeLevel > 0 ? this.baseFov : (this.camera as THREE.PerspectiveCamera).fov
     this.viewmodelCamera.updateProjectionMatrix()
 
-    // Drop the gun out of view while dead (POV is on the ground)
     if (this.player.isDead) {
       this.clearScope(false)
       this.hide()
@@ -371,7 +384,6 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
 
     const fpsCameraManager = this.playerCameraManager as FPSCameraManager
 
-    // Apply rotation bobbing if the camera is rotating
     if (fpsCameraManager.isRotating) {
       const rotationBobbing = new Vector2D(
         fpsCameraManager.rotationDelta.x,
@@ -381,26 +393,21 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       this.weaponBobbingAcc.add(new Vector3D(rotationBobbing.y, rotationBobbing.x, 0))
     }
 
-    // Calculate bobbing restitution speed and amount
     const bobbingLerpAmount = Math.min(1, this.bobbingRestitutionSpeed * dt)
 
-    // Apply bobbing to each axis of the weapon's rotation
     this.weaponBobbingAcc.x = lerp(this.weaponBobbingAcc.x, 0, bobbingLerpAmount)
     this.weaponBobbingAcc.y = lerp(this.weaponBobbingAcc.y, 0, bobbingLerpAmount)
     this.weaponBobbingAcc.z = lerp(this.weaponBobbingAcc.z, 0, bobbingLerpAmount)
 
-    // Update the weapon's rotation with bobbing effect
     this.fpsMesh.mesh.rotation.x = -this.weaponBobbingAcc.x + this.weaponRotation.x
     this.fpsMesh.mesh.rotation.y = -this.weaponBobbingAcc.y + this.weaponRotation.y
     this.fpsMesh.mesh.rotation.z = -this.weaponBobbingAcc.z + this.weaponRotation.z
 
-    // Apply jump bobbing
     let jumpBobbing = this.player.velocity.y / 2500
     jumpBobbing = Math.max(-Math.PI / 128, jumpBobbing)
 
     this.weaponBobbingAcc.x += jumpBobbing
 
-    // Apply bobbing to the weapon's position
     const bobbingAmount = Math.sin(this.moveEffect.y) * this.bobbingAmount
     const idleSwayX = Math.sin(this.idleSwayTime * 1.3) * 0.003
     const idleSwayY = Math.cos(this.idleSwayTime * 0.9) * 0.002
@@ -410,7 +417,6 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       this.weaponOffset.y + this.fpsMesh.viewmodelOffset.y + bobbingAmount + Math.sin(this.moveEffect.y) / 50 + idleSwayY
     this.fpsMesh.mesh.position.z = this.weaponOffset.z + this.fpsMesh.viewmodelOffset.z + this.recoilEffect
 
-    // Apply recoil effect
     if (this.recoilEffect > 0) this.recoilEffect -= dt / 2
     this.switchVelocity += dt * 4
 
@@ -463,31 +469,81 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   /** AWP scope cycle: hip → zoom1 → zoom2 → hip */
   public handleZoom(): void {
     if (this.player.currentWeapon.key !== 'AWP' || this.player.isDead) return
+    if (this.pendingRezoomLevel > 0) this.cancelScopedBoltCycle()
     this.scopeLevel = (this.scopeLevel + 1) % 3
-    this.applyScope()
+    this.applyScope(false)
     void this.game.audioManager.playZoom()
   }
 
   public clearScope(playSound = false): void {
-    if (this.scopeLevel === 0 && !this.scopeOverlay?.classList.contains('is-on')) return
+    this.cancelScopedBoltCycle()
+    const wasOn = this.scopeLevel > 0 || !!this.scopeOverlay?.classList.contains('is-on')
     this.scopeLevel = 0
-    this.applyScope()
-    if (playSound) void this.game.audioManager.playZoom()
+    this.applyScope(true)
+    if (playSound && wasOn) void this.game.audioManager.playZoom()
   }
 
-  private applyScope(): void {
-    const fov =
+  private beginScopedBoltCycle(fromLevel: 1 | 2): void {
+    this.pendingRezoomLevel = fromLevel
+    this.boltCycleToken++
+    const token = this.boltCycleToken
+    this.scopeLevel = 0
+    this.applyScope(false)
+    this.game.audioManager.playAwpBoltCycle(() => {
+      if (token !== this.boltCycleToken) return
+      if (this.player.isDead || this.player.currentWeapon.key !== 'AWP') {
+        this.pendingRezoomLevel = 0
+        return
+      }
+      this.completeScopedBoltCycle()
+    })
+  }
+
+  private completeScopedBoltCycle(): void {
+    const level = this.pendingRezoomLevel
+    this.pendingRezoomLevel = 0
+    if (level <= 0 || this.player.isDead || this.player.currentWeapon.key !== 'AWP') return
+    this.scopeLevel = level
+    this.applyScope(false)
+    void this.game.audioManager.playZoom(0.72)
+  }
+
+  private cancelScopedBoltCycle(): void {
+    if (this.pendingRezoomLevel === 0) {
+      this.game.audioManager.clearAwpBoltTimers()
+      return
+    }
+    this.pendingRezoomLevel = 0
+    this.boltCycleToken++
+    this.game.audioManager.clearAwpBoltTimers()
+  }
+
+  private updateFovTransition(dt: number): void {
+    const cam = this.camera as THREE.PerspectiveCamera
+    const diff = this.targetFov - cam.fov
+    if (Math.abs(diff) < 0.04) {
+      if (cam.fov !== this.targetFov) this.setFov(this.targetFov)
+      return
+    }
+    const zoomingIn = this.targetFov < cam.fov
+    const rate = zoomingIn ? FPSRenderer.FOV_LERP_IN : FPSRenderer.FOV_LERP_OUT
+    this.setFov(lerp(cam.fov, this.targetFov, Math.min(1, dt * rate)))
+  }
+
+  private applyScope(snap: boolean): void {
+    this.targetFov =
       this.scopeLevel === 0
         ? this.baseFov
         : FPSRenderer.SCOPE_FOVS[this.scopeLevel - 1] ?? this.baseFov
-    this.setFov(fov)
+    if (snap) this.setFov(this.targetFov)
     this.viewmodelCamera.fov = this.baseFov
     this.viewmodelCamera.updateProjectionMatrix()
 
     const overlay = this.ensureScopeOverlay()
+    overlay.classList.remove('is-level-1', 'is-level-2')
     if (this.scopeLevel > 0) {
       this.hide()
-      overlay.classList.add('is-on')
+      overlay.classList.add('is-on', `is-level-${this.scopeLevel}`)
     } else {
       overlay.classList.remove('is-on')
       if (this.fpsMesh?.mesh) this.fpsMesh.mesh.visible = true
@@ -500,59 +556,110 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (!el) {
       el = document.createElement('div')
       el.id = 'awp-scope'
-      el.innerHTML = `
-        <div class="awp-scope-vignette"></div>
-        <div class="awp-scope-lens">
-          <div class="awp-scope-cross-h"></div>
-          <div class="awp-scope-cross-v"></div>
-          <div class="awp-scope-dot"></div>
-        </div>
-      `
       document.body.appendChild(el)
-      if (!document.getElementById('awp-scope-styles')) {
-        const style = document.createElement('style')
-        style.id = 'awp-scope-styles'
-        style.textContent = `
-          #awp-scope {
-            position: fixed; inset: 0; z-index: 7; pointer-events: none;
-            opacity: 0; visibility: hidden; transition: opacity 0.08s linear;
-          }
-          #awp-scope.is-on { opacity: 1; visibility: visible; }
-          .awp-scope-vignette {
-            position: absolute; inset: 0;
-            background: radial-gradient(circle at center,
-              transparent 0%, transparent 22%,
-              rgba(0,0,0,0.55) 38%, #000 52%);
-          }
-          .awp-scope-lens {
-            position: absolute; left: 50%; top: 50%;
-            width: min(92vmin, 920px); height: min(92vmin, 920px);
-            transform: translate(-50%, -50%);
-            border-radius: 50%;
-            box-shadow: 0 0 0 9999px #000;
-            background: radial-gradient(circle at 42% 38%,
-              rgba(255,255,255,0.04), transparent 55%);
-          }
-          .awp-scope-cross-h, .awp-scope-cross-v {
-            position: absolute; background: rgba(0,0,0,0.85);
-          }
-          .awp-scope-cross-h {
-            left: 8%; right: 8%; top: 50%; height: 1px;
-            transform: translateY(-50%);
-          }
-          .awp-scope-cross-v {
-            top: 8%; bottom: 8%; left: 50%; width: 1px;
-            transform: translateX(-50%);
-          }
-          .awp-scope-dot {
-            position: absolute; left: 50%; top: 50%;
-            width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
-            border-radius: 50%; background: #111;
-          }
-        `
-        document.head.appendChild(style)
-      }
     }
+    el.innerHTML = `
+      <div class="awp-scope-lens">
+        <div class="awp-scope-glass"></div>
+        <div class="awp-scope-reticle">
+          <span class="awp-scope-arm awp-scope-arm-t"></span>
+          <span class="awp-scope-arm awp-scope-arm-b"></span>
+          <span class="awp-scope-arm awp-scope-arm-l"></span>
+          <span class="awp-scope-arm awp-scope-arm-r"></span>
+          <span class="awp-scope-tick awp-scope-tick-t"></span>
+          <span class="awp-scope-tick awp-scope-tick-b"></span>
+          <span class="awp-scope-tick awp-scope-tick-l"></span>
+          <span class="awp-scope-tick awp-scope-tick-r"></span>
+          <span class="awp-scope-dot"></span>
+        </div>
+        <div class="awp-scope-ring"></div>
+      </div>
+    `
+    let style = document.getElementById('awp-scope-styles') as HTMLStyleElement | null
+    if (!style) {
+      style = document.createElement('style')
+      style.id = 'awp-scope-styles'
+      document.head.appendChild(style)
+    }
+    style.textContent = `
+      #awp-scope {
+        position: fixed; inset: 0; z-index: 7; pointer-events: none;
+        opacity: 0; visibility: hidden;
+        transition: opacity 0.1s ease-out, visibility 0.1s;
+      }
+      #awp-scope.is-on { opacity: 1; visibility: visible; }
+      .awp-scope-lens {
+        position: absolute; left: 50%; top: 50%;
+        width: min(96vmin, 980px); height: min(96vmin, 980px);
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        box-shadow: 0 0 0 9999px #000;
+        overflow: hidden;
+      }
+      .awp-scope-glass {
+        position: absolute; inset: 0; border-radius: 50%;
+        background:
+          radial-gradient(circle at 38% 32%, rgba(255,255,255,0.07), transparent 42%),
+          radial-gradient(circle at center, transparent 48%, rgba(0,0,0,0.42) 72%, rgba(0,0,0,0.88) 100%);
+      }
+      .awp-scope-ring {
+        position: absolute; inset: 1.2%;
+        border-radius: 50%;
+        border: 2px solid rgba(0,0,0,0.55);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+        pointer-events: none;
+      }
+      .awp-scope-reticle {
+        position: absolute; inset: 0;
+      }
+      .awp-scope-arm {
+        position: absolute;
+        background: #0a0a0a;
+        box-shadow: 0 0 0 0.5px rgba(255,255,255,0.18);
+      }
+      .awp-scope-arm-t, .awp-scope-arm-b {
+        left: 50%; width: 1.5px; margin-left: -0.75px;
+      }
+      .awp-scope-arm-l, .awp-scope-arm-r {
+        top: 50%; height: 1.5px; margin-top: -0.75px;
+      }
+      .awp-scope-arm-t { top: 7%; height: calc(50% - 14px); }
+      .awp-scope-arm-b { bottom: 7%; height: calc(50% - 14px); }
+      .awp-scope-arm-l { left: 7%; width: calc(50% - 14px); }
+      .awp-scope-arm-r { right: 7%; width: calc(50% - 14px); }
+      .awp-scope-tick {
+        position: absolute;
+        background: #0a0a0a;
+        box-shadow: 0 0 0 0.5px rgba(255,255,255,0.14);
+      }
+      .awp-scope-tick-t, .awp-scope-tick-b {
+        left: 50%; width: 11px; height: 1.5px; margin-left: -5.5px;
+      }
+      .awp-scope-tick-l, .awp-scope-tick-r {
+        top: 50%; width: 1.5px; height: 11px; margin-top: -5.5px;
+      }
+      .awp-scope-tick-t { top: calc(50% - 42px); }
+      .awp-scope-tick-b { top: calc(50% + 40px); }
+      .awp-scope-tick-l { left: calc(50% - 42px); }
+      .awp-scope-tick-r { left: calc(50% + 40px); }
+      .awp-scope-dot {
+        position: absolute; left: 50%; top: 50%;
+        width: 2px; height: 2px; margin: -1px 0 0 -1px;
+        border-radius: 50%; background: #050505;
+        box-shadow: 0 0 0 0.5px rgba(255,255,255,0.2);
+      }
+      #awp-scope.is-level-2 .awp-scope-arm-t { height: calc(50% - 11px); }
+      #awp-scope.is-level-2 .awp-scope-arm-b { height: calc(50% - 11px); }
+      #awp-scope.is-level-2 .awp-scope-arm-l { width: calc(50% - 11px); }
+      #awp-scope.is-level-2 .awp-scope-arm-r { width: calc(50% - 11px); }
+      #awp-scope.is-level-2 .awp-scope-tick-t { top: calc(50% - 52px); }
+      #awp-scope.is-level-2 .awp-scope-tick-b { top: calc(50% + 50px); }
+      #awp-scope.is-level-2 .awp-scope-tick-l { left: calc(50% - 52px); }
+      #awp-scope.is-level-2 .awp-scope-tick-r { left: calc(50% + 50px); }
+      #awp-scope.is-level-2 .awp-scope-lens {
+        width: min(98vmin, 1040px); height: min(98vmin, 1040px);
+      }
+    `
     this.scopeOverlay = el
     return el
   }
