@@ -1962,6 +1962,106 @@ export class MainMenu {
         .kos-logo-hero { width: min(480px, 36vw); }
         .kos-menu-rail { max-width: 400px; }
       }
+
+      /* Mobile: always keep menu buttons reachable (esp. iPhone landscape) */
+      #kos-menu.is-mobile-ui .kos-screen.is-active {
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-main {
+        min-height: 100%;
+        min-height: 100dvh;
+        box-sizing: border-box;
+        align-content: start;
+        overflow: visible;
+        padding:
+          max(16px, env(safe-area-inset-top))
+          max(18px, env(safe-area-inset-right))
+          max(18px, env(safe-area-inset-bottom))
+          max(18px, env(safe-area-inset-left));
+      }
+      #kos-menu.is-mobile-ui .kos-logo-hero {
+        width: min(220px, 56vw, 36vh);
+      }
+      #kos-menu.is-mobile-ui .kos-menu-rail {
+        max-width: min(420px, 100%);
+        gap: 12px;
+      }
+      #kos-menu.is-mobile-ui .kos-nav { gap: 4px; }
+      #kos-menu.is-mobile-ui .kos-btn {
+        min-height: 46px;
+        padding: 12px 14px;
+        font-size: 15px;
+      }
+      #kos-menu.is-mobile-ui .kos-btn-primary { font-size: 15px; }
+      #kos-menu.is-mobile-ui .kos-field { gap: 6px; }
+      #kos-menu.is-mobile-ui .kos-field input {
+        padding: 10px 2px 9px;
+        font-size: 15px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-sub,
+      #kos-menu.is-mobile-ui .kos-shell-settings {
+        width: min(520px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+        max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        margin:
+          max(8px, env(safe-area-inset-top))
+          max(12px, env(safe-area-inset-right))
+          max(8px, env(safe-area-inset-bottom))
+          max(12px, env(safe-area-inset-left));
+      }
+
+      /* Wide / short phones (iPhone 11 landscape): logo beside buttons */
+      @media (orientation: landscape) and (max-height: 520px) {
+        #kos-menu.is-mobile-ui .kos-shell-main {
+          grid-template-columns: minmax(120px, 30vw) minmax(240px, 1fr);
+          grid-template-areas: "hero rail";
+          align-items: center;
+          align-content: center;
+          justify-items: stretch;
+          gap: 8px 20px;
+          padding:
+            max(10px, env(safe-area-inset-top))
+            max(16px, env(safe-area-inset-right))
+            max(10px, env(safe-area-inset-bottom))
+            max(16px, env(safe-area-inset-left));
+        }
+        #kos-menu.is-mobile-ui .kos-hero {
+          align-items: center;
+          justify-content: center;
+          padding-bottom: 0;
+        }
+        #kos-menu.is-mobile-ui .kos-logo-hero {
+          width: min(180px, 28vw, 72vh);
+        }
+        #kos-menu.is-mobile-ui .kos-menu-rail {
+          max-width: 460px;
+          gap: 8px;
+        }
+        #kos-menu.is-mobile-ui .kos-btn {
+          min-height: 42px;
+          padding: 9px 12px;
+          font-size: 14px;
+        }
+        #kos-menu.is-mobile-ui .kos-btn-primary { font-size: 14px; }
+        #kos-menu.is-mobile-ui .kos-field span {
+          font-size: 9px;
+        }
+        #kos-menu.is-mobile-ui .kos-field input {
+          padding: 7px 2px 6px;
+          font-size: 14px;
+        }
+        #kos-menu.is-mobile-ui .kos-shell-sub,
+        #kos-menu.is-mobile-ui .kos-shell-settings {
+          max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+          padding: 14px 16px 16px;
+        }
+        #kos-menu.is-mobile-ui .kos-logo-sm { width: min(72px, 18vw); }
+        #kos-menu.is-mobile-ui .kos-heading { font-size: 20px; margin: 4px 0; }
+        #kos-menu.is-mobile-ui .kos-hint { margin-bottom: 10px; font-size: 12px; }
+        #kos-menu.is-mobile-ui .kos-chip { padding: 9px 6px; font-size: 12px; }
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .kos-screen, .kos-logo-load, .kos-hero, .kos-menu-rail, .kos-shell-sub, .kos-tab-panel {
           animation: none !important;
