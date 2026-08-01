@@ -281,8 +281,15 @@ export class MainMenu {
           </div>
 
           <div class="kos-tab-panel is-on" data-panel="video">
-            <p class="kos-hint">Render resolution — stretched to fill your screen. Starred options are recommended.</p>
+            <p class="kos-hint">Render resolution is stretched to fill your screen (CS-style). Switching aspect (4:3 ↔ 16:9) changes the stretch.</p>
+            <p class="kos-hint tight" id="kos-res-active">Active: 1280×960</p>
             <div class="kos-res-groups" id="kos-res-groups"></div>
+            <p class="kos-section-label" style="margin-top:18px">Graphics</p>
+            <div class="kos-chip-row" id="kos-gfx-row" data-desktop-only>
+              <button type="button" class="kos-chip" data-gfx="low">Low</button>
+              <button type="button" class="kos-chip" data-gfx="medium">Medium</button>
+              <button type="button" class="kos-chip" data-gfx="high">High</button>
+            </div>
             <p class="kos-section-label" style="margin-top:18px">Frame rate</p>
             <p class="kos-hint tight" id="kos-fps-hint">Auto follows your display (120Hz on ProMotion iPhones).</p>
             <div class="kos-chip-row" id="kos-fps-row">
@@ -546,7 +553,7 @@ export class MainMenu {
 
     this.root.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps], [data-hold], [data-perf]'
+        '[data-action], [data-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -624,6 +631,23 @@ export class MainMenu {
           this.settings.resolutionHeight = h
           this.renderResolutionGroups()
           this.persist()
+          try {
+            Game.getInstance().applyResolution(w, h)
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      const gfx = t.getAttribute('data-gfx') as 'low' | 'medium' | 'high' | null
+      if (gfx === 'low' || gfx === 'medium' || gfx === 'high') {
+        this.settings.graphicsQuality = gfx
+        this.syncGraphicsControls()
+        this.persist()
+        try {
+          Game.getInstance().applyGraphicsQuality(gfx)
+        } catch {
+          /* ignore */
         }
       }
 
@@ -795,6 +819,10 @@ export class MainMenu {
     const host = this.root.querySelector('#kos-res-groups')
     if (!host) return
     const current = resolutionKey(this.settings.resolutionWidth, this.settings.resolutionHeight)
+    const active = this.root.querySelector('#kos-res-active')
+    if (active) {
+      active.textContent = `Active: ${this.settings.resolutionWidth}×${this.settings.resolutionHeight} (stretched)`
+    }
     const aspects: AspectGroup[] = ['4:3', '16:9', '16:10']
     host.innerHTML = aspects
       .map((aspect) => {
@@ -814,6 +842,14 @@ export class MainMenu {
           </div>`
       })
       .join('')
+    this.syncGraphicsControls()
+  }
+
+  private syncGraphicsControls(): void {
+    const q = this.settings.graphicsQuality || 'high'
+    this.root.querySelectorAll('[data-gfx]').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-gfx') === q)
+    })
   }
 
   private syncCrosshairControls(): void {
@@ -1460,6 +1496,12 @@ export class MainMenu {
         pointer-events: auto;
       }
       #kos-menu.is-desktop [data-mobile-only] { display: none !important; }
+      #kos-menu.is-mobile-ui [data-desktop-only] { display: none !important; }
+
+      .kos-res, .kos-chip, .kos-seg button, .kos-bind, .kos-mobile-item {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
 
       .kos-mset {
         display: flex;

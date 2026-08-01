@@ -200,29 +200,44 @@ export class GameHUD {
         this.loadoutPickHandler = null
         handler(primary)
       }
-      btn.addEventListener('click', pick)
+      btn.addEventListener('pointerup', pick)
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (this.loadoutPickHandler) pick(e)
+      })
     })
     this.scoreboardEl = document.getElementById('hud-scoreboard')!
     this.sbRowsEl = document.getElementById('hud-sb-rows')!
     this.pauseMenuEl = document.getElementById('hud-pause')!
     this.pauseBtnEl = document.getElementById('hud-pause-btn')!
 
-    this.pauseBtnEl.addEventListener('click', (e) => {
+    const onPauseToggle = (e: Event) => {
       e.preventDefault()
       e.stopPropagation()
       const game = Game.getInstance()
       if (game.matchPaused) game.resumeMatch()
       else game.pauseMatch()
+    }
+    this.pauseBtnEl.addEventListener('pointerup', onPauseToggle)
+    this.pauseBtnEl.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
     })
 
     this.pauseMenuEl.querySelectorAll('[data-pause]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+      const run = (e: Event) => {
         e.preventDefault()
         e.stopPropagation()
         const action = (btn as HTMLElement).getAttribute('data-pause')
         const game = Game.getInstance()
         if (action === 'resume') game.resumeMatch()
         if (action === 'menu') game.returnToMenu()
+      }
+      btn.addEventListener('pointerup', run)
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
       })
     })
   }
@@ -459,8 +474,10 @@ export class GameHUD {
         gap: 8px;
       }
       .cs-pause-btn {
-        width: 36px;
-        height: 36px;
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
         appearance: none;
         border: 1px solid rgba(255,255,255,0.18);
         background: rgba(0,0,0,0.45);
@@ -470,6 +487,8 @@ export class GameHUD {
         justify-content: center;
         gap: 5px;
         padding: 0;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
         transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
       }
       .cs-pause-btn span {

@@ -71,6 +71,7 @@ export interface PlayerSettings {
   fpsMax: number
   resolutionWidth: number
   resolutionHeight: number
+  graphicsQuality: 'low' | 'medium' | 'high'
   mobile: MobileControlsSettings
 }
 
@@ -291,6 +292,10 @@ export function loadSettings(): PlayerSettings {
           : 0,
       resolutionWidth: res.width,
       resolutionHeight: res.height,
+      graphicsQuality:
+        parsed.graphicsQuality === 'low' || parsed.graphicsQuality === 'medium' || parsed.graphicsQuality === 'high'
+          ? parsed.graphicsQuality
+          : 'high',
       mobile: normalizeMobileSettings(parsed.mobile),
     }
   } catch {
@@ -315,6 +320,7 @@ export function defaultSettings(): PlayerSettings {
     fpsMax: 0,
     resolutionWidth: 1280,
     resolutionHeight: 960,
+    graphicsQuality: 'high',
     mobile: defaultMobileSettings(),
   }
 }

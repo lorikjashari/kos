@@ -42,6 +42,7 @@ async function main() {
       game.attachCrosshair(menu.getGameCrosshair(), settings)
       if (!isTouchDevice()) {
         game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)
+        game.applyGraphicsQuality(settings.graphicsQuality || 'high')
       }
       game.getMobileControls()?.applySettings(settings.mobile)
       if (isTouchDevice()) game.applyMobilePerfProfile(settings.mobile.perfProfile)

@@ -64,7 +64,7 @@ export class SceneLighting implements IUpdatable {
           spawnRadius: 500,
           speed: 100,
         })
-        //this.renderer.addToRenderer(this.particle)
+        this.renderer.scene.add(this.particle)
       }
     }
     if (this.particle) {

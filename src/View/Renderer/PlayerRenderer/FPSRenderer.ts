@@ -75,6 +75,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   public handleReload(): void {
+    const meshKey = this.fpsMesh?.key
     this.fpsMesh.playAnimation('Reload')
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
@@ -83,7 +84,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (rel?.Start && rel?.End && this.fpsMesh.animations.has('Idle')) {
       const durSec = Math.max(0.2, (rel.End.time - Math.abs(rel.Start.time)) / 1.5)
       window.setTimeout(() => {
-        if (this.fpsMesh?.animations.has('Idle')) {
+        if (this.fpsMesh?.key === meshKey && this.fpsMesh.animations.has('Idle')) {
           this.fpsMesh.playAnimation('Idle', true, true)
         }
       }, durSec * 1000 + 40)
@@ -93,16 +94,16 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   public handleWeaponSwitch(): void {
     this.clearScope(false)
     this.switchVelocity = 0.05
+    const meshKey = this.fpsMesh?.key
     this.fpsMesh.playAnimation('Switch')
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
     }
-    // After the draw clip, settle into looping Idle (hands + AWP bone seat)
     const sw = this.fpsMesh.animations.get('Switch')
     if (sw?.Start && sw?.End && this.fpsMesh.animations.has('Idle')) {
       const durSec = Math.max(0.2, (sw.End.time - Math.abs(sw.Start.time)) / 1.5)
       window.setTimeout(() => {
-        if (this.fpsMesh?.animations.has('Idle')) {
+        if (this.fpsMesh?.key === meshKey && this.fpsMesh.animations.has('Idle')) {
           this.fpsMesh.playAnimation('Idle', true, true)
         }
       }, durSec * 1000 + 40)
@@ -176,8 +177,10 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   private getOrCreateWeaponMesh(key: string): FPSMesh | null {
     const cached = this.weaponCache.get(key)
     if (cached) {
-      // Hot reload / older cache may be missing the AWP prop — ensure it's seated
-      if (key === 'AWP') this.attachAwpProp(cached)
+      if (key === 'AWP') {
+        const root = cached.mesh as unknown as THREE.Object3D
+        if (!root.getObjectByName('AwpViewProp')) this.attachAwpProp(cached)
+      }
       return cached
     }
     const source = Game.getInstance().globalLoadingManager.loadableMeshs.get(key)
@@ -185,31 +188,24 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     const mesh = source.clone() as FPSMesh
     mesh.init()
     if (key === 'AWP') this.attachAwpProp(mesh)
-    // Touch every clipAction once so first Shoot/Reload/Switch never allocates
     for (const animName of ['Shoot', 'Reload', 'Switch']) {
       if (mesh.animations.has(animName)) {
         mesh.playAnimation(animName)
       }
     }
     mesh.mixer?.stopAllAction()
+    mesh.mixer?.setTime(0)
     this.weaponCache.set(key, mesh)
     return mesh
   }
 
   /**
-   * Seat the baked CS2 AWP using the tuned idle pose, then reparent onto the
-   * Galil Armature Root bone so Switch / Shoot / Reload animations carry it.
-   * Object3D.attach() keeps the world pose while parenting.
+   * Seat the baked CS2 AWP on the Galil Armature Root with a fixed local pose.
+   * Only runs once per mesh — never re-seat from a live animated world pose.
    */
   private attachAwpProp(fps: FPSMesh): void {
     const root = fps.mesh as unknown as THREE.Object3D
-
-    // Drop any previous seat so tweaks always apply (cache-safe)
-    const stale: THREE.Object3D[] = []
-    root.traverse((c) => {
-      if (c.name === 'AwpViewProp') stale.push(c)
-    })
-    for (const c of stale) c.parent?.remove(c)
+    if (root.getObjectByName('AwpViewProp')) return
 
     const prop = Game.getInstance().globalLoadingManager.createAwpViewProp()
     if (!prop) {
@@ -224,14 +220,6 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       c.visible = true
     })
 
-    // Tuned idle seat (root-local, under scale -1,-1,-1)
-    prop.position.set(0.39, -0.25, -1.62)
-    prop.rotation.set(0, Math.PI, 0)
-    prop.scale.setScalar(3.7 / 1.36)
-    root.add(prop)
-    root.updateMatrixWorld(true)
-
-    // Prefer Armature/Root so draw / fire / reload clips move the rifle with the hands
     let seat: THREE.Object3D | undefined
     root.traverse((c) => {
       if (seat) return
@@ -242,9 +230,12 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
         if (!seat && c.name === 'Armature') seat = c
       })
     }
-    if (seat) {
-      seat.attach(prop)
-    }
+
+    const parent = seat || root
+    prop.position.set(0.39, -0.25, -1.62)
+    prop.rotation.set(0, Math.PI, 0)
+    prop.scale.setScalar(3.7 / 1.36)
+    parent.add(prop)
   }
 
   /**
@@ -350,7 +341,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   private initViewmodelPosition(): void {
-    this.fpsMesh.mesh.position.add(this.weaponOffset)
+    this.fpsMesh.mesh.position.copy(this.weaponOffset)
   }
   update(dt: number): void {
     super.update(dt)

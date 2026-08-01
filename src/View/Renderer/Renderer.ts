@@ -94,13 +94,65 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   public setGameResolution(width: number, height: number): void {
     const w = Math.max(320, Math.floor(width))
     const h = Math.max(240, Math.floor(height))
-    if (w === this.gameResW && h === this.gameResH) {
-      this.applyGameResolution()
-      return
-    }
     this.gameResW = w
     this.gameResH = h
     this.applyGameResolution()
+  }
+
+  public applyGraphicsProfile(profile: 'low' | 'medium' | 'high'): void {
+    if (this.mobileGameplay) return
+    if (profile === 'low') {
+      this.renderingConfig.hasPostProcess = false
+      this.renderingConfig.hasParticle = false
+      this.renderingConfig.hasShadow = false
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1)
+    } else if (profile === 'medium') {
+      this.renderingConfig.hasPostProcess = true
+      this.renderingConfig.hasParticle = false
+      this.renderingConfig.hasShadow = true
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.25)
+    } else {
+      this.renderingConfig.hasPostProcess = true
+      this.renderingConfig.hasParticle = true
+      this.renderingConfig.hasShadow = true
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.5)
+    }
+    this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
+    this.sceneLighting?.enableShadow(this.renderingConfig.hasShadow)
+    this.sceneLighting?.applyRenderingConfig()
+    if (this.renderingConfig.hasPostProcess) {
+      if (!this.composer && this.camera) this.addPostProcess()
+    }
+    this.applyGameResolution()
+  }
+
+  public applyMobilePerfProfile(profile: MobilePerfProfile): void {
+    if (!this.mobileGameplay) return
+    if (profile === 'smooth') {
+      this.renderingConfig.hasPostProcess = false
+      this.renderingConfig.hasParticle = false
+      this.renderingConfig.hasShadow = false
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.15)
+      this.setGameResolution(854, 480)
+    } else if (profile === 'balanced') {
+      this.renderingConfig.hasPostProcess = false
+      this.renderingConfig.hasParticle = true
+      this.renderingConfig.hasShadow = true
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.5)
+      this.setGameResolution(960, 540)
+    } else {
+      this.renderingConfig.hasPostProcess = true
+      this.renderingConfig.hasParticle = true
+      this.renderingConfig.hasShadow = true
+      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 2)
+      this.setGameResolution(1280, 720)
+    }
+    this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
+    this.sceneLighting?.enableShadow(this.renderingConfig.hasShadow)
+    this.sceneLighting?.applyRenderingConfig()
+    if (this.renderingConfig.hasPostProcess && this.camera) {
+      if (!this.composer) this.addPostProcess()
+    }
   }
 
   public getGameResolution(): { width: number; height: number } {
@@ -112,10 +164,13 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     canvas.style.position = 'fixed'
     canvas.style.left = '0'
     canvas.style.top = '0'
-    canvas.style.width = '100vw'
-    canvas.style.height = '100vh'
+    canvas.style.right = '0'
+    canvas.style.bottom = '0'
+    canvas.style.width = '100%'
+    canvas.style.height = '100%'
     canvas.style.display = 'block'
     canvas.style.objectFit = 'fill'
+    canvas.style.imageRendering = this.gameResW <= 1024 ? 'auto' : 'auto'
     canvas.style.zIndex = '0'
   }
 
@@ -123,14 +178,22 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     const w = this.gameResW
     const h = this.gameResH
     this.setSize(w, h, false)
+    this.setViewport(0, 0, w, h)
     this.composer?.setSize(w, h)
     this.styleCanvas()
     if (this.camera instanceof THREE.PerspectiveCamera) {
       this.camera.aspect = w / h
       this.camera.updateProjectionMatrix()
     }
-    this.viewmodelRenderer.camera.aspect = w / h
-    this.viewmodelRenderer.camera.updateProjectionMatrix()
+    if (this.viewmodelRenderer?.camera) {
+      this.viewmodelRenderer.camera.aspect = w / h
+      this.viewmodelRenderer.camera.updateProjectionMatrix()
+    }
+    const fpsCam = this.currentPlayer?.renderer?.camera
+    if (fpsCam instanceof THREE.PerspectiveCamera) {
+      fpsCam.aspect = w / h
+      fpsCam.updateProjectionMatrix()
+    }
   }
 
   private createDebugCamera() {
@@ -291,33 +354,7 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     }
   }
 
-  public applyMobilePerfProfile(profile: MobilePerfProfile): void {
-    if (!this.mobileGameplay) return
-    if (profile === 'smooth') {
-      this.renderingConfig.hasPostProcess = false
-      this.renderingConfig.hasParticle = false
-      this.renderingConfig.hasShadow = false
-      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.25)
-      this.setGameResolution(854, 480)
-    } else if (profile === 'balanced') {
-      this.renderingConfig.hasPostProcess = false
-      this.renderingConfig.hasParticle = true
-      this.renderingConfig.hasShadow = false
-      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.5)
-      this.setGameResolution(960, 540)
-    } else {
-      this.renderingConfig.hasPostProcess = false
-      this.renderingConfig.hasParticle = true
-      this.renderingConfig.hasShadow = true
-      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 2)
-      this.setGameResolution(1280, 720)
-    }
-    this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
-    this.sceneLighting?.enableShadow(this.renderingConfig.hasShadow)
-    if (this.renderingConfig.hasPostProcess && !this.composer) this.addPostProcess()
-  }
   private onWindowResize(): void {
-    // Keep the chosen game resolution; only refresh CSS fill + pixel ratio
     this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
     this.applyGameResolution()
     this.update()

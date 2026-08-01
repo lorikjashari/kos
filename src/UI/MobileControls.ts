@@ -33,6 +33,7 @@ export class MobileControls {
   private lookPointerId: number | null = null
   private lastLookX = 0
   private lastLookY = 0
+  private btnLook = new Map<number, { lastX: number; lastY: number; armed: boolean }>()
   private joyPointerId: number | null = null
   private joyOriginX = 0
   private joyOriginY = 0
@@ -154,6 +155,7 @@ export class MobileControls {
 
   private renderButtons(): void {
     if (!this.root) return
+    const heldIds = [...this.holdPointers.values()]
     const layer = this.root.querySelector('.kos-mc-layer') as HTMLElement
     const editbar = this.root.querySelector('.kos-mc-editbar') as HTMLElement
     editbar.hidden = !this.editMode
@@ -165,9 +167,10 @@ export class MobileControls {
       const px = Math.round(base * slot.size)
       const selected = this.selectedId === meta.id ? ' is-selected' : ''
       const hidden = !slot.visible ? ' is-hidden-slot' : ''
+      const down = this.pressed.has(meta.id) || this.toggled.has(meta.id) ? ' is-down' : ''
       if (meta.id === 'joystick') {
         html.push(`
-          <div class="kos-mc-btn kos-mc-joy${selected}${hidden}" data-id="joystick"
+          <div class="kos-mc-btn kos-mc-joy${selected}${hidden}${down}" data-id="joystick"
             style="left:${slot.x}%;top:${slot.y}%;width:${px}px;height:${px}px;opacity:${slot.opacity}">
             <div class="kos-mc-joy-ring"></div>
             <div class="kos-mc-joy-knob" data-knob="1"></div>
@@ -175,7 +178,7 @@ export class MobileControls {
           </div>`)
       } else {
         html.push(`
-          <button type="button" class="kos-mc-btn${selected}${hidden}" data-id="${meta.id}"
+          <button type="button" class="kos-mc-btn${selected}${hidden}${down}" data-id="${meta.id}"
             style="left:${slot.x}%;top:${slot.y}%;width:${px}px;height:${px}px;opacity:${slot.opacity}">
             <span class="kos-mc-glyph">${meta.glyph}</span>
             <span class="kos-mc-label">${meta.label}</span>
@@ -184,6 +187,15 @@ export class MobileControls {
     }
     layer.innerHTML = html.join('')
     this.joyKnob = this.root.querySelector('[data-knob]') as HTMLElement | null
+    for (const [pid, id] of this.holdPointers) {
+      const el = layer.querySelector(`[data-id="${id}"]`) as HTMLElement | null
+      el?.setPointerCapture?.(pid)
+    }
+    void heldIds
+  }
+
+  private canAimWhileHold(id: MobileControlId): boolean {
+    return id === 'fire' || id === 'jump' || id === 'aim' || id === 'crouch'
   }
 
   private onLookDown(e: PointerEvent): void {
@@ -247,6 +259,9 @@ export class MobileControls {
       return
     }
     this.holdPointers.set(e.pointerId, id)
+    if (this.canAimWhileHold(id)) {
+      this.btnLook.set(e.pointerId, { lastX: e.clientX, lastY: e.clientY, armed: false })
+    }
     this.press(id, true)
   }
 
@@ -273,6 +288,22 @@ export class MobileControls {
       if (!joy) return
       const radius = joy.getBoundingClientRect().width / 2
       this.updateJoystick(e.clientX, e.clientY, radius)
+      return
+    }
+
+    const look = this.btnLook.get(e.pointerId)
+    if (look && this.active && !this.editMode) {
+      const dx = e.clientX - look.lastX
+      const dy = e.clientY - look.lastY
+      const dist = Math.hypot(dx, dy)
+      if (!look.armed) {
+        if (dist < 6) return
+        look.armed = true
+      }
+      look.lastX = e.clientX
+      look.lastY = e.clientY
+      const sens = this.settings.lookSensitivity
+      this.input.applyLookDelta(dx * sens * 1.35, dy * sens * 1.35)
     }
   }
 
@@ -290,6 +321,7 @@ export class MobileControls {
       return
     }
 
+    this.btnLook.delete(e.pointerId)
     const id = this.holdPointers.get(e.pointerId)
     if (!id || id === 'joystick') return
     this.holdPointers.delete(e.pointerId)
@@ -360,6 +392,7 @@ export class MobileControls {
     for (const id of [...this.pressed]) this.press(id, false)
     this.toggled.clear()
     this.holdPointers.clear()
+    this.btnLook.clear()
     this.clearJoystick()
     this.joyPointerId = null
     this.lookPointerId = null

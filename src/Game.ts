@@ -241,9 +241,15 @@ export class Game implements IUpdatable {
       this.applyMobilePerfProfile(s.mobile.perfProfile)
     } else {
       this.applyResolution(s.resolutionWidth, s.resolutionHeight)
+      this.applyGraphicsQuality(s.graphicsQuality || 'high')
       this.mobileControls?.applySettings(s.mobile)
     }
     this.syncMobileControls()
+  }
+
+  public applyGraphicsQuality(quality: 'low' | 'medium' | 'high'): void {
+    if (isTouchDevice()) return
+    this.renderer?.applyGraphicsProfile(quality)
   }
 
   public applyMobilePerfProfile(profile: MobilePerfProfile): void {
