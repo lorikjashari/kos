@@ -193,18 +193,18 @@ export const MOBILE_CONTROL_META: Array<{ id: MobileControlId; label: string; gl
 ]
 
 export const DEFAULT_MOBILE_LAYOUT: MobileLayoutMap = {
-  joystick: { x: 14, y: 72, size: 1.15, opacity: 0.55, visible: true },
-  fire: { x: 86, y: 74, size: 1.25, opacity: 0.72, visible: true },
-  aim: { x: 72, y: 78, size: 0.95, opacity: 0.65, visible: true },
-  jump: { x: 86, y: 56, size: 0.95, opacity: 0.65, visible: true },
-  crouch: { x: 74, y: 60, size: 0.9, opacity: 0.62, visible: true },
-  reload: { x: 90, y: 40, size: 0.85, opacity: 0.6, visible: true },
+  joystick: { x: 15, y: 73, size: 1.22, opacity: 0.58, visible: true },
+  fire: { x: 86, y: 74, size: 1.32, opacity: 0.78, visible: true },
+  aim: { x: 71, y: 78, size: 1.02, opacity: 0.68, visible: true },
+  jump: { x: 87, y: 55, size: 1.05, opacity: 0.7, visible: true },
+  crouch: { x: 73, y: 59, size: 0.95, opacity: 0.65, visible: true },
+  reload: { x: 90, y: 39, size: 0.9, opacity: 0.62, visible: true },
   walk: { x: 28, y: 88, size: 0.8, opacity: 0.55, visible: false },
-  weapon1: { x: 62, y: 18, size: 0.75, opacity: 0.58, visible: true },
-  weapon2: { x: 72, y: 18, size: 0.75, opacity: 0.58, visible: true },
-  weapon3: { x: 82, y: 18, size: 0.75, opacity: 0.58, visible: true },
-  leanLeft: { x: 8, y: 48, size: 0.75, opacity: 0.5, visible: true },
-  leanRight: { x: 22, y: 48, size: 0.75, opacity: 0.5, visible: true },
+  weapon1: { x: 62, y: 17, size: 0.8, opacity: 0.6, visible: true },
+  weapon2: { x: 72, y: 17, size: 0.8, opacity: 0.6, visible: true },
+  weapon3: { x: 82, y: 17, size: 0.8, opacity: 0.6, visible: true },
+  leanLeft: { x: 8, y: 48, size: 0.78, opacity: 0.52, visible: true },
+  leanRight: { x: 22, y: 48, size: 0.78, opacity: 0.52, visible: true },
 }
 
 export function clampMobileSlot(slot: Partial<MobileControlSlot> | undefined, fallback: MobileControlSlot): MobileControlSlot {

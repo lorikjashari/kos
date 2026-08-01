@@ -24,6 +24,23 @@ const ACTION_KEYS: Partial<Record<MobileControlId, Key>> = {
   leanRight: Key.LeanRight,
 }
 
+const ICONS: Partial<Record<MobileControlId, string>> = {
+  fire: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/></svg>`,
+  aim: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>`,
+  jump: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V7M12 7l-4.2 4.2M12 7l4.2 4.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  crouch: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v12M12 17l-4.2-4.2M12 17l4.2-4.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  reload: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.1-5.2" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M19.5 4.8v4.4h-4.4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  weapon1: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14.5h11.5l3.2-3.2H21v2.2h-1.4l-1.5 1.5H14l-1.2 2.3H8.8L7.5 14.5H4z" fill="currentColor"/></svg>`,
+  weapon2: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 15.2h7.2l2-2H19v1.7h-1.1l-.9.9h-2.3l-.8 1.6H9.3L8.4 15.2H7z" fill="currentColor"/><circle cx="9.2" cy="10.2" r="1.3" fill="currentColor"/></svg>`,
+  weapon3: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5l8.8 8.8M15.2 6.8l2 2-7.6 7.6-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  leanLeft: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  leanRight: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+}
+
+/**
+ * Standoff-style mobile HUD. Uses div hit-targets (not <button>) so iOS
+ * multi-touch can hold fire+jump+stick together without focus/selection fights.
+ */
 export class MobileControls {
   private root: HTMLElement | null = null
   private input: InputManager
@@ -37,6 +54,7 @@ export class MobileControls {
   private joyPointerId: number | null = null
   private joyOriginX = 0
   private joyOriginY = 0
+  private joyRadius = 60
   private joyKnob: HTMLElement | null = null
   private dragId: MobileControlId | null = null
   private dragPointerId: number | null = null
@@ -47,11 +65,13 @@ export class MobileControls {
   private pressed = new Set<MobileControlId>()
   private holdPointers = new Map<number, MobileControlId>()
   private toggled = new Set<MobileControlId>()
+  private boundVis = false
 
   constructor(input: InputManager, settings?: MobileControlsSettings) {
     this.input = input
     this.settings = normalizeMobileSettings(settings)
     this.ensureStyles()
+    this.bindVisibility()
   }
 
   public applySettings(settings: MobileControlsSettings): void {
@@ -122,10 +142,20 @@ export class MobileControls {
     this.onLayoutChanged?.(this.settings.layout)
   }
 
+  private bindVisibility(): void {
+    if (this.boundVis || typeof document === 'undefined') return
+    this.boundVis = true
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.releaseAll()
+    })
+    window.addEventListener('blur', () => this.releaseAll())
+  }
+
   private mount(): void {
     if (this.root) return
     this.root = document.createElement('div')
     this.root.id = 'kos-mobile-controls'
+    this.root.setAttribute('aria-hidden', 'false')
     this.root.innerHTML = `
       <div class="kos-mc-look" data-look="1"></div>
       <div class="kos-mc-layer" data-layer="1"></div>
@@ -141,21 +171,26 @@ export class MobileControls {
   private bindRoot(): void {
     if (!this.root) return
     const look = this.root.querySelector('.kos-mc-look') as HTMLElement
-    look.addEventListener('pointerdown', (e) => this.onLookDown(e))
-    look.addEventListener('pointermove', (e) => this.onLookMove(e))
-    look.addEventListener('pointerup', (e) => this.onLookUp(e))
-    look.addEventListener('pointercancel', (e) => this.onLookUp(e))
+    const opts: AddEventListenerOptions = { passive: false }
 
-    this.root.addEventListener('pointerdown', (e) => this.onUiPointerDown(e))
-    this.root.addEventListener('pointermove', (e) => this.onUiPointerMove(e))
-    this.root.addEventListener('pointerup', (e) => this.onUiPointerUp(e))
-    this.root.addEventListener('pointercancel', (e) => this.onUiPointerUp(e))
+    look.addEventListener('pointerdown', (e) => this.onLookDown(e), opts)
+    look.addEventListener('pointermove', (e) => this.onLookMove(e), opts)
+    look.addEventListener('pointerup', (e) => this.onLookUp(e), opts)
+    look.addEventListener('pointercancel', (e) => this.onLookUp(e), opts)
+    look.addEventListener('lostpointercapture', (e) => this.onLookUp(e as PointerEvent), opts)
+
+    this.root.addEventListener('pointerdown', (e) => this.onUiPointerDown(e), opts)
+    this.root.addEventListener('pointermove', (e) => this.onUiPointerMove(e), opts)
+    this.root.addEventListener('pointerup', (e) => this.onUiPointerUp(e), opts)
+    this.root.addEventListener('pointercancel', (e) => this.onUiPointerUp(e), opts)
+    this.root.addEventListener('lostpointercapture', (e) => this.onLostCapture(e as PointerEvent), opts)
     this.root.addEventListener('contextmenu', (e) => e.preventDefault())
+    this.root.addEventListener('selectstart', (e) => e.preventDefault())
+    this.root.addEventListener('dragstart', (e) => e.preventDefault())
   }
 
   private renderButtons(): void {
     if (!this.root) return
-    const heldIds = [...this.holdPointers.values()]
     const layer = this.root.querySelector('.kos-mc-layer') as HTMLElement
     const editbar = this.root.querySelector('.kos-mc-editbar') as HTMLElement
     editbar.hidden = !this.editMode
@@ -163,65 +198,108 @@ export class MobileControls {
     for (const meta of MOBILE_CONTROL_META) {
       const slot = this.settings.layout[meta.id]
       if (!slot.visible && !this.editMode) continue
-      const base = meta.id === 'joystick' ? 132 : meta.id === 'fire' ? 96 : 64
+      const base = meta.id === 'joystick' ? 138 : meta.id === 'fire' ? 102 : 70
       const px = Math.round(base * slot.size)
       const selected = this.selectedId === meta.id ? ' is-selected' : ''
       const hidden = !slot.visible ? ' is-hidden-slot' : ''
       const down = this.pressed.has(meta.id) || this.toggled.has(meta.id) ? ' is-down' : ''
+      const tone =
+        meta.id === 'fire'
+          ? ' is-fire'
+          : meta.id === 'aim'
+            ? ' is-aim'
+            : meta.id === 'jump'
+              ? ' is-jump'
+              : ''
       if (meta.id === 'joystick') {
         html.push(`
-          <div class="kos-mc-btn kos-mc-joy${selected}${hidden}${down}" data-id="joystick"
+          <div class="kos-mc-btn kos-mc-joy${selected}${hidden}${down}" data-id="joystick" role="group" aria-label="${meta.label}"
             style="left:${slot.x}%;top:${slot.y}%;width:${px}px;height:${px}px;opacity:${slot.opacity}">
+            <div class="kos-mc-hit"></div>
             <div class="kos-mc-joy-ring"></div>
             <div class="kos-mc-joy-knob" data-knob="1"></div>
             <span class="kos-mc-label">${meta.label}</span>
           </div>`)
       } else {
+        const icon = ICONS[meta.id] || `<span class="kos-mc-fallback">${meta.glyph}</span>`
         html.push(`
-          <button type="button" class="kos-mc-btn${selected}${hidden}${down}" data-id="${meta.id}"
+          <div class="kos-mc-btn${tone}${selected}${hidden}${down}" data-id="${meta.id}" role="button" aria-label="${meta.label}"
             style="left:${slot.x}%;top:${slot.y}%;width:${px}px;height:${px}px;opacity:${slot.opacity}">
-            <span class="kos-mc-glyph">${meta.glyph}</span>
+            <div class="kos-mc-hit"></div>
+            <span class="kos-mc-glyph">${icon}</span>
             <span class="kos-mc-label">${meta.label}</span>
-          </button>`)
+          </div>`)
       }
     }
     layer.innerHTML = html.join('')
     this.joyKnob = this.root.querySelector('[data-knob]') as HTMLElement | null
+
+    // Re-assert capture after DOM rebuild so multi-touch holds survive a rare re-render
     for (const [pid, id] of this.holdPointers) {
       const el = layer.querySelector(`[data-id="${id}"]`) as HTMLElement | null
-      el?.setPointerCapture?.(pid)
+      try {
+        el?.setPointerCapture?.(pid)
+      } catch {
+        /* ignore */
+      }
     }
-    void heldIds
+    if (this.joyPointerId != null) {
+      const joy = layer.querySelector('[data-id="joystick"]') as HTMLElement | null
+      try {
+        joy?.setPointerCapture?.(this.joyPointerId)
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   private canAimWhileHold(id: MobileControlId): boolean {
     return id === 'fire' || id === 'jump' || id === 'aim' || id === 'crouch'
   }
 
+  private vibrateLight(): void {
+    try {
+      navigator.vibrate?.(10)
+    } catch {
+      /* ignore */
+    }
+  }
+
   private onLookDown(e: PointerEvent): void {
     if (this.editMode || !this.active) return
     if ((e.target as HTMLElement).closest('[data-id]')) return
+    // Another finger already aiming via look — ignore (buttons own their pointers)
+    if (this.lookPointerId != null && this.lookPointerId !== e.pointerId) return
     e.preventDefault()
     this.lookPointerId = e.pointerId
     this.lastLookX = e.clientX
     this.lastLookY = e.clientY
-    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    } catch {
+      /* ignore */
+    }
   }
 
   private onLookMove(e: PointerEvent): void {
     if (this.editMode || !this.active) return
     if (this.lookPointerId !== e.pointerId) return
+    e.preventDefault()
     const dx = e.clientX - this.lastLookX
     const dy = e.clientY - this.lastLookY
     this.lastLookX = e.clientX
     this.lastLookY = e.clientY
     const sens = this.settings.lookSensitivity
-    this.input.applyLookDelta(dx * sens * 1.35, dy * sens * 1.35)
+    this.input.applyLookDelta(dx * sens * 1.4, dy * sens * 1.4)
   }
 
   private onLookUp(e: PointerEvent): void {
     if (this.lookPointerId !== e.pointerId) return
     this.lookPointerId = null
+  }
+
+  private onLostCapture(e: PointerEvent): void {
+    this.onUiPointerUp(e)
   }
 
   private onUiPointerDown(e: PointerEvent): void {
@@ -230,7 +308,12 @@ export class MobileControls {
     const id = btn.getAttribute('data-id') as MobileControlId
     e.preventDefault()
     e.stopPropagation()
-    btn.setPointerCapture?.(e.pointerId)
+
+    try {
+      btn.setPointerCapture?.(e.pointerId)
+    } catch {
+      /* ignore */
+    }
 
     if (this.editMode) {
       this.selectedId = id
@@ -246,27 +329,43 @@ export class MobileControls {
     }
 
     if (!this.active) return
+
+    // Don't steal look pointer if this finger was looking
+    if (this.lookPointerId === e.pointerId) this.lookPointerId = null
+
     if (id === 'joystick') {
+      if (this.joyPointerId != null && this.joyPointerId !== e.pointerId) return
       this.joyPointerId = e.pointerId
       const rect = btn.getBoundingClientRect()
       this.joyOriginX = rect.left + rect.width / 2
       this.joyOriginY = rect.top + rect.height / 2
-      this.updateJoystick(e.clientX, e.clientY, rect.width / 2)
+      this.joyRadius = rect.width / 2
+      this.updateJoystick(e.clientX, e.clientY, this.joyRadius)
+      this.vibrateLight()
       return
     }
+
     if (this.isToggleControl(id)) {
       this.flipToggle(id)
+      this.vibrateLight()
       return
     }
+
+    // Same finger already holding another action — release old first
+    const prev = this.holdPointers.get(e.pointerId)
+    if (prev && prev !== id) this.releaseHold(e.pointerId)
+
     this.holdPointers.set(e.pointerId, id)
     if (this.canAimWhileHold(id)) {
       this.btnLook.set(e.pointerId, { lastX: e.clientX, lastY: e.clientY, armed: false })
     }
     this.press(id, true)
+    this.vibrateLight()
   }
 
   private onUiPointerMove(e: PointerEvent): void {
     if (this.editMode && this.dragId && this.dragPointerId === e.pointerId && this.root) {
+      e.preventDefault()
       const rect = this.root.getBoundingClientRect()
       const x = (e.clientX - rect.left) / rect.width * 100 - this.dragOffsetX
       const y = (e.clientY - rect.top) / rect.height * 100 - this.dragOffsetY
@@ -284,26 +383,25 @@ export class MobileControls {
     }
 
     if (this.joyPointerId === e.pointerId) {
-      const joy = this.root?.querySelector('[data-id="joystick"]') as HTMLElement | null
-      if (!joy) return
-      const radius = joy.getBoundingClientRect().width / 2
-      this.updateJoystick(e.clientX, e.clientY, radius)
+      e.preventDefault()
+      this.updateJoystick(e.clientX, e.clientY, this.joyRadius)
       return
     }
 
     const look = this.btnLook.get(e.pointerId)
     if (look && this.active && !this.editMode) {
+      e.preventDefault()
       const dx = e.clientX - look.lastX
       const dy = e.clientY - look.lastY
       const dist = Math.hypot(dx, dy)
       if (!look.armed) {
-        if (dist < 6) return
+        if (dist < 3) return
         look.armed = true
       }
       look.lastX = e.clientX
       look.lastY = e.clientY
       const sens = this.settings.lookSensitivity
-      this.input.applyLookDelta(dx * sens * 1.35, dy * sens * 1.35)
+      this.input.applyLookDelta(dx * sens * 1.4, dy * sens * 1.4)
     }
   }
 
@@ -321,11 +419,19 @@ export class MobileControls {
       return
     }
 
-    this.btnLook.delete(e.pointerId)
-    const id = this.holdPointers.get(e.pointerId)
+    this.releaseHold(e.pointerId)
+  }
+
+  private releaseHold(pointerId: number): void {
+    this.btnLook.delete(pointerId)
+    const id = this.holdPointers.get(pointerId)
     if (!id || id === 'joystick') return
-    this.holdPointers.delete(e.pointerId)
+    this.holdPointers.delete(pointerId)
     if (this.isToggleControl(id)) return
+    // Keep pressed if another finger still holds the same control
+    for (const held of this.holdPointers.values()) {
+      if (held === id) return
+    }
     this.press(id, false)
   }
 
@@ -353,7 +459,7 @@ export class MobileControls {
     let dx = x - this.joyOriginX
     let dy = y - this.joyOriginY
     const len = Math.hypot(dx, dy) || 1
-    const max = Math.max(18, radius * 0.42)
+    const max = Math.max(20, radius * 0.44)
     if (len > max) {
       dx = (dx / len) * max
       dy = (dy / len) * max
@@ -367,7 +473,7 @@ export class MobileControls {
     const dead = this.settings.joystickDeadzone
     let analog = 0
     if (mag > dead) {
-      analog = Math.pow((mag - dead) / Math.max(0.001, 1 - dead), 0.9)
+      analog = Math.pow((mag - dead) / Math.max(0.001, 1 - dead), 0.85)
     }
     this.input.setMoveAnalog(analog)
     this.input.setActionPressed(Key.Forward, ny < -dead)
@@ -392,11 +498,14 @@ export class MobileControls {
     else this.pressed.delete(id)
     this.input.setActionPressed(key, down)
     const el = this.root?.querySelector(`[data-id="${id}"]`)
-    el?.classList.toggle('is-down', down)
+    el?.classList.toggle('is-down', down || this.toggled.has(id))
   }
 
   private releaseAll(): void {
-    for (const id of [...this.pressed]) this.press(id, false)
+    for (const id of [...this.pressed]) {
+      if (!this.toggled.has(id)) this.press(id, false)
+    }
+    for (const id of [...this.toggled]) this.press(id, false)
     this.toggled.clear()
     this.holdPointers.clear()
     this.btnLook.clear()
@@ -406,8 +515,9 @@ export class MobileControls {
   }
 
   private ensureStyles(): void {
-    if (document.getElementById('kos-mc-styles')) return
-    const style = document.createElement('style')
+    const style =
+      (document.getElementById('kos-mc-styles') as HTMLStyleElement | null) ||
+      document.createElement('style')
     style.id = 'kos-mc-styles'
     style.textContent = `
       #kos-mobile-controls {
@@ -416,6 +526,8 @@ export class MobileControls {
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
         display: none;
         font-family: "Outfit", "Segoe UI", system-ui, sans-serif;
       }
@@ -425,17 +537,25 @@ export class MobileControls {
         position: absolute; inset: 0;
         pointer-events: auto;
         touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
       }
-      #kos-mobile-controls.is-edit .kos-mc-look { pointer-events: none; background: rgba(4,10,20,0.35); }
-      #kos-mobile-controls .kos-mc-layer { position: absolute; inset: 0; pointer-events: none; }
+      #kos-mobile-controls.is-edit .kos-mc-look {
+        pointer-events: none;
+        background: rgba(4,10,20,0.35);
+      }
+      #kos-mobile-controls .kos-mc-layer {
+        position: absolute; inset: 0;
+        pointer-events: none;
+      }
       #kos-mobile-controls .kos-mc-btn {
         position: absolute;
         transform: translate(-50%, -50%);
-        border: 1.5px solid rgba(255,255,255,0.38);
+        border: 1.5px solid rgba(255,255,255,0.34);
         border-radius: 999px;
         background:
-          linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.02)),
-          radial-gradient(circle at 35% 28%, rgba(255,255,255,0.22), rgba(8,14,28,0.55));
+          linear-gradient(165deg, rgba(255,255,255,0.20), rgba(255,255,255,0.04) 42%, rgba(6,12,24,0.42)),
+          radial-gradient(circle at 32% 26%, rgba(255,255,255,0.24), transparent 55%);
         color: #fff;
         pointer-events: auto;
         touch-action: none;
@@ -444,31 +564,92 @@ export class MobileControls {
         justify-content: center;
         padding: 0;
         margin: 0;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 22px rgba(0,0,0,0.32);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.22),
+          inset 0 -8px 16px rgba(0,0,0,0.18),
+          0 10px 24px rgba(0,0,0,0.34);
         -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        outline: none;
+        transition: transform 70ms ease, border-color 70ms ease, background 70ms ease, box-shadow 70ms ease;
+        will-change: transform;
+      }
+      #kos-mobile-controls .kos-mc-hit {
+        position: absolute;
+        inset: -14%;
+        border-radius: inherit;
+        pointer-events: auto;
       }
       #kos-mobile-controls .kos-mc-btn.is-down {
+        transform: translate(-50%, -50%) scale(0.94);
+        border-color: rgba(170,210,255,0.92);
         background:
-          linear-gradient(180deg, rgba(90,160,255,0.42), rgba(20,60,140,0.55)),
-          radial-gradient(circle at 35% 28%, rgba(140,190,255,0.35), rgba(10,30,70,0.6));
-        border-color: rgba(150,200,255,0.85);
-        transform: translate(-50%, -50%) scale(0.96);
+          linear-gradient(165deg, rgba(110,175,255,0.55), rgba(24,70,150,0.58)),
+          radial-gradient(circle at 32% 26%, rgba(180,220,255,0.45), transparent 58%);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.28),
+          0 0 0 2px rgba(90,160,255,0.28),
+          0 8px 18px rgba(20,80,180,0.35);
       }
       #kos-mobile-controls .kos-mc-btn.is-selected {
-        outline: 2px solid #5aa2ff;
-        outline-offset: 3px;
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.22),
+          0 0 0 3px rgba(90,162,255,0.85),
+          0 10px 24px rgba(0,0,0,0.34);
       }
-      #kos-mobile-controls .kos-mc-btn.is-hidden-slot { opacity: 0.25 !important; border-style: dashed; }
+      #kos-mobile-controls .kos-mc-btn.is-hidden-slot {
+        opacity: 0.22 !important;
+        border-style: dashed;
+      }
+      #kos-mobile-controls .kos-mc-btn.is-fire {
+        border-color: rgba(255,150,150,0.58);
+        background:
+          linear-gradient(165deg, rgba(255,150,150,0.28), rgba(120,24,24,0.48)),
+          radial-gradient(circle at 32% 26%, rgba(255,200,200,0.28), transparent 55%);
+      }
+      #kos-mobile-controls .kos-mc-btn.is-fire.is-down {
+        border-color: rgba(255,180,180,0.95);
+        background:
+          linear-gradient(165deg, rgba(255,110,110,0.62), rgba(140,20,20,0.62)),
+          radial-gradient(circle at 32% 26%, rgba(255,200,200,0.4), transparent 58%);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.25),
+          0 0 0 2px rgba(255,90,90,0.3),
+          0 8px 20px rgba(160,30,30,0.4);
+      }
+      #kos-mobile-controls .kos-mc-btn.is-aim {
+        border-color: rgba(160,210,255,0.5);
+      }
+      #kos-mobile-controls .kos-mc-btn.is-jump {
+        border-color: rgba(180,255,200,0.42);
+      }
       #kos-mobile-controls .kos-mc-glyph {
-        font-size: calc(18px * (var(--s, 1)));
+        position: relative;
+        z-index: 1;
+        width: 46%;
+        height: 46%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55));
+      }
+      #kos-mobile-controls .kos-mc-glyph svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #kos-mobile-controls .kos-mc-fallback {
+        font-size: 18px;
         font-weight: 700;
         line-height: 1;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.55);
       }
       #kos-mobile-controls .kos-mc-label {
         position: absolute;
         left: 50%;
-        bottom: -16px;
+        bottom: -15px;
         transform: translateX(-50%);
         font-size: 10px;
         letter-spacing: 0.04em;
@@ -477,30 +658,43 @@ export class MobileControls {
         pointer-events: none;
         text-shadow: 0 1px 2px #000;
       }
-      #kos-mobile-controls.is-edit .kos-mc-label { opacity: 0.85; }
+      #kos-mobile-controls.is-edit .kos-mc-label { opacity: 0.9; }
       #kos-mobile-controls .kos-mc-joy {
         border-radius: 50%;
-        background: rgba(8,16,28,0.22);
-        border: 1.5px solid rgba(255,255,255,0.22);
+        background:
+          radial-gradient(circle at 50% 50%, rgba(255,255,255,0.06), rgba(6,12,22,0.28) 62%),
+          rgba(8,16,28,0.18);
+        border: 1.5px solid rgba(255,255,255,0.24);
+        box-shadow:
+          inset 0 0 0 1px rgba(255,255,255,0.06),
+          0 12px 28px rgba(0,0,0,0.28);
+      }
+      #kos-mobile-controls .kos-mc-joy.is-down {
+        border-color: rgba(150,200,255,0.55);
+        transform: translate(-50%, -50%);
       }
       #kos-mobile-controls .kos-mc-joy-ring {
-        position: absolute; inset: 10%;
+        position: absolute; inset: 11%;
         border-radius: 50%;
-        border: 1.5px solid rgba(255,255,255,0.28);
+        border: 1.5px solid rgba(255,255,255,0.26);
         pointer-events: none;
+        box-shadow: inset 0 0 18px rgba(255,255,255,0.05);
       }
       #kos-mobile-controls .kos-mc-joy-knob {
         position: absolute;
         left: 50%; top: 50%;
-        width: 38%; height: 38%;
-        margin: 0;
+        width: 40%; height: 40%;
         border-radius: 50%;
-        background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.55), rgba(40,90,180,0.65));
+        background:
+          radial-gradient(circle at 35% 28%, rgba(255,255,255,0.7), rgba(70,130,220,0.78) 58%, rgba(20,55,120,0.9));
         transform: translate(0,0);
-        margin-left: -19%;
-        margin-top: -19%;
+        margin-left: -20%;
+        margin-top: -20%;
         pointer-events: none;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.45),
+          0 6px 14px rgba(0,0,0,0.4);
+        will-change: transform;
       }
       #kos-mobile-controls .kos-mc-editbar {
         position: absolute;
@@ -508,18 +702,15 @@ export class MobileControls {
         top: max(10px, env(safe-area-inset-top));
         transform: translateX(-50%);
         pointer-events: none;
-        background: rgba(0,0,0,0.55);
+        background: rgba(0,0,0,0.58);
         color: #fff;
         padding: 8px 14px;
         border-radius: 999px;
         font-size: 12px;
         letter-spacing: 0.02em;
-      }
-      #kos-mobile-controls [data-id="fire"] {
-        background: radial-gradient(circle at 35% 30%, rgba(255,120,120,0.35), rgba(90,20,20,0.5));
-        border-color: rgba(255,140,140,0.55);
+        border: 1px solid rgba(255,255,255,0.12);
       }
     `
-    document.head.appendChild(style)
+    if (!style.parentElement) document.head.appendChild(style)
   }
 }
