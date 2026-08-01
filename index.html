@@ -54,8 +54,8 @@
         #fps { display: none !important; }
       }
 
-      /* WebGL game canvas only — never stretch the crosshair canvas */
-      canvas:not(#game-crosshair):not(#kos-xhair-preview) {
+      /* WebGL game canvas only — never target HUD / crosshair elements */
+      canvas:not(#kos-xhair-preview) {
         position: fixed !important;
         inset: 0 !important;
         width: 100% !important;
@@ -66,6 +66,7 @@
         background: #0a1220;
       }
 
+      /* In-game crosshair is a DIV (not canvas) so it can never become the blue rectangle */
       #game-crosshair {
         position: fixed !important;
         left: 50% !important;
@@ -78,16 +79,29 @@
         max-width: 48px !important;
         max-height: 48px !important;
         transform: translate(-50%, -50%);
-        z-index: 10000;
-        pointer-events: none;
+        z-index: 10000 !important;
+        pointer-events: none !important;
         background: transparent !important;
         opacity: 0;
         visibility: hidden;
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
+        display: none;
+        overflow: visible;
       }
-      #game-crosshair.is-on { opacity: 1; visibility: visible; display: block; }
-      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; display: none !important; }
+      #game-crosshair.is-on {
+        opacity: 1 !important;
+        visibility: visible !important;
+        display: block !important;
+      }
+      #game-crosshair.is-awp-hidden {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        display: none !important;
+      }
+      #kos-mp-banner {
+        user-select: none !important;
+        -webkit-user-select: none !important;
+        -webkit-touch-callout: none !important;
+      }
     </style>
   </head>
 

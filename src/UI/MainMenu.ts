@@ -148,8 +148,8 @@ export class MainMenu {
     this.stopRoomWatch()
     this.root.classList.add('is-hidden')
     this.root.setAttribute('aria-hidden', 'true')
-    // Match start will sync via GameHUD; still force the canvas ready now
-    const xhair = document.getElementById('game-crosshair') as HTMLCanvasElement | null
+    // Match start will sync via GameHUD; still force the reticle ready now
+    const xhair = document.getElementById('game-crosshair') as HTMLElement | null
     if (xhair) {
       if (xhair.parentElement !== document.body) document.body.appendChild(xhair)
       xhair.classList.add('is-on')
@@ -167,7 +167,7 @@ export class MainMenu {
       xhair.style.setProperty('pointer-events', 'none', 'important')
       xhair.style.setProperty('background', 'transparent', 'important')
     }
-    this.gameCrosshair?.resize()
+    this.gameCrosshair?.draw()
   }
 
   public show(): void {
@@ -808,14 +808,14 @@ export class MainMenu {
     this.crosshairPreview = new CrosshairRenderer(previewCanvas, this.settings.crosshair)
     this.buildCrosshairControls()
 
-    // Game crosshair canvas (hidden until match)
-    let gameCanvas = document.getElementById('game-crosshair') as HTMLCanvasElement | null
-    if (!gameCanvas) {
-      gameCanvas = document.createElement('canvas')
-      gameCanvas.id = 'game-crosshair'
-      document.body.appendChild(gameCanvas)
-    }
-    this.gameCrosshair = new CrosshairRenderer(gameCanvas, this.settings.crosshair, 48)
+    // In-game crosshair MUST be a <div>, never <canvas> — canvas fullscreen CSS
+    // was stretching it into the blue rectangle and hiding the reticle.
+    document.getElementById('game-crosshair')?.remove()
+    const gameXhair = document.createElement('div')
+    gameXhair.id = 'game-crosshair'
+    gameXhair.setAttribute('aria-hidden', 'true')
+    document.body.appendChild(gameXhair)
+    this.gameCrosshair = new CrosshairRenderer(gameXhair, this.settings.crosshair, 48)
     window.addEventListener('resize', () => {
       this.crosshairPreview.resize()
       this.gameCrosshair.resize()
@@ -2181,16 +2181,24 @@ export class MainMenu {
         max-width: 48px !important;
         max-height: 48px !important;
         transform: translate(-50%, -50%);
-        z-index: 10000;
-        pointer-events: none;
+        z-index: 10000 !important;
+        pointer-events: none !important;
         background: transparent !important;
         opacity: 0;
         visibility: hidden;
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
+        display: none;
+        overflow: visible;
       }
-      #game-crosshair.is-on { opacity: 1; visibility: visible; display: block; }
-      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; display: none !important; }
+      #game-crosshair.is-on {
+        opacity: 1 !important;
+        visibility: visible !important;
+        display: block !important;
+      }
+      #game-crosshair.is-awp-hidden {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        display: none !important;
+      }
 
       @media (max-width: 900px) {
         .kos-shell-main {

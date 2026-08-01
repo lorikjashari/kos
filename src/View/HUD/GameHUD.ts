@@ -213,7 +213,7 @@ export class GameHUD {
    * specificity / stacking from the HUD cannot hide it.
    */
   public setCrosshairVisible(on: boolean, hideForScope = false): void {
-    const el = document.getElementById('game-crosshair') as HTMLCanvasElement | null
+    const el = document.getElementById('game-crosshair') as HTMLElement | null
     if (!el) return
     if (el.parentElement !== document.body) {
       document.body.appendChild(el)
@@ -225,7 +225,6 @@ export class GameHUD {
     this.crosshairShown = show
     el.classList.toggle('is-on', show)
     el.classList.toggle('is-awp-hidden', !show)
-    // Inline !important beats every stylesheet conflict
     el.style.setProperty('position', 'fixed', 'important')
     el.style.setProperty('left', '50%', 'important')
     el.style.setProperty('top', '50%', 'important')

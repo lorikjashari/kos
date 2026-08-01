@@ -399,8 +399,8 @@ export class Game implements IUpdatable {
 
       // ---- Crosshair ----
       case 'crosshair': {
-        const canvas = document.getElementById('game-crosshair') as HTMLElement | null
-        if (canvas) canvas.style.display = val > 0 ? '' : 'none'
+        const on = val > 0
+        this.renderer.hud?.setCrosshairVisible(on, !on)
         this.conPrint(`crosshair ${onOff(val)}`, 'ok')
         return
       }
@@ -1089,8 +1089,9 @@ export class Game implements IUpdatable {
     el.id = 'kos-mp-banner'
     el.textContent = code
     el.style.cssText =
-      'position:fixed;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:46;pointer-events:auto;user-select:all;-webkit-user-select:all;padding:6px 12px;border-radius:999px;font:800 13px Outfit,Segoe UI,sans-serif;letter-spacing:0.14em;color:#fff;background:rgba(8,14,28,0.72);border:1px solid rgba(90,160,255,0.45);backdrop-filter:blur(8px);text-shadow:0 1px 2px #000;cursor:pointer'
+      'position:fixed;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:46;pointer-events:auto;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;padding:6px 12px;border-radius:999px;font:800 13px Outfit,Segoe UI,sans-serif;letter-spacing:0.14em;color:#fff;background:rgba(8,14,28,0.72);border:1px solid rgba(90,160,255,0.45);backdrop-filter:blur(8px);text-shadow:0 1px 2px #000;cursor:pointer'
     el.title = 'Tap to copy room code'
+    el.addEventListener('selectstart', (e) => e.preventDefault())
     el.addEventListener('click', () => {
       void navigator.clipboard?.writeText(code).catch(() => undefined)
     })
