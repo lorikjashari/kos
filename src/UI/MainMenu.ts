@@ -2015,10 +2015,22 @@ export class MainMenu {
       }
 
       #game-crosshair {
-        position: fixed; left: 50%; top: 50%;
+        position: fixed !important;
+        left: 50% !important;
+        top: 50% !important;
+        right: auto !important;
+        bottom: auto !important;
+        inset: auto !important;
+        width: 48px !important;
+        height: 48px !important;
+        max-width: 48px !important;
+        max-height: 48px !important;
         transform: translate(-50%, -50%);
-        z-index: 6; pointer-events: none;
-        opacity: 0; visibility: hidden;
+        z-index: 6;
+        pointer-events: none;
+        background: transparent !important;
+        opacity: 0;
+        visibility: hidden;
         image-rendering: pixelated;
         image-rendering: crisp-edges;
       }

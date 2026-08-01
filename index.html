@@ -54,7 +54,8 @@
         #fps { display: none !important; }
       }
 
-      canvas {
+      /* WebGL game canvas only — never stretch the crosshair canvas */
+      canvas:not(#game-crosshair):not(#kos-xhair-preview) {
         position: fixed !important;
         inset: 0 !important;
         width: 100% !important;
@@ -64,6 +65,29 @@
         touch-action: none;
         background: #0a1220;
       }
+
+      #game-crosshair {
+        position: fixed !important;
+        left: 50% !important;
+        top: 50% !important;
+        right: auto !important;
+        bottom: auto !important;
+        inset: auto !important;
+        width: 48px !important;
+        height: 48px !important;
+        max-width: 48px !important;
+        max-height: 48px !important;
+        transform: translate(-50%, -50%);
+        z-index: 6;
+        pointer-events: none;
+        background: transparent !important;
+        opacity: 0;
+        visibility: hidden;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+      #game-crosshair.is-on { opacity: 1; visibility: visible; }
+      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; }
     </style>
   </head>
 

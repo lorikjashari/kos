@@ -252,10 +252,18 @@ export class GameHUD {
     this.sbRowsEl = document.getElementById('hud-sb-rows')!
     this.pauseMenuEl = document.getElementById('hud-pause')!
     this.pauseBtnEl = document.getElementById('hud-pause-btn')!
+    this.scoreboardEl.addEventListener('pointerup', (e) => {
+      if (!this.scoreboardEl?.classList.contains('is-on')) return
+      if ((e.target as HTMLElement).closest('.cs-sb-panel')) return
+      e.preventDefault()
+      e.stopPropagation()
+      this.setScoreboardVisible(false)
+    })
 
     const onPauseToggle = (e: Event) => {
       e.preventDefault()
       e.stopPropagation()
+      this.pauseBtnEl?.blur()
       const game = Game.getInstance()
       if (game.matchPaused) game.resumeMatch()
       else game.pauseMatch()
@@ -311,6 +319,7 @@ export class GameHUD {
     this.scoreboardEl.setAttribute('aria-hidden', visible ? 'false' : 'true')
     if (visible) this.refreshScoreboard()
     this.syncTopLayer()
+    document.getElementById('kos-mobile-controls')?.classList.toggle('is-scores', visible)
   }
 
   private syncTopLayer(): void {
@@ -631,10 +640,18 @@ export class GameHUD {
         box-shadow: 0 0 6px rgba(255,255,255,0.25);
       }
       .cs-pause-btn:hover {
-        background: rgba(26, 95, 255, 0.35);
-        border-color: rgba(26, 95, 255, 0.55);
-        transform: translateY(-1px);
+        background: rgba(0,0,0,0.45);
+        border-color: rgba(255,255,255,0.18);
+        transform: none;
       }
+      @media (hover: hover) and (pointer: fine) {
+        .cs-pause-btn:hover {
+          background: rgba(26, 95, 255, 0.35);
+          border-color: rgba(26, 95, 255, 0.55);
+          transform: translateY(-1px);
+        }
+      }
+      .cs-pause-btn:active,
       .cs-pause-btn.is-active {
         background: rgba(26, 95, 255, 0.45);
         border-color: rgba(201, 162, 39, 0.55);
@@ -667,9 +684,16 @@ export class GameHUD {
         transition: background 140ms ease, color 140ms ease, transform 140ms ease;
       }
       .cs-pause-opt:hover {
-        background: rgba(26, 95, 255, 0.18);
-        color: #c9a227;
-        transform: translateX(2px);
+        background: transparent;
+        color: #fff;
+        transform: none;
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .cs-pause-opt:hover {
+          background: rgba(26, 95, 255, 0.18);
+          color: #c9a227;
+          transform: translateX(2px);
+        }
       }
 
       .cs-bottom-left {
