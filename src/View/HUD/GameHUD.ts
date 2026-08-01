@@ -52,6 +52,7 @@ export class GameHUD {
   private feedId = 0
   private readonly feedLifetimeMs = 4200
   private readonly maxFeed = 5
+  private crosshairShown: boolean | null = null
 
   constructor() {
     document.getElementById('game-hud')?.remove()
@@ -204,35 +205,51 @@ export class GameHUD {
     if (this.killFeedEl) this.killFeedEl.innerHTML = ''
     this.setScoreboardVisible(false)
     this.setPauseMenuOpen(false)
-    this.adoptCrosshair()
     this.setCrosshairVisible(true, false)
   }
 
-  /** Keep the aim canvas above the WebGL layer and under loadout/scope UI. */
-  private adoptCrosshair(): void {
-    const el = document.getElementById('game-crosshair')
-    if (!el) return
-    if (el.parentElement !== this.root) {
-      this.root.appendChild(el)
-    }
-    try {
-      Game.getInstance().getCrosshairRenderer()?.resize()
-    } catch {
-      /* game may not be ready */
-    }
-  }
-
   /**
-   * @param on match / menu visibility
-   * @param hideForScope true while AWP ADS (scope reticle replaces it)
+   * Crosshair stays on document.body (never inside #game-hud) so CSS
+   * specificity / stacking from the HUD cannot hide it.
    */
   public setCrosshairVisible(on: boolean, hideForScope = false): void {
-    this.adoptCrosshair()
-    const el = document.getElementById('game-crosshair') as HTMLElement | null
+    const el = document.getElementById('game-crosshair') as HTMLCanvasElement | null
     if (!el) return
-    el.style.removeProperty('display')
-    el.classList.toggle('is-on', on)
-    el.classList.toggle('is-awp-hidden', hideForScope)
+    if (el.parentElement !== document.body) {
+      document.body.appendChild(el)
+    }
+    const show = on && !hideForScope
+    if (this.crosshairShown === show && el.classList.contains('is-on') === show) {
+      return
+    }
+    this.crosshairShown = show
+    el.classList.toggle('is-on', show)
+    el.classList.toggle('is-awp-hidden', !show)
+    // Inline !important beats every stylesheet conflict
+    el.style.setProperty('position', 'fixed', 'important')
+    el.style.setProperty('left', '50%', 'important')
+    el.style.setProperty('top', '50%', 'important')
+    el.style.setProperty('right', 'auto', 'important')
+    el.style.setProperty('bottom', 'auto', 'important')
+    el.style.setProperty('inset', 'auto', 'important')
+    el.style.setProperty('width', '48px', 'important')
+    el.style.setProperty('height', '48px', 'important')
+    el.style.setProperty('max-width', '48px', 'important')
+    el.style.setProperty('max-height', '48px', 'important')
+    el.style.setProperty('transform', 'translate(-50%, -50%)', 'important')
+    el.style.setProperty('z-index', '10000', 'important')
+    el.style.setProperty('pointer-events', 'none', 'important')
+    el.style.setProperty('background', 'transparent', 'important')
+    el.style.setProperty('opacity', show ? '1' : '0', 'important')
+    el.style.setProperty('visibility', show ? 'visible' : 'hidden', 'important')
+    el.style.setProperty('display', show ? 'block' : 'none', 'important')
+    if (show) {
+      try {
+        Game.getInstance().getCrosshairRenderer()?.draw()
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   private syncCrosshairForWeapon(player: Player): void {
@@ -242,7 +259,7 @@ export class GameHUD {
       return
     }
     if (game.isAwaitingLoadout()) {
-      this.setCrosshairVisible(true, true)
+      this.setCrosshairVisible(false, true)
       return
     }
     const fps = game.currentPlayer?.renderer as FPSRenderer | undefined
@@ -461,7 +478,7 @@ export class GameHUD {
     })
     this.loadoutEl.classList.add('is-on')
     this.loadoutEl.setAttribute('aria-hidden', 'false')
-    this.setCrosshairVisible(true, true)
+    this.setCrosshairVisible(false, true)
   }
 
   public hideLoadoutPicker(): void {
@@ -596,29 +613,6 @@ export class GameHUD {
         -webkit-tap-highlight-color: transparent;
       }
       #game-hud-top:not(.is-touch) [data-touch-only] { display: none !important; }
-
-      #game-hud > #game-crosshair {
-        position: absolute !important;
-        left: 50% !important;
-        top: 50% !important;
-        right: auto !important;
-        bottom: auto !important;
-        inset: auto !important;
-        width: 48px !important;
-        height: 48px !important;
-        max-width: 48px !important;
-        max-height: 48px !important;
-        transform: translate(-50%, -50%);
-        z-index: 12;
-        pointer-events: none;
-        background: transparent !important;
-        opacity: 0;
-        visibility: hidden;
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
-      }
-      #game-hud > #game-crosshair.is-on { opacity: 1; visibility: visible; }
-      #game-hud > #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; }
 
       .kos-brand {
         position: absolute;

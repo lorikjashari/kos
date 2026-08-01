@@ -19,6 +19,10 @@ export class CrosshairRenderer {
     this.draw()
   }
 
+  public getCanvas(): HTMLCanvasElement {
+    return this.canvas
+  }
+
   public setSettings(settings: CrosshairSettings): void {
     this.settings = settings
     this.draw()
@@ -27,21 +31,27 @@ export class CrosshairRenderer {
   public resize(): void {
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     const size = this.logicalSize
+    // Resetting width/height clears the bitmap — always redraw after
     this.canvas.width = Math.round(size * dpr)
     this.canvas.height = Math.round(size * dpr)
-    this.canvas.style.width = `${size}px`
-    this.canvas.style.height = `${size}px`
+    this.canvas.style.setProperty('width', `${size}px`, 'important')
+    this.canvas.style.setProperty('height', `${size}px`, 'important')
+    this.ctx = this.canvas.getContext('2d')!
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     this.ctx.imageSmoothingEnabled = false
     this.draw()
   }
 
   public draw(): void {
+    if (!this.ctx || this.ctx.canvas !== this.canvas) {
+      this.ctx = this.canvas.getContext('2d')!
+    }
     const ctx = this.ctx
     const w = this.logicalSize
     const h = this.logicalSize
     const cx = w / 2
     const cy = h / 2
+    ctx.setTransform(Math.min(window.devicePixelRatio || 1, 2), 0, 0, Math.min(window.devicePixelRatio || 1, 2), 0, 0)
     ctx.clearRect(0, 0, w, h)
     ctx.imageSmoothingEnabled = false
 
@@ -65,19 +75,14 @@ export class CrosshairRenderer {
       ctx.fillRect(x, y, bw, bh)
     }
 
-    const drawCross = true
-    const drawDot = s.centerDot
-
-    if (drawCross) {
-      if (!s.tStyle) {
-        drawBar(cx - thick / 2, cy - halfGap - length, thick, length)
-      }
-      drawBar(cx - thick / 2, cy + halfGap, thick, length)
-      drawBar(cx - halfGap - length, cy - thick / 2, length, thick)
-      drawBar(cx + halfGap, cy - thick / 2, length, thick)
+    if (!s.tStyle) {
+      drawBar(cx - thick / 2, cy - halfGap - length, thick, length)
     }
+    drawBar(cx - thick / 2, cy + halfGap, thick, length)
+    drawBar(cx - halfGap - length, cy - thick / 2, length, thick)
+    drawBar(cx + halfGap, cy - thick / 2, length, thick)
 
-    if (drawDot) {
+    if (s.centerDot) {
       const d = Math.max(1, s.dotSize) * unit * 0.45
       if (s.outline) {
         const o = s.outlineThickness

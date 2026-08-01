@@ -78,7 +78,7 @@
         max-width: 48px !important;
         max-height: 48px !important;
         transform: translate(-50%, -50%);
-        z-index: 35;
+        z-index: 10000;
         pointer-events: none;
         background: transparent !important;
         opacity: 0;
@@ -86,8 +86,8 @@
         image-rendering: pixelated;
         image-rendering: crisp-edges;
       }
-      #game-crosshair.is-on { opacity: 1; visibility: visible; }
-      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; }
+      #game-crosshair.is-on { opacity: 1; visibility: visible; display: block; }
+      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; display: none !important; }
     </style>
   </head>
 

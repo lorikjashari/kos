@@ -148,16 +148,39 @@ export class MainMenu {
     this.stopRoomWatch()
     this.root.classList.add('is-hidden')
     this.root.setAttribute('aria-hidden', 'true')
-    const xhair = document.getElementById('game-crosshair')
-    xhair?.classList.add('is-on')
-    xhair?.classList.remove('is-awp-hidden')
+    // Match start will sync via GameHUD; still force the canvas ready now
+    const xhair = document.getElementById('game-crosshair') as HTMLCanvasElement | null
+    if (xhair) {
+      if (xhair.parentElement !== document.body) document.body.appendChild(xhair)
+      xhair.classList.add('is-on')
+      xhair.classList.remove('is-awp-hidden')
+      xhair.style.setProperty('position', 'fixed', 'important')
+      xhair.style.setProperty('left', '50%', 'important')
+      xhair.style.setProperty('top', '50%', 'important')
+      xhair.style.setProperty('width', '48px', 'important')
+      xhair.style.setProperty('height', '48px', 'important')
+      xhair.style.setProperty('transform', 'translate(-50%, -50%)', 'important')
+      xhair.style.setProperty('z-index', '10000', 'important')
+      xhair.style.setProperty('opacity', '1', 'important')
+      xhair.style.setProperty('visibility', 'visible', 'important')
+      xhair.style.setProperty('display', 'block', 'important')
+      xhair.style.setProperty('pointer-events', 'none', 'important')
+      xhair.style.setProperty('background', 'transparent', 'important')
+    }
     this.gameCrosshair?.resize()
   }
 
   public show(): void {
     this.root.classList.remove('is-hidden')
     this.root.setAttribute('aria-hidden', 'false')
-    document.getElementById('game-crosshair')?.classList.remove('is-on')
+    const xhair = document.getElementById('game-crosshair') as HTMLElement | null
+    if (xhair) {
+      xhair.classList.remove('is-on')
+      xhair.classList.add('is-awp-hidden')
+      xhair.style.setProperty('opacity', '0', 'important')
+      xhair.style.setProperty('visibility', 'hidden', 'important')
+      xhair.style.setProperty('display', 'none', 'important')
+    }
     this.showScreen('main')
   }
 
@@ -2158,7 +2181,7 @@ export class MainMenu {
         max-width: 48px !important;
         max-height: 48px !important;
         transform: translate(-50%, -50%);
-        z-index: 35;
+        z-index: 10000;
         pointer-events: none;
         background: transparent !important;
         opacity: 0;
@@ -2166,8 +2189,8 @@ export class MainMenu {
         image-rendering: pixelated;
         image-rendering: crisp-edges;
       }
-      #game-crosshair.is-on { opacity: 1; visibility: visible; }
-      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; }
+      #game-crosshair.is-on { opacity: 1; visibility: visible; display: block; }
+      #game-crosshair.is-awp-hidden { opacity: 0 !important; visibility: hidden !important; display: none !important; }
 
       @media (max-width: 900px) {
         .kos-shell-main {
