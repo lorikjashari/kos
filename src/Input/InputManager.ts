@@ -231,9 +231,11 @@ export class InputManager implements IUpdatable {
     player.setCrouching(!!this.keys.get(Key.Crouch)?.isPressed)
     this.updateFootsteps(dt)
 
-    // One jump per key press — no hold-space auto-bhop. A press is buffered briefly so
-    // hitting jump just before touching down still fires on the landing frame (bhop).
-    if (this.keys.get(Key.Jump)?.justPressed) {
+    // PC: one jump per press (short buffer for pre-landing bhop timing).
+    // Mobile: hold jump to auto-bhop on every landing.
+    if (this.mobileMode && this.keys.get(Key.Jump)?.isPressed) {
+      this.jumpBufferMs = this.jumpBufferDuration
+    } else if (this.keys.get(Key.Jump)?.justPressed) {
       this.jumpBufferMs = this.jumpBufferDuration
     }
     if (this.jumpBufferMs > 0) {
