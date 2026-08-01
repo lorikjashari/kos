@@ -1079,13 +1079,17 @@ export class Game implements IUpdatable {
     }
   }
 
-  private showMpBanner(code: string, isHost: boolean): void {
+  private showMpBanner(code: string, _isHost: boolean): void {
     this.hideMpBanner()
     const el = document.createElement('div')
     el.id = 'kos-mp-banner'
-    el.textContent = isHost ? `ROOM ${code} · share to join` : `JOINED ${code}`
+    el.textContent = code
     el.style.cssText =
-      'position:fixed;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:46;pointer-events:none;user-select:none;-webkit-user-select:none;padding:8px 14px;border-radius:999px;font:700 12px Outfit,Segoe UI,sans-serif;letter-spacing:0.08em;color:#fff;background:rgba(8,14,28,0.72);border:1px solid rgba(90,160,255,0.45);backdrop-filter:blur(8px);text-shadow:0 1px 2px #000'
+      'position:fixed;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:46;pointer-events:auto;user-select:all;-webkit-user-select:all;padding:6px 12px;border-radius:999px;font:800 13px Outfit,Segoe UI,sans-serif;letter-spacing:0.14em;color:#fff;background:rgba(8,14,28,0.72);border:1px solid rgba(90,160,255,0.45);backdrop-filter:blur(8px);text-shadow:0 1px 2px #000;cursor:pointer'
+    el.title = 'Tap to copy room code'
+    el.addEventListener('click', () => {
+      void navigator.clipboard?.writeText(code).catch(() => undefined)
+    })
     document.body.appendChild(el)
     this.mpBanner = el
   }

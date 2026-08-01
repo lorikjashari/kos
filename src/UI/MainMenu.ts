@@ -252,37 +252,30 @@ export class MainMenu {
       <section class="kos-screen" data-screen="mp">
         <div class="kos-shell kos-shell-sub">
           <button type="button" class="kos-back" data-action="back-main">← Back</button>
-          <div class="kos-sub-brand">
-            <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
-          </div>
-          <h2 class="kos-heading">Friends Multiplayer</h2>
-          <p class="kos-hint">Free guest rooms on Pool Day. Bots fill the lobby — friends replace them as they join. Max ~15.</p>
+          <h2 class="kos-heading">Multiplayer</h2>
 
-          <div class="kos-section-label">Difficulty (bots)</div>
+          <label class="kos-field kos-field-inline">
+            <span>Bots</span>
+            <input id="kos-mp-bot-count" type="number" min="0" max="10" step="1" value="10" inputmode="numeric" />
+          </label>
+
           <div class="kos-chip-row" id="kos-mp-diff">
             <button type="button" class="kos-chip" data-mp-diff="easy">Easy</button>
             <button type="button" class="kos-chip is-on" data-mp-diff="medium">Medium</button>
             <button type="button" class="kos-chip" data-mp-diff="hard">Hard</button>
           </div>
 
-          <label class="kos-field kos-field-inline">
-            <span>How many bots</span>
-            <input id="kos-mp-bot-count" type="number" min="0" max="10" step="1" value="10" inputmode="numeric" />
-          </label>
-          <p class="kos-hint tight-left">0 = pure 1v1 / friends only. Friends still replace bots as they join.</p>
-
           <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="mp-host">
             <span class="kos-btn-label">Create Room</span>
           </button>
-          <p class="kos-hint tight-left">Host stays online and shares the room code.</p>
 
-          <div class="kos-section-label">Join with code</div>
+          <div class="kos-mp-or">or join</div>
+
           <label class="kos-field">
-            <span>Room code</span>
-            <input id="kos-mp-code" type="text" maxlength="8" placeholder="e.g. A7K2QM" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:0.14em;font-weight:800" />
+            <input id="kos-mp-code" type="text" maxlength="8" placeholder="Room code" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:0.14em;font-weight:800" />
           </label>
           <button type="button" class="kos-btn kos-btn-ghost-line kos-start" data-action="mp-join">
-            <span class="kos-btn-label">Join Room</span>
+            <span class="kos-btn-label">Join</span>
           </button>
           <p class="kos-hint" id="kos-mp-status"></p>
         </div>
@@ -1235,7 +1228,12 @@ export class MainMenu {
         transition: opacity 320ms var(--kos-ease), visibility 320ms var(--kos-ease);
         -webkit-font-smoothing: antialiased;
       }
-      #kos-menu.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+      #kos-menu.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        display: none !important;
+      }
       #kos-menu *, #kos-menu *::before, #kos-menu *::after { box-sizing: border-box; }
 
       .kos-bg {
@@ -1414,6 +1412,15 @@ export class MainMenu {
         color: rgba(226, 232, 240, 0.55);
       }
       .kos-hint.tight-left { margin: -8px 0 18px; font-size: 12.5px; }
+      .kos-mp-or {
+        margin: 14px 0 10px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--kos-muted);
+      }
 
       .kos-field {
         display: flex; flex-direction: column; gap: 8px; width: 100%;
