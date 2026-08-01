@@ -363,7 +363,13 @@ export class MobileControls {
     }
     const nx = dx / max
     const ny = dy / max
+    const mag = Math.min(1, Math.hypot(nx, ny))
     const dead = this.settings.joystickDeadzone
+    let analog = 0
+    if (mag > dead) {
+      analog = Math.pow((mag - dead) / Math.max(0.001, 1 - dead), 0.9)
+    }
+    this.input.setMoveAnalog(analog)
     this.input.setActionPressed(Key.Forward, ny < -dead)
     this.input.setActionPressed(Key.Backward, ny > dead)
     this.input.setActionPressed(Key.Left, nx < -dead)
@@ -372,6 +378,7 @@ export class MobileControls {
 
   private clearJoystick(): void {
     if (this.joyKnob) this.joyKnob.style.transform = 'translate(0,0)'
+    this.input.setMoveAnalog(0)
     this.input.setActionPressed(Key.Forward, false)
     this.input.setActionPressed(Key.Backward, false)
     this.input.setActionPressed(Key.Left, false)

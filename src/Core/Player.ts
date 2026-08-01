@@ -87,6 +87,7 @@ export class Player extends Pawn implements IUpdatable {
   public isCrouching = false
   public recoilIndex = 0
   public wishSpeedScale = 1
+  public moveIntentScale = 1
   /** Per-map multiplier (Dust II is large — needs higher base speed) */
   public mapSpeedScale = 1
   public isCurrentPlayer = false
@@ -622,6 +623,12 @@ export class Player extends Pawn implements IUpdatable {
     this.updateSpeedScale()
   }
 
+  /** Analog move intent 0..1 (mobile stick). Ignored while crouching / keyboard walk. */
+  public setMoveIntentScale(scale: number): void {
+    this.moveIntentScale = Math.max(0.2, Math.min(1, scale))
+    this.updateSpeedScale()
+  }
+
   public setCrouching(crouching: boolean): void {
     if (this.isCrouching === crouching) return
     this.isCrouching = crouching
@@ -633,7 +640,7 @@ export class Player extends Pawn implements IUpdatable {
   private updateSpeedScale(): void {
     if (this.isCrouching) this.wishSpeedScale = 0.38
     else if (this.isWalking) this.wishSpeedScale = 0.55
-    else this.wishSpeedScale = 1
+    else this.wishSpeedScale = this.moveIntentScale
   }
 
   public setMapSpeedScale(scale: number): void {

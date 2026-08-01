@@ -185,7 +185,6 @@ export const MOBILE_CONTROL_META: Array<{ id: MobileControlId; label: string; gl
   { id: 'jump', label: 'Jump', glyph: '⤒' },
   { id: 'crouch', label: 'Crouch', glyph: '⤓' },
   { id: 'reload', label: 'Reload', glyph: '↻' },
-  { id: 'walk', label: 'Walk', glyph: 'Ｗ' },
   { id: 'weapon1', label: 'Primary', glyph: '1' },
   { id: 'weapon2', label: 'Secondary', glyph: '2' },
   { id: 'weapon3', label: 'Knife', glyph: '3' },
@@ -200,7 +199,7 @@ export const DEFAULT_MOBILE_LAYOUT: MobileLayoutMap = {
   jump: { x: 86, y: 56, size: 0.95, opacity: 0.65, visible: true },
   crouch: { x: 74, y: 60, size: 0.9, opacity: 0.62, visible: true },
   reload: { x: 90, y: 40, size: 0.85, opacity: 0.6, visible: true },
-  walk: { x: 28, y: 88, size: 0.8, opacity: 0.55, visible: true },
+  walk: { x: 28, y: 88, size: 0.8, opacity: 0.55, visible: false },
   weapon1: { x: 62, y: 18, size: 0.75, opacity: 0.58, visible: true },
   weapon2: { x: 72, y: 18, size: 0.75, opacity: 0.58, visible: true },
   weapon3: { x: 82, y: 18, size: 0.75, opacity: 0.58, visible: true },
@@ -224,6 +223,7 @@ export function normalizeMobileLayout(raw?: Partial<MobileLayoutMap>): MobileLay
   for (const id of Object.keys(DEFAULT_MOBILE_LAYOUT) as MobileControlId[]) {
     out[id] = clampMobileSlot(raw?.[id], DEFAULT_MOBILE_LAYOUT[id])
   }
+  out.walk = { ...out.walk, visible: false }
   return out
 }
 

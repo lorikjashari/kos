@@ -27,7 +27,7 @@ export class InputManager implements IUpdatable {
   public gameplayEnabled = false
   public jumpWithScrollWheel = true
   public mobileMode = false
-
+  private moveAnalog = 1
   private playerWrapper!: PlayerWrapper
   private footstepTimer = 0
   private emptyClickCooldown = 0
@@ -92,6 +92,12 @@ export class InputManager implements IUpdatable {
   public setMobileMode(enabled: boolean): void {
     this.mobileMode = !!enabled
     if (this.mobileMode) this.unlock()
+    else this.moveAnalog = 1
+  }
+
+  /** Stick magnitude 0..1 — near center walks, full push runs. */
+  public setMoveAnalog(amount: number): void {
+    this.moveAnalog = Math.max(0, Math.min(1, amount))
   }
 
   public setActionPressed(action: Key, pressed: boolean): void {
@@ -172,19 +178,29 @@ export class InputManager implements IUpdatable {
 
   private updateFootsteps(dt: number): void {
     const player = this.playerWrapper.player
-    const walking = !!this.keys.get(Key.Shift)?.isPressed
-    player.setWalking(walking)
+    if (this.mobileMode) {
+      player.setWalking(false)
+      player.setMoveIntentScale(this.isMoving() ? Math.max(0.28, this.moveAnalog) : 1)
+    } else {
+      player.setWalking(!!this.keys.get(Key.Shift)?.isPressed)
+      player.setMoveIntentScale(1)
+    }
 
-    if (!player.isOnGround || !this.isMoving() || walking) {
+    if (!player.isOnGround || !this.isMoving()) {
       this.footstepTimer = 0
       return
     }
 
-    const interval = player.isCrouching ? 0.55 : 0.34
+    const speedFactor = this.mobileMode
+      ? Math.max(0.35, this.moveAnalog)
+      : player.isWalking
+        ? 0.55
+        : 1
+    const interval = player.isCrouching ? 0.55 : 0.34 / speedFactor
     this.footstepTimer += dt
     if (this.footstepTimer >= interval) {
       this.footstepTimer = 0
-      const volume = player.isCrouching ? 0.35 : 1
+      const volume = player.isCrouching ? 0.35 : 0.45 + 0.55 * speedFactor
       void Game.getInstance().audioManager.playFootstep(volume)
     }
   }

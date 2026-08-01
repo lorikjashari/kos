@@ -60,9 +60,27 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     const scopedAwp = this.player.currentWeapon.key === 'AWP' && this.scopeLevel > 0
     const rezoomLevel = this.scopeLevel
     super.handleShoot(hitscanResult)
-    this.fpsMesh.playAnimation('Shoot')
+    const key = this.player.currentWeapon.key
     const isMelee = this.player.currentWeapon.fireMode === 'melee'
-    this.recoilEffect = isMelee ? 0.06 : 0.12
+    if (key === 'AWP') {
+      this.fpsMesh.playAnimation('Shoot', false, true, 1.05)
+      this.recoilEffect = 0.24
+      this.recoilRecover = 1.35
+      this.weaponBobbingAcc.x += 0.042
+      this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.028
+      this.weaponBobbingAcc.z += 0.012
+    } else if (key === 'AK47') {
+      this.fpsMesh.playAnimation('Shoot', false, true, 1.85)
+      this.recoilEffect = 0.13
+      this.recoilRecover = 3.4
+      this.weaponBobbingAcc.x += 0.016
+      this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.012
+      this.weaponBobbingAcc.z += 0.008
+    } else {
+      this.fpsMesh.playAnimation('Shoot', false, true, 1.55)
+      this.recoilEffect = isMelee ? 0.06 : 0.11
+      this.recoilRecover = 2.4
+    }
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.createRecoil()
     }
@@ -76,21 +94,26 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (scopedAwp && rezoomLevel > 0) {
       this.beginScopedBoltCycle(rezoomLevel as 1 | 2)
     }
+    const shootScale = key === 'AWP' ? 1.05 : key === 'AK47' ? 1.85 : 1.55
+    this.scheduleIdleReturn('Shoot', shootScale)
   }
 
   public handleReload(): void {
     this.clearScope(false)
     const meshKey = this.fpsMesh?.key
-    this.fpsMesh.playAnimation('Reload')
+    const scale = this.player.currentWeapon.key === 'AWP' ? 1.35 : 1.55
+    this.fpsMesh.playAnimation('Reload', false, true, scale)
+    this.locomotionBusyUntil = performance.now() + 3200
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
     }
     const rel = this.fpsMesh.animations.get('Reload')
     if (rel?.Start && rel?.End && this.fpsMesh.animations.has('Idle')) {
-      const durSec = Math.max(0.2, (rel.End.time - Math.abs(rel.Start.time)) / 1.5)
+      const durSec = Math.max(0.2, (rel.End.time - Math.abs(rel.Start.time)) / scale)
+      this.locomotionBusyUntil = performance.now() + durSec * 1000 + 80
       window.setTimeout(() => {
         if (this.fpsMesh?.key === meshKey && this.fpsMesh.animations.has('Idle')) {
-          this.fpsMesh.playAnimation('Idle', true, true)
+          this.fpsMesh.playAnimation('Idle', true, true, 1.0)
         }
       }, durSec * 1000 + 40)
     }
@@ -100,25 +123,62 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.clearScope(false)
     this.switchVelocity = 0.05
     const meshKey = this.fpsMesh?.key
-    this.fpsMesh.playAnimation('Switch')
+    const key = this.fpsMesh?.key
+    const scale = key === 'AWP' ? 1.25 : key === 'AK47' ? 1.45 : 1.5
+    this.fpsMesh.playAnimation('Switch', false, true, scale)
+    this.weaponBobbingAcc.x += 0.02
+    this.weaponBobbingAcc.y -= 0.03
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
     }
     const sw = this.fpsMesh.animations.get('Switch')
     if (sw?.Start && sw?.End && this.fpsMesh.animations.has('Idle')) {
-      const durSec = Math.max(0.2, (sw.End.time - Math.abs(sw.Start.time)) / 1.5)
+      const durSec = Math.max(0.2, (sw.End.time - Math.abs(sw.Start.time)) / scale)
+      this.locomotionBusyUntil = performance.now() + durSec * 1000 + 80
       window.setTimeout(() => {
         if (this.fpsMesh?.key === meshKey && this.fpsMesh.animations.has('Idle')) {
-          this.fpsMesh.playAnimation('Idle', true, true)
+          this.fpsMesh.playAnimation('Idle', true, true, 1.0)
         }
       }, durSec * 1000 + 40)
+    }
+  }
+
+  private scheduleIdleReturn(fromAnim: string, timeScale: number): void {
+    const meshKey = this.fpsMesh?.key
+    const clip = this.fpsMesh.animations.get(fromAnim)
+    if (!clip?.Start || !clip?.End || !this.fpsMesh.animations.has('Idle')) return
+    const durSec = Math.max(0.12, (clip.End.time - Math.abs(clip.Start.time)) / timeScale)
+    this.locomotionBusyUntil = Math.max(this.locomotionBusyUntil, performance.now() + durSec * 1000)
+    window.setTimeout(() => {
+      if (this.fpsMesh?.key !== meshKey) return
+      if (this.scopeLevel > 0) return
+      const cur = this.fpsMesh.getCurrentAnimName()
+      if (cur === 'Reload' || cur === 'Switch') return
+      this.fpsMesh.playAnimation('Idle', true, true, 1.0)
+    }, durSec * 1000 + 30)
+  }
+
+  private updateLocomotionAnim(): void {
+    if (!this.fpsMesh?.animations.has('Move')) return
+    if (this.scopeLevel > 0) return
+    if (performance.now() < this.locomotionBusyUntil) return
+    const cur = this.fpsMesh.getCurrentAnimName()
+    if (cur === 'Shoot' || cur === 'Reload' || cur === 'Switch') return
+    const spd = Math.hypot(this.player.velocity.x, this.player.velocity.z)
+    const moving = this.player.isOnGround && spd > 1.2
+    if (moving) {
+      if (cur !== 'Move') this.fpsMesh.playAnimation('Move', true, true, 1.25)
+    } else if (cur === 'Move' || cur === '') {
+      this.fpsMesh.playAnimation('Idle', true, true, 1.0)
     }
   }
   private switchVelocity = 0
   private viewmodelCamera: THREE.PerspectiveCamera
   public fpsMesh!: FPSMesh
   private recoilEffect = 0
+  private recoilRecover = 2.5
   private idleSwayTime = 0
+  private locomotionBusyUntil = 0
   /** 0 hipfire, 1 first zoom, 2 second zoom — AWP only */
   private scopeLevel = 0
   private pendingRezoomLevel = 0
@@ -380,6 +440,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (this.scopeLevel > 0) return
 
     this.fpsMesh.update(dt)
+    this.updateLocomotionAnim()
     this.idleSwayTime += dt
 
     const fpsCameraManager = this.playerCameraManager as FPSCameraManager
@@ -408,16 +469,27 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
 
     this.weaponBobbingAcc.x += jumpBobbing
 
-    const bobbingAmount = Math.sin(this.moveEffect.y) * this.bobbingAmount
-    const idleSwayX = Math.sin(this.idleSwayTime * 1.3) * 0.003
-    const idleSwayY = Math.cos(this.idleSwayTime * 0.9) * 0.002
+    const spd = Math.hypot(this.player.velocity.x, this.player.velocity.z)
+    const moveAmp = Math.min(1, spd / 8)
+    const bobbingAmount = Math.sin(this.moveEffect.y) * this.bobbingAmount * (0.55 + moveAmp * 0.7)
+    const idleSwayX =
+      Math.sin(this.idleSwayTime * 1.15) * 0.0028 + Math.sin(this.idleSwayTime * 2.4) * 0.0009
+    const idleSwayY =
+      Math.cos(this.idleSwayTime * 0.85) * 0.0021 + Math.cos(this.idleSwayTime * 1.9) * 0.0007
     this.fpsMesh.mesh.position.x =
       (this.weaponOffset.x + this.fpsMesh.viewmodelOffset.x + idleSwayX) * this.handSide
     this.fpsMesh.mesh.position.y =
-      this.weaponOffset.y + this.fpsMesh.viewmodelOffset.y + bobbingAmount + Math.sin(this.moveEffect.y) / 50 + idleSwayY
-    this.fpsMesh.mesh.position.z = this.weaponOffset.z + this.fpsMesh.viewmodelOffset.z + this.recoilEffect
+      this.weaponOffset.y +
+      this.fpsMesh.viewmodelOffset.y +
+      bobbingAmount +
+      Math.sin(this.moveEffect.y) / 50 +
+      idleSwayY
+    this.fpsMesh.mesh.position.z =
+      this.weaponOffset.z + this.fpsMesh.viewmodelOffset.z + this.recoilEffect
 
-    if (this.recoilEffect > 0) this.recoilEffect -= dt / 2
+    if (this.recoilEffect > 0) {
+      this.recoilEffect = Math.max(0, this.recoilEffect - dt * this.recoilRecover)
+    }
     this.switchVelocity += dt * 4
 
     if (this.switchVelocity >= -this.weaponOffset.y / 2) {

@@ -14,6 +14,7 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
   private currentAnimIsLoop = false;
   private currentAnimIsInterrompable = false;
   private currentAnim!: AnimationMarkerDelimiter;
+  private animTimeScale = 1.5;
   constructor(path: string, key: string) {
     super(path, key);
   }
@@ -24,8 +25,7 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
     ) {
       this.mixer.update(dt);
     } else if (this.currentAnimIsLoop) {
-      console.log("Play animation delimiter");
-      this.playAnimationDelimiter(this.currentAnim);
+      this.playAnimationDelimiter(this.currentAnim, this.animTimeScale);
     }
   }
   protected setAnimations(markers: Map<string, AnimationMarkerDelimiter>) {
@@ -69,12 +69,17 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
     return loadableMesh;
   }
 
+  public getCurrentAnimName(): string {
+    return this.currentAnim?.name ?? ''
+  }
+
   // Loop: repeat
   // selfInterrompable: Possibility of the animation to stop itself to play again from 0
   public playAnimation(
     animationName: string,
     loop = false,
-    selfInterrompable = true
+    selfInterrompable = true,
+    timeScale = 1.5
   ) {
     const animationMarker = this.animations.get(animationName)
 
@@ -82,7 +87,7 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
       console.log(`${animationName} animation doesn't exist on ${this.key}`);
       return;
     }
-    if (!selfInterrompable && animationMarker.name === this.currentAnim.name) {
+    if (!selfInterrompable && animationMarker.name === this.currentAnim?.name) {
       return;
     }
 
@@ -90,22 +95,23 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
     this.currentAnimIsLoop = loop;
     this.currentAnimIsInterrompable = selfInterrompable;
 
-    this.playAnimationDelimiter(animationMarker);
+    this.playAnimationDelimiter(animationMarker, timeScale);
   }
-  public playAnimationDelimiter(animationMarker: AnimationMarkerDelimiter) {
+  public playAnimationDelimiter(animationMarker: AnimationMarkerDelimiter, timeScale = 1.5) {
     if (!animationMarker?.Start || !animationMarker?.End) {
       console.warn(`Animation "${animationMarker?.name ?? 'unknown'}" is missing Start/End markers`)
       return
     }
 
     this.currentAnim = animationMarker;
+    this.animTimeScale = timeScale
 
     const clips = this.mesh.animations;
     this.lastAnimationDuration =
       animationMarker!["End"]!.time - animationMarker!["Start"]!.time;
     const start = Math.abs(animationMarker!["Start"]!.time);
     this.mixer.time = 0;
-    this.mixer.timeScale = 1.5;
+    this.mixer.timeScale = timeScale;
     for (let i = 0; i < clips.length; i++) {
       const action = this.mixer.clipAction(clips[i]);
       action.loop = THREE.LoopOnce;
