@@ -18,6 +18,7 @@
     "@babel/runtime": "^7.24.0",
     "ammojs-typed": "^1.0.6",
     "ammojs-wasm-typed": "^1.1.0",
+    "mqtt": "^5.15.2",
     "peerjs": "^1.5.5",
     "three": "^0.164.0",
     "three-csm": "^4.2.1",

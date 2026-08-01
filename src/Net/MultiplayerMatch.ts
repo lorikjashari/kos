@@ -10,6 +10,7 @@ import {
   type NetMsg,
   type NetRole,
 } from './NetTypes'
+import { roomDirectory, RoomDirectory } from './RoomDirectory'
 
 export type MultiplayerStartConfig = {
   mode: 'host' | 'join'
@@ -79,6 +80,12 @@ export class MultiplayerMatch {
       this.role = 'host'
       this.roomCode = code
       this.humans.set(session.localPeerId, { id: session.localPeerId, name: this.localName })
+      void roomDirectory.startHosting({
+        code,
+        host: this.localName,
+        players: 1,
+        max: RoomDirectory.MAX_PLAYERS,
+      })
       return { code, role: 'host' }
     }
 
@@ -94,6 +101,7 @@ export class MultiplayerMatch {
   public stop(): void {
     this.enabled = false
     this.role = 'offline'
+    roomDirectory.stopHosting()
     this.session?.destroy()
     this.session = null
     this.humans.clear()
@@ -157,6 +165,7 @@ export class MultiplayerMatch {
     if (this.isHost) {
       this.broadcastRoster()
       this.reconcileBotCount()
+      roomDirectory.updateHosting(this.humans.size)
     }
   }
 
@@ -174,6 +183,7 @@ export class MultiplayerMatch {
         })
         this.broadcastRoster()
         this.reconcileBotCount()
+        roomDirectory.updateHosting(this.humans.size)
         break
       }
       case 'welcome': {

@@ -23,6 +23,7 @@ import { Game } from '../Game'
 import type { MobileControls } from './MobileControls'
 import { isTouchDevice } from './MobileDevice'
 import type { MobileHoldMode, MobilePerfProfile } from './SettingsStore'
+import { roomDirectory, type PublicRoomInfo } from '../Net/RoomDirectory'
 
 export type BotMatchConfig = {
   difficulty: BotDifficulty
@@ -66,6 +67,7 @@ export class MainMenu {
   private selectedMobileId: MobileControlId | null = null
   private dockDrag: { pointerId: number; ox: number; oy: number; x: number; y: number } | null = null
   private displayHz = 60
+  private watchingRooms = false
 
   constructor(callbacks: MenuCallbacks) {
     this.callbacks = callbacks
@@ -143,9 +145,13 @@ export class MainMenu {
   public hide(): void {
     this.stopMobileLayoutEdit()
     this.stopMenuAudio()
+    this.stopRoomWatch()
     this.root.classList.add('is-hidden')
     this.root.setAttribute('aria-hidden', 'true')
-    document.getElementById('game-crosshair')?.classList.add('is-on')
+    const xhair = document.getElementById('game-crosshair')
+    xhair?.classList.add('is-on')
+    xhair?.classList.remove('is-awp-hidden')
+    this.gameCrosshair?.resize()
   }
 
   public show(): void {
@@ -162,6 +168,8 @@ export class MainMenu {
     })
     this.root.classList.toggle('is-bg-blur', id !== 'main')
     this.syncMenuMusic()
+    if (id === 'mp') this.startRoomWatch()
+    else this.stopRoomWatch()
     if (id === 'settings') {
       this.renderKeybindList()
       this.syncCrosshairControls()
@@ -254,6 +262,11 @@ export class MainMenu {
           <button type="button" class="kos-back" data-action="back-main">← Back</button>
           <h2 class="kos-heading">Multiplayer</h2>
 
+          <div class="kos-section-label">Open rooms</div>
+          <div class="kos-mp-rooms" id="kos-mp-rooms">
+            <div class="kos-mp-rooms-empty" id="kos-mp-rooms-empty">Looking for rooms…</div>
+          </div>
+
           <label class="kos-field kos-field-inline">
             <span>Bots</span>
             <input id="kos-mp-bot-count" type="number" min="0" max="10" step="1" value="10" inputmode="numeric" />
@@ -269,7 +282,7 @@ export class MainMenu {
             <span class="kos-btn-label">Create Room</span>
           </button>
 
-          <div class="kos-mp-or">or join</div>
+          <div class="kos-mp-or">or code</div>
 
           <label class="kos-field">
             <input id="kos-mp-code" type="text" maxlength="8" placeholder="Room code" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:0.14em;font-weight:800" />
@@ -616,6 +629,13 @@ export class MainMenu {
     this.bindDockDrag()
 
     this.root.addEventListener('click', (e) => {
+      const roomBtn = (e.target as HTMLElement).closest('[data-join-code]') as HTMLElement | null
+      if (roomBtn) {
+        const code = (roomBtn.getAttribute('data-join-code') || '').trim().toUpperCase()
+        if (code) this.startMultiplayer('join', code)
+        return
+      }
+
       const t = (e.target as HTMLElement).closest(
         '[data-action], [data-diff], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
@@ -817,14 +837,15 @@ export class MainMenu {
     })
   }
 
-  private startMultiplayer(mode: 'host' | 'join'): void {
+  private startMultiplayer(mode: 'host' | 'join', joinCode?: string): void {
     const name = (this.root.querySelector('#kos-name') as HTMLInputElement).value.trim().slice(0, 24)
     this.settings.playerName = name || 'Player'
     this.persist()
     const status = this.root.querySelector('#kos-mp-status') as HTMLElement | null
     const codeInput = this.root.querySelector('#kos-mp-code') as HTMLInputElement | null
     const botInput = this.root.querySelector('#kos-mp-bot-count') as HTMLInputElement | null
-    const roomCode = (codeInput?.value || '').trim().toUpperCase()
+    const roomCode = (joinCode || codeInput?.value || '').trim().toUpperCase()
+    if (joinCode && codeInput) codeInput.value = roomCode
     const rawBots = Number(botInput?.value)
     const botCount = Number.isFinite(rawBots) ? Math.max(0, Math.min(10, Math.round(rawBots))) : 10
     if (mode === 'join' && roomCode.length < 4) {
@@ -833,6 +854,7 @@ export class MainMenu {
     }
     if (status) status.textContent = mode === 'host' ? 'Creating room…' : `Joining ${roomCode}…`
     this.stopMenuAudio()
+    this.stopRoomWatch()
     this.callbacks.onPlayMultiplayer({
       mode,
       roomCode: mode === 'join' ? roomCode : undefined,
@@ -840,6 +862,51 @@ export class MainMenu {
       difficulty: this.selectedDifficulty,
       botCount,
     })
+  }
+
+  private startRoomWatch(): void {
+    if (this.watchingRooms) return
+    this.watchingRooms = true
+    const empty = this.root.querySelector('#kos-mp-rooms-empty') as HTMLElement | null
+    if (empty) empty.textContent = 'Looking for rooms…'
+    roomDirectory.watch((rooms) => this.renderRoomList(rooms))
+  }
+
+  private stopRoomWatch(): void {
+    if (!this.watchingRooms) return
+    this.watchingRooms = false
+    roomDirectory.unwatch()
+  }
+
+  private renderRoomList(rooms: PublicRoomInfo[]): void {
+    const host = this.root.querySelector('#kos-mp-rooms') as HTMLElement | null
+    const empty = this.root.querySelector('#kos-mp-rooms-empty') as HTMLElement | null
+    if (!host) return
+    host.querySelectorAll('[data-join-code]').forEach((el) => el.remove())
+    const open = rooms.filter((r) => r.players < r.max)
+    if (empty) {
+      empty.style.display = open.length ? 'none' : 'block'
+      empty.textContent = open.length ? '' : 'No open rooms — create one'
+    }
+    for (const room of open) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'kos-mp-room'
+      btn.setAttribute('data-join-code', room.code)
+      btn.innerHTML = `
+        <span class="kos-mp-room-name">${this.escapeHtml(room.name)}</span>
+        <span class="kos-mp-room-meta">${room.players}/${room.max}</span>
+      `
+      host.appendChild(btn)
+    }
+  }
+
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
   }
 
   public setMultiplayerStatus(text: string): void {
@@ -1420,6 +1487,71 @@ export class MainMenu {
         letter-spacing: 0.12em;
         text-transform: uppercase;
         color: var(--kos-muted);
+      }
+      .kos-section-label {
+        margin: 4px 0 10px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--kos-muted);
+      }
+      .kos-mp-rooms {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        max-height: min(42vh, 280px);
+        overflow-y: auto;
+        margin: 0 0 18px;
+        padding-right: 2px;
+      }
+      .kos-mp-rooms-empty {
+        padding: 14px 4px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--kos-muted);
+        text-align: center;
+      }
+      .kos-mp-room {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        width: 100%;
+        padding: 12px 14px;
+        border: 1px solid var(--kos-line);
+        border-left: 3px solid var(--kos-blue);
+        background: rgba(255, 255, 255, 0.88);
+        color: var(--kos-ink);
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 700;
+        text-align: left;
+        cursor: pointer;
+        transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+      }
+      .kos-mp-room:hover,
+      .kos-mp-room:focus-visible {
+        background: var(--kos-blue-soft);
+        border-color: rgba(26, 95, 255, 0.28);
+        outline: none;
+        transform: translateX(2px);
+      }
+      .kos-mp-room-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .kos-mp-room-meta {
+        flex-shrink: 0;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        color: var(--kos-blue-deep);
+        font-variant-numeric: tabular-nums;
       }
 
       .kos-field {
@@ -2026,7 +2158,7 @@ export class MainMenu {
         max-width: 48px !important;
         max-height: 48px !important;
         transform: translate(-50%, -50%);
-        z-index: 6;
+        z-index: 35;
         pointer-events: none;
         background: transparent !important;
         opacity: 0;
