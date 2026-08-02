@@ -239,6 +239,16 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     mesh.register(this.loadableMeshs)
     return mesh
   }
+
+  /** Load an FPS pack (Armature + markers) once — used for editor-only weapon previews. */
+  public async ensureFpsMesh(meshKey: string, glbPath: string): Promise<FPSMesh> {
+    const existing = this.loadableMeshs.get(meshKey)
+    if (existing instanceof FPSMesh) return existing
+    const mesh = new FPSMesh(glbPath, meshKey)
+    await mesh.load()
+    mesh.register(this.loadableMeshs)
+    return mesh
+  }
   static async loadJson(path: string): Promise<any> {
     const response = await fetch(path)
     if (!response.ok) {

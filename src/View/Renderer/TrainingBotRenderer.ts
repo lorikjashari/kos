@@ -101,6 +101,14 @@ export class TrainingBotRenderer implements IUpdatable {
     return 'Usp'
   }
 
+  /** Editor-only: AK uses `AkEditor` (fps_mine_sketch.glb). Match bots keep galil `AK47`. */
+  private resolveGunMeshKey(gunKey: string, defaultMesh: string): string {
+    if (gunKey === 'AK' && this.game.editorActive) {
+      if (this.game.globalLoadingManager.loadableMeshs.has('AkEditor')) return 'AkEditor'
+    }
+    return defaultMesh
+  }
+
   /** Third-person weapon prop seated in the CS terrorist's right hand */
   private csGun?: THREE.Group
   /** Cached built weapon props by key ('Usp' | 'AK') */
@@ -313,7 +321,8 @@ export class TrainingBotRenderer implements IUpdatable {
     container.visible = false
 
     let gun: THREE.Object3D | undefined
-    const source = this.game.globalLoadingManager.loadableMeshs.get(def.mesh)
+    const meshKey = this.resolveGunMeshKey(key, def.mesh)
+    const source = this.game.globalLoadingManager.loadableMeshs.get(meshKey)
     if (source?.mesh) {
       const full = source.cloneMesh() as unknown as THREE.Object3D
       full.updateMatrixWorld(true)

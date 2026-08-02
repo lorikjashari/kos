@@ -568,6 +568,8 @@ export class Game implements IUpdatable {
     await this.prepareCombat()
     // CS Source T model for the frozen editor dummy
     await this.globalLoadingManager.ensureMesh('CsTerrorist', 'models/cs_terrorist.glb')
+    // Editor-only AK preview — unused fps_mine_sketch pack (gameplay keeps galil AK47)
+    await this.globalLoadingManager.ensureFpsMesh('AkEditor', 'fps_mine_sketch.glb')
 
     this.teardownEditorTools()
     this.clearBots()
@@ -587,7 +589,7 @@ export class Game implements IUpdatable {
     this.editorAxes = true
     this.editorHitZonesOnly = false
     this.editorPreviewAnim = 'Idle'
-    this.editorWeapon = 'Usp'
+    this.editorWeapon = 'AK'
     TrainingBot.showHitboxes = false
     // Cursor free so the editor panel + gizmo work
     this.inputManager.gameplayEnabled = false
@@ -643,6 +645,7 @@ export class Game implements IUpdatable {
     renderer.setAxesVisible(true)
     // Default Idle on the CS terrorist (not the robot avatar)
     renderer.previewAnim(this.editorPreviewAnim)
+    renderer.setWeapon('AK')
 
     this.renderer.hud?.showGameplay()
     this.renderer.hud?.setLockdown(null)

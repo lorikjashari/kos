@@ -126,10 +126,10 @@ export class EditorMenu {
 
         <section class="kos-ed-sec">
           <div class="kos-ed-label">Weapon</div>
-          <p class="kos-ed-hint" style="margin-bottom:8px">He always holds the selected gun — Idle / Walking / Running.</p>
+          <p class="kos-ed-hint" style="margin-bottom:8px">AK uses the editor preview model (fps_mine_sketch) — gameplay AK is unchanged.</p>
           <div class="kos-ed-row kos-ed-anims">
-            <button type="button" data-weapon="Usp" class="is-on">USP</button>
-            <button type="button" data-weapon="AK">AK</button>
+            <button type="button" data-weapon="Usp">USP</button>
+            <button type="button" data-weapon="AK" class="is-on">AK</button>
           </div>
         </section>
 
