@@ -2250,97 +2250,115 @@ export class MainMenu {
       }
 
       #kos-menu.is-mobile-ui .kos-shell-main {
+        position: relative;
         display: flex;
         flex-direction: column;
         grid-template-columns: none;
         grid-template-areas: none;
-        justify-content: space-between;
+        justify-content: flex-end;
         align-items: stretch;
         min-height: 100%;
         min-height: 100dvh;
         height: 100%;
         box-sizing: border-box;
         overflow: hidden;
-        gap: 12px;
+        gap: 10px;
         padding:
-          max(14px, env(safe-area-inset-top))
-          max(14px, env(safe-area-inset-right))
-          max(12px, env(safe-area-inset-bottom))
-          max(14px, env(safe-area-inset-left));
+          max(10px, env(safe-area-inset-top))
+          max(12px, env(safe-area-inset-right))
+          max(10px, env(safe-area-inset-bottom))
+          max(12px, env(safe-area-inset-left));
       }
       #kos-menu.is-mobile-ui .kos-hero {
-        flex: 1 1 auto;
+        position: absolute;
+        left: max(12px, env(safe-area-inset-left));
+        top: max(10px, env(safe-area-inset-top));
+        z-index: 2;
+        flex: none;
         display: flex;
         align-items: flex-start;
         justify-content: flex-start;
         min-height: 0;
-        padding: 2px 0 0;
+        padding: 0;
+        pointer-events: none;
         animation: kos-slide-up 480ms var(--kos-ease) both;
       }
       #kos-menu.is-mobile-ui .kos-logo-hero {
-        width: min(132px, 34vw, 18vh);
-        filter: drop-shadow(0 10px 24px rgba(10, 30, 80, 0.22));
+        width: min(96px, 26vw, 14vh);
+        filter: drop-shadow(0 8px 18px rgba(10, 30, 80, 0.22));
         animation: kos-logo-in 700ms var(--kos-ease) both;
       }
       #kos-menu.is-mobile-ui .kos-menu-rail {
+        position: relative;
+        z-index: 3;
         flex: 0 0 auto;
         width: 100%;
         max-width: none;
-        gap: 10px;
-        padding: 12px 12px 10px;
-        border-radius: 18px;
+        gap: 8px;
+        padding: 10px 10px 8px;
+        border-radius: 16px;
         background:
-          linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(255,255,255,0.78) 100%);
-        border: 1px solid rgba(255,255,255,0.72);
+          linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.82) 100%);
+        border: 1px solid rgba(255,255,255,0.78);
         box-shadow:
-          0 18px 40px rgba(8, 14, 28, 0.18),
-          0 1px 0 rgba(255,255,255,0.65) inset;
+          0 16px 36px rgba(8, 14, 28, 0.2),
+          0 1px 0 rgba(255,255,255,0.7) inset;
         backdrop-filter: blur(18px) saturate(1.2);
         -webkit-backdrop-filter: blur(18px) saturate(1.2);
         animation: kos-slide-up 520ms var(--kos-ease) 60ms both;
       }
-      #kos-menu.is-mobile-ui .kos-nav { gap: 3px; }
-      #kos-menu.is-mobile-ui .kos-field { gap: 3px; }
+      #kos-menu.is-mobile-ui .kos-nav { gap: 6px; }
+      #kos-menu.is-mobile-ui .kos-field { gap: 2px; margin-bottom: 2px; }
       #kos-menu.is-mobile-ui .kos-field span {
-        font-size: 9px;
-        letter-spacing: 0.18em;
+        font-size: 8px;
+        letter-spacing: 0.16em;
       }
       #kos-menu.is-mobile-ui .kos-field input {
-        padding: 7px 2px 8px;
-        font-size: 15px;
+        padding: 6px 2px 7px;
+        font-size: 14px;
         background: transparent;
       }
       #kos-menu.is-mobile-ui .kos-btn {
-        min-height: 42px;
-        padding: 9px 12px;
+        min-height: 44px;
+        padding: 10px 12px;
         font-size: 14px;
-        font-weight: 700;
+        font-weight: 750;
         letter-spacing: -0.01em;
+        justify-content: center;
+        text-align: center;
+        clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+        background: rgba(255,255,255,0.72);
+        border: 1px solid rgba(10, 30, 80, 0.08);
       }
+      #kos-menu.is-mobile-ui .kos-btn::before { display: none; }
       #kos-menu.is-mobile-ui .kos-btn:hover:not(:disabled),
       #kos-menu.is-mobile-ui .kos-btn:active:not(:disabled) {
         transform: none;
       }
       #kos-menu.is-mobile-ui .kos-btn-primary {
-        min-height: 46px;
-        font-size: 13px;
-        letter-spacing: 0.08em;
-        box-shadow: 0 8px 20px rgba(26, 95, 255, 0.28);
+        min-height: 48px;
+        font-size: 14px;
+        letter-spacing: 0.07em;
+        border: none;
+        box-shadow: 0 10px 22px rgba(26, 95, 255, 0.3);
       }
       #kos-menu.is-mobile-ui .kos-btn-primary:hover:not(:disabled),
       #kos-menu.is-mobile-ui .kos-btn-primary:active:not(:disabled) {
         transform: none;
-        box-shadow: 0 8px 20px rgba(26, 95, 255, 0.28);
+        box-shadow: 0 10px 22px rgba(26, 95, 255, 0.3);
       }
       #kos-menu.is-mobile-ui .kos-btn-ghost-line {
-        min-height: 40px;
-        padding: 8px 10px 8px 12px;
+        min-height: 42px;
+        padding: 9px 12px;
         font-size: 13.5px;
-        font-weight: 650;
-        border-bottom-color: rgba(10, 30, 80, 0.08);
+        font-weight: 700;
+        border: 1px solid rgba(10, 30, 80, 0.1);
+        border-bottom: 1px solid rgba(10, 30, 80, 0.1);
+        background: rgba(255,255,255,0.7);
+        clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
       }
       #kos-menu.is-mobile-ui .kos-btn-ghost-line:last-child {
-        border-bottom: none;
+        border-bottom: 1px solid rgba(10, 30, 80, 0.1);
       }
 
       #kos-menu.is-mobile-ui .kos-shell-sub {
@@ -2413,14 +2431,14 @@ export class MainMenu {
         border-left: none;
         border-radius: 0;
         box-shadow: none;
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 255, 255, 0.92);
         backdrop-filter: blur(18px) saturate(1.15);
         -webkit-backdrop-filter: blur(18px) saturate(1.15);
         padding:
-          max(10px, env(safe-area-inset-top))
-          max(14px, env(safe-area-inset-right))
-          max(12px, env(safe-area-inset-bottom))
-          max(14px, env(safe-area-inset-left));
+          max(8px, env(safe-area-inset-top))
+          max(12px, env(safe-area-inset-right))
+          max(10px, env(safe-area-inset-bottom))
+          max(12px, env(safe-area-inset-left));
         overflow: hidden;
       }
       #kos-menu.is-mobile-ui .kos-settings-chrome {
@@ -2432,37 +2450,37 @@ export class MainMenu {
       #kos-menu.is-mobile-ui .kos-settings-bar {
         flex-direction: row;
         align-items: center;
-        gap: 10px;
-        min-height: 36px;
+        gap: 8px;
+        min-height: 32px;
       }
       #kos-menu.is-mobile-ui .kos-shell-settings .kos-back {
         margin: 0;
-        padding: 8px 4px;
+        padding: 6px 2px;
         flex-shrink: 0;
         font-size: 12px;
       }
       #kos-menu.is-mobile-ui .kos-settings-brand {
         flex-direction: row;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         flex: 1;
         min-width: 0;
       }
       #kos-menu.is-mobile-ui .kos-shell-settings .kos-logo-sm {
-        width: 26px;
+        width: 22px;
         margin: 0;
         flex-shrink: 0;
       }
       #kos-menu.is-mobile-ui .kos-shell-settings .kos-heading {
         margin: 0;
-        font-size: 18px;
+        font-size: 16px;
         letter-spacing: -0.03em;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       #kos-menu.is-mobile-ui .kos-shell-settings .kos-tabs {
-        margin: 4px 0 0;
+        margin: 2px 0 0;
         flex-wrap: nowrap;
         gap: 0;
         overflow-x: auto;
@@ -2474,8 +2492,8 @@ export class MainMenu {
       #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab {
         flex: 1 0 auto;
         min-width: 0;
-        padding: 9px 10px 10px;
-        font-size: 12.5px;
+        padding: 7px 8px 8px;
+        font-size: 12px;
       }
       #kos-menu.is-mobile-ui .kos-settings-body {
         flex: 1 1 auto;
@@ -2484,110 +2502,191 @@ export class MainMenu {
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
-        padding: 12px 0 8px;
+        padding: 8px 0 6px;
         scrollbar-width: thin;
       }
       #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab-panel.is-on {
-        padding-bottom: 8px;
+        padding-bottom: 4px;
       }
-      #kos-menu.is-mobile-ui .kos-mset { gap: 8px; }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-hint {
+        margin: 0 0 8px;
+        font-size: 11.5px;
+        line-height: 1.35;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-section-label {
+        margin: 8px 0 6px;
+        font-size: 9px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-chip-row {
+        gap: 5px;
+        margin-bottom: 10px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-chip {
+        padding: 7px 6px;
+        font-size: 11px;
+      }
+      #kos-menu.is-mobile-ui .kos-mset { gap: 6px; }
       #kos-menu.is-mobile-ui .kos-mset-card {
-        padding: 11px 11px 10px;
-        border-radius: 12px;
+        padding: 8px 9px 8px;
+        border-radius: 10px;
         box-shadow: none;
       }
-      #kos-menu.is-mobile-ui .kos-mset-head { margin-bottom: 8px; }
-      #kos-menu.is-mobile-ui .kos-mset-head strong { font-size: 13px; }
-      #kos-menu.is-mobile-ui .kos-mset-head em { font-size: 11px; }
-      #kos-menu.is-mobile-ui .kos-seg button {
-        padding: 9px 6px;
-        font-size: 11.5px;
+      #kos-menu.is-mobile-ui .kos-mset-head {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0 8px;
+        margin-bottom: 6px;
       }
+      #kos-menu.is-mobile-ui .kos-mset-head strong {
+        font-size: 12px;
+        line-height: 1.2;
+      }
+      #kos-menu.is-mobile-ui .kos-mset-head em {
+        font-size: 10.5px;
+        line-height: 1.2;
+      }
+      #kos-menu.is-mobile-ui .kos-seg {
+        gap: 4px;
+        padding: 3px;
+        border-radius: 9px;
+      }
+      #kos-menu.is-mobile-ui .kos-seg button {
+        padding: 7px 4px;
+        font-size: 11px;
+        border-radius: 7px;
+      }
+      #kos-menu.is-mobile-ui .kos-mset-card .kos-slider {
+        gap: 0;
+        padding: 2px 0;
+        font-size: 11px;
+      }
+      #kos-menu.is-mobile-ui .kos-mset-card .kos-slider input[type=range] {
+        height: 22px;
+      }
+      #kos-menu.is-mobile-ui .kos-mset-card .kos-slider input[type=range]::-webkit-slider-thumb {
+        width: 12px;
+        height: 12px;
+        margin-top: -4px;
+      }
+      #kos-menu.is-mobile-ui .kos-mset-card .kos-match-opt {
+        margin: 4px 0 0;
+        padding: 8px 9px;
+        gap: 8px;
+      }
+      #kos-menu.is-mobile-ui .kos-mset-card .kos-match-opt strong { font-size: 12px; }
+      #kos-menu.is-mobile-ui .kos-mset-card .kos-match-opt em { font-size: 10.5px; }
       #kos-menu.is-mobile-ui .kos-mobile-editor-actions {
         position: static;
         background: none;
         padding: 0;
-        margin: 0 0 8px;
+        margin: 0 0 6px;
+        gap: 6px;
+      }
+      #kos-menu.is-mobile-ui .kos-mobile-editor-actions .kos-btn {
+        min-height: 40px;
+        font-size: 12.5px;
+        padding: 8px 10px;
       }
       #kos-menu.is-mobile-ui .kos-mobile-list {
         max-height: none;
         overflow: visible;
+        gap: 4px;
+      }
+      #kos-menu.is-mobile-ui .kos-mobile-item {
+        padding: 8px 10px;
+        border-radius: 8px;
+        font-size: 12.5px;
+      }
+      #kos-menu.is-mobile-ui .kos-xhair-preview-wrap {
+        padding: 10px 8px 8px;
+        margin-bottom: 8px;
       }
       #kos-menu.is-mobile-ui .kos-xhair-controls {
         max-height: none;
         overflow: visible;
         padding-right: 0;
+        gap: 2px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-btn-ghost {
+        margin-top: 8px;
+        min-height: 38px;
+        font-size: 12px;
+        padding: 8px 12px;
       }
 
-      /* Wide / short phones: brand left, docked controls right */
+      /* Wide / short phones: tiny brand mark, buttons own the screen */
       @media (orientation: landscape) and (max-height: 520px) {
         #kos-menu.is-mobile-ui .kos-shell-main {
           flex-direction: row;
-          align-items: stretch;
-          justify-content: space-between;
-          gap: 14px;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 12px;
           padding:
-            max(8px, env(safe-area-inset-top))
-            max(12px, env(safe-area-inset-right))
-            max(8px, env(safe-area-inset-bottom))
-            max(12px, env(safe-area-inset-left));
+            max(6px, env(safe-area-inset-top))
+            max(10px, env(safe-area-inset-right))
+            max(6px, env(safe-area-inset-bottom))
+            max(10px, env(safe-area-inset-left));
         }
         #kos-menu.is-mobile-ui .kos-hero {
-          flex: 0 0 auto;
-          width: min(150px, 28vw);
-          align-items: center;
-          justify-content: center;
-          padding: 0;
+          left: max(10px, env(safe-area-inset-left));
+          top: max(6px, env(safe-area-inset-top));
         }
         #kos-menu.is-mobile-ui .kos-logo-hero {
-          width: min(120px, 24vw, 58vh);
+          width: min(72px, 16vw, 42vh);
         }
         #kos-menu.is-mobile-ui .kos-menu-rail {
           flex: 1 1 auto;
-          max-width: min(420px, 58vw);
+          max-width: min(380px, 62vw);
           align-self: center;
-          gap: 8px;
-          padding: 10px 12px 9px;
-          border-radius: 14px;
+          gap: 6px;
+          padding: 8px 10px 7px;
+          border-radius: 12px;
         }
+        #kos-menu.is-mobile-ui .kos-nav { gap: 5px; }
         #kos-menu.is-mobile-ui .kos-btn {
-          min-height: 38px;
-          padding: 7px 10px;
-          font-size: 13px;
+          min-height: 36px;
+          padding: 6px 10px;
+          font-size: 12.5px;
         }
         #kos-menu.is-mobile-ui .kos-btn-primary {
-          min-height: 40px;
+          min-height: 38px;
           font-size: 12px;
         }
         #kos-menu.is-mobile-ui .kos-btn-ghost-line {
-          min-height: 36px;
-          padding: 6px 8px 6px 10px;
-          font-size: 13px;
+          min-height: 34px;
+          padding: 6px 10px;
+          font-size: 12.5px;
         }
         #kos-menu.is-mobile-ui .kos-field span { font-size: 8px; }
         #kos-menu.is-mobile-ui .kos-field input {
-          padding: 5px 2px 6px;
-          font-size: 14px;
+          padding: 4px 2px 5px;
+          font-size: 13px;
         }
         #kos-menu.is-mobile-ui .kos-shell-sub {
-          max-height: calc(100dvh - 10px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-          padding: 12px 14px 12px;
+          max-height: calc(100dvh - 8px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+          padding: 10px 12px 10px;
         }
         #kos-menu.is-mobile-ui .kos-shell-settings {
           padding:
-            max(6px, env(safe-area-inset-top))
-            max(12px, env(safe-area-inset-right))
-            max(8px, env(safe-area-inset-bottom))
-            max(12px, env(safe-area-inset-left));
+            max(4px, env(safe-area-inset-top))
+            max(10px, env(safe-area-inset-right))
+            max(6px, env(safe-area-inset-bottom))
+            max(10px, env(safe-area-inset-left));
         }
-        #kos-menu.is-mobile-ui .kos-shell-settings .kos-logo-sm { width: 22px; }
-        #kos-menu.is-mobile-ui .kos-shell-settings .kos-heading { font-size: 16px; }
-        #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab { padding: 7px 9px 8px; font-size: 12px; }
-        #kos-menu.is-mobile-ui .kos-settings-body { padding-top: 8px; }
-        #kos-menu.is-mobile-ui .kos-shell-sub .kos-logo-sm { width: min(52px, 14vw); }
-        #kos-menu.is-mobile-ui .kos-shell-sub:not(.kos-shell-settings) .kos-heading { font-size: 18px; margin: 2px 0; }
-        #kos-menu.is-mobile-ui .kos-hint { margin-bottom: 8px; font-size: 12px; }
-        #kos-menu.is-mobile-ui .kos-chip { padding: 8px 6px; font-size: 11.5px; }
+        #kos-menu.is-mobile-ui .kos-shell-settings .kos-logo-sm { width: 18px; }
+        #kos-menu.is-mobile-ui .kos-shell-settings .kos-heading { font-size: 15px; }
+        #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab { padding: 5px 8px 6px; font-size: 11px; }
+        #kos-menu.is-mobile-ui .kos-settings-body { padding: 6px 0 4px; }
+        #kos-menu.is-mobile-ui .kos-mset { gap: 5px; }
+        #kos-menu.is-mobile-ui .kos-mset-card { padding: 6px 8px; }
+        #kos-menu.is-mobile-ui .kos-mset-head { margin-bottom: 4px; }
+        #kos-menu.is-mobile-ui .kos-seg button { padding: 5px 4px; font-size: 10.5px; }
+        #kos-menu.is-mobile-ui .kos-shell-sub .kos-logo-sm { width: min(44px, 12vw); }
+        #kos-menu.is-mobile-ui .kos-shell-sub:not(.kos-shell-settings) .kos-heading { font-size: 16px; margin: 2px 0; }
+        #kos-menu.is-mobile-ui .kos-hint { margin-bottom: 6px; font-size: 11px; }
+        #kos-menu.is-mobile-ui .kos-chip { padding: 6px 5px; font-size: 11px; }
       }
 
       @media (prefers-reduced-motion: reduce) {
