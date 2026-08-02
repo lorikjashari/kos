@@ -106,6 +106,8 @@ export class MainMenu {
     this.root.querySelectorAll('.kos-tab-panel').forEach((el) => {
       el.classList.toggle('is-on', el.getAttribute('data-panel') === tab)
     })
+    const body = this.root.querySelector('.kos-settings-body') as HTMLElement | null
+    if (body) body.scrollTop = 0
     if (tab === 'mobile') this.syncMobileControlsPanel()
   }
 
@@ -338,19 +340,23 @@ export class MainMenu {
 
       <section class="kos-screen" data-screen="settings">
         <div class="kos-shell kos-shell-sub kos-shell-settings">
-          <button type="button" class="kos-back" data-action="back-main">← Back</button>
-          <div class="kos-sub-brand">
-            <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
-          </div>
-          <h2 class="kos-heading">Settings</h2>
-
+          <div class="kos-settings-chrome">
+            <div class="kos-settings-bar">
+              <button type="button" class="kos-back" data-action="back-main">← Back</button>
+              <div class="kos-settings-brand">
+                <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
+                <h2 class="kos-heading">Settings</h2>
+              </div>
+            </div>
             <div class="kos-tabs" role="tablist">
-            <button type="button" class="kos-tab is-on" data-tab="video">Video</button>
-            <button type="button" class="kos-tab" data-tab="crosshair">Crosshair</button>
-            <button type="button" class="kos-tab" data-tab="keybinds" data-desktop-only>Keybinds</button>
-            <button type="button" class="kos-tab" data-tab="mobile" data-mobile-only>Mobile</button>
+              <button type="button" class="kos-tab is-on" data-tab="video">Video</button>
+              <button type="button" class="kos-tab" data-tab="crosshair">Crosshair</button>
+              <button type="button" class="kos-tab" data-tab="keybinds" data-desktop-only>Keybinds</button>
+              <button type="button" class="kos-tab" data-tab="mobile" data-mobile-only>Mobile</button>
+            </div>
           </div>
 
+          <div class="kos-settings-body">
           <div class="kos-tab-panel is-on" data-panel="video">
             <p class="kos-hint" data-desktop-only>Render resolution is stretched to fill your screen (CS-style). Switching aspect (4:3 ↔ 16:9) changes the stretch.</p>
             <p class="kos-hint" data-mobile-only>Native display resolution is used on mobile. Frame rate and Performance control smoothness.</p>
@@ -470,6 +476,7 @@ export class MainMenu {
                 <div class="kos-mobile-list" id="kos-mobile-list"></div>
               </div>
             </div>
+          </div>
           </div>
         </div>
       </section>
@@ -1447,7 +1454,39 @@ export class MainMenu {
         scrollbar-color: rgba(26, 95, 255, 0.25) transparent;
         animation: kos-slide-up 420ms var(--kos-ease) both;
       }
-      .kos-shell-settings { width: min(640px, 94vw); }
+      .kos-shell-settings {
+        width: min(640px, 94vw);
+        padding-top: clamp(18px, 3vh, 28px);
+      }
+      .kos-settings-chrome {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+      }
+      .kos-settings-bar {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        width: 100%;
+      }
+      .kos-settings-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0;
+        min-width: 0;
+      }
+      .kos-settings-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+      }
       .kos-sub-brand { margin-bottom: 4px; }
       .kos-logo-sm {
         width: min(120px, 32vw);
@@ -1455,6 +1494,8 @@ export class MainMenu {
         display: block;
         filter: drop-shadow(0 8px 20px rgba(26, 95, 255, 0.12));
       }
+      .kos-shell-settings .kos-logo-sm { margin-bottom: 2px; }
+      .kos-shell-settings .kos-back { margin-bottom: 8px; }
 
       .kos-heading {
         margin: 8px 0 6px;
@@ -1464,6 +1505,7 @@ export class MainMenu {
         line-height: 1.1;
         color: var(--kos-ink);
       }
+      .kos-shell-settings .kos-heading { margin: 4px 0 0; }
       .kos-hint {
         margin: 0 0 22px;
         font-size: 14px; font-weight: 500;
@@ -1925,21 +1967,11 @@ export class MainMenu {
         background: #eef4ff;
         color: var(--kos-blue-deep);
       }
-      .kos-mobile-editor-actions {
-        position: sticky;
-        bottom: 0;
-        z-index: 2;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 10px 0 4px;
-        background: linear-gradient(180deg, rgba(255,255,255,0), #fff 28%);
-      }
 
       .kos-tabs {
         display: flex; gap: 0; width: 100%; margin: 10px 0 20px;
         border-bottom: 2px solid var(--kos-line);
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
       }
       .kos-tab {
         flex: 1; appearance: none; border: none; cursor: pointer;
@@ -2192,103 +2224,370 @@ export class MainMenu {
         .kos-menu-rail { max-width: 400px; }
       }
 
-      /* Mobile: always keep menu buttons reachable (esp. iPhone landscape) */
+      /* Mobile: compact launcher — brand over art, controls in a bottom dock */
       #kos-menu.is-mobile-ui .kos-screen.is-active {
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
       }
-      #kos-menu.is-mobile-ui .kos-shell-main {
-        min-height: 100%;
-        min-height: 100dvh;
-        box-sizing: border-box;
-        align-content: start;
-        overflow: visible;
-        padding:
-          max(16px, env(safe-area-inset-top))
-          max(18px, env(safe-area-inset-right))
-          max(18px, env(safe-area-inset-bottom))
-          max(18px, env(safe-area-inset-left));
+      #kos-menu.is-mobile-ui .kos-screen[data-screen="main"].is-active {
+        overflow: hidden;
       }
-      #kos-menu.is-mobile-ui .kos-logo-hero {
-        width: min(220px, 56vw, 36vh);
+      #kos-menu.is-mobile-ui .kos-screen[data-screen="settings"].is-active {
+        overflow: hidden;
+        flex-direction: column;
+        align-items: stretch;
       }
-      #kos-menu.is-mobile-ui .kos-menu-rail {
-        max-width: min(420px, 100%);
-        gap: 12px;
+      #kos-menu.is-mobile-ui.is-bg-blur .kos-bg-veil {
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.08) 28%, rgba(245,247,251,0.55) 100%),
+          linear-gradient(90deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.22) 55%, rgba(255,255,255,0.10) 100%);
       }
-      #kos-menu.is-mobile-ui .kos-nav { gap: 4px; }
-      #kos-menu.is-mobile-ui .kos-btn {
-        min-height: 46px;
-        padding: 12px 14px;
-        font-size: 15px;
-      }
-      #kos-menu.is-mobile-ui .kos-btn-primary { font-size: 15px; }
-      #kos-menu.is-mobile-ui .kos-field { gap: 6px; }
-      #kos-menu.is-mobile-ui .kos-field input {
-        padding: 10px 2px 9px;
-        font-size: 15px;
-      }
-      #kos-menu.is-mobile-ui .kos-shell-sub,
-      #kos-menu.is-mobile-ui .kos-shell-settings {
-        width: min(520px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
-        max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-        margin:
-          max(8px, env(safe-area-inset-top))
-          max(12px, env(safe-area-inset-right))
-          max(8px, env(safe-area-inset-bottom))
-          max(12px, env(safe-area-inset-left));
+      #kos-menu.is-mobile-ui .kos-bg-veil {
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.10) 0%, transparent 34%, rgba(8,14,28,0.18) 72%, rgba(8,14,28,0.42) 100%),
+          linear-gradient(90deg, rgba(255,255,255,0.42) 0%, rgba(255,255,255,0.10) 48%, transparent 78%);
       }
 
-      /* Wide / short phones (iPhone 11 landscape): logo beside buttons */
+      #kos-menu.is-mobile-ui .kos-shell-main {
+        display: flex;
+        flex-direction: column;
+        grid-template-columns: none;
+        grid-template-areas: none;
+        justify-content: space-between;
+        align-items: stretch;
+        min-height: 100%;
+        min-height: 100dvh;
+        height: 100%;
+        box-sizing: border-box;
+        overflow: hidden;
+        gap: 12px;
+        padding:
+          max(14px, env(safe-area-inset-top))
+          max(14px, env(safe-area-inset-right))
+          max(12px, env(safe-area-inset-bottom))
+          max(14px, env(safe-area-inset-left));
+      }
+      #kos-menu.is-mobile-ui .kos-hero {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-start;
+        min-height: 0;
+        padding: 2px 0 0;
+        animation: kos-slide-up 480ms var(--kos-ease) both;
+      }
+      #kos-menu.is-mobile-ui .kos-logo-hero {
+        width: min(132px, 34vw, 18vh);
+        filter: drop-shadow(0 10px 24px rgba(10, 30, 80, 0.22));
+        animation: kos-logo-in 700ms var(--kos-ease) both;
+      }
+      #kos-menu.is-mobile-ui .kos-menu-rail {
+        flex: 0 0 auto;
+        width: 100%;
+        max-width: none;
+        gap: 10px;
+        padding: 12px 12px 10px;
+        border-radius: 18px;
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(255,255,255,0.78) 100%);
+        border: 1px solid rgba(255,255,255,0.72);
+        box-shadow:
+          0 18px 40px rgba(8, 14, 28, 0.18),
+          0 1px 0 rgba(255,255,255,0.65) inset;
+        backdrop-filter: blur(18px) saturate(1.2);
+        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        animation: kos-slide-up 520ms var(--kos-ease) 60ms both;
+      }
+      #kos-menu.is-mobile-ui .kos-nav { gap: 3px; }
+      #kos-menu.is-mobile-ui .kos-field { gap: 3px; }
+      #kos-menu.is-mobile-ui .kos-field span {
+        font-size: 9px;
+        letter-spacing: 0.18em;
+      }
+      #kos-menu.is-mobile-ui .kos-field input {
+        padding: 7px 2px 8px;
+        font-size: 15px;
+        background: transparent;
+      }
+      #kos-menu.is-mobile-ui .kos-btn {
+        min-height: 42px;
+        padding: 9px 12px;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      #kos-menu.is-mobile-ui .kos-btn:hover:not(:disabled),
+      #kos-menu.is-mobile-ui .kos-btn:active:not(:disabled) {
+        transform: none;
+      }
+      #kos-menu.is-mobile-ui .kos-btn-primary {
+        min-height: 46px;
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        box-shadow: 0 8px 20px rgba(26, 95, 255, 0.28);
+      }
+      #kos-menu.is-mobile-ui .kos-btn-primary:hover:not(:disabled),
+      #kos-menu.is-mobile-ui .kos-btn-primary:active:not(:disabled) {
+        transform: none;
+        box-shadow: 0 8px 20px rgba(26, 95, 255, 0.28);
+      }
+      #kos-menu.is-mobile-ui .kos-btn-ghost-line {
+        min-height: 40px;
+        padding: 8px 10px 8px 12px;
+        font-size: 13.5px;
+        font-weight: 650;
+        border-bottom-color: rgba(10, 30, 80, 0.08);
+      }
+      #kos-menu.is-mobile-ui .kos-btn-ghost-line:last-child {
+        border-bottom: none;
+      }
+
+      #kos-menu.is-mobile-ui .kos-shell-sub {
+        width: min(440px, calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+        max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        margin:
+          max(6px, env(safe-area-inset-top))
+          max(10px, env(safe-area-inset-right))
+          max(6px, env(safe-area-inset-bottom))
+          max(10px, env(safe-area-inset-left));
+        padding: 14px 14px 16px;
+        border-radius: 16px;
+        box-shadow: 0 16px 40px rgba(10, 30, 80, 0.12);
+      }
+      #kos-menu.is-mobile-ui .kos-shell-sub .kos-back {
+        margin-bottom: 6px;
+        padding: 4px 0;
+        font-size: 12px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-sub .kos-logo-sm {
+        width: min(64px, 18vw);
+      }
+      #kos-menu.is-mobile-ui .kos-shell-sub:not(.kos-shell-settings) .kos-heading {
+        font-size: 22px;
+        margin: 2px 0 4px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-sub .kos-hint {
+        margin-bottom: 12px;
+        font-size: 12.5px;
+        line-height: 1.4;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-sub .kos-section-label { margin: 2px 0 8px; }
+      #kos-menu.is-mobile-ui .kos-shell-sub .kos-chip-row { gap: 6px; margin-bottom: 14px; }
+      #kos-menu.is-mobile-ui .kos-shell-sub .kos-chip {
+        padding: 9px 8px;
+        font-size: 12px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-sub .kos-btn-primary {
+        min-height: 46px;
+        font-size: 13px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-sub .kos-match-opt {
+        margin: 2px 0 14px;
+        padding: 11px 12px 11px 12px;
+      }
+      #kos-menu.is-mobile-ui .kos-mp-rooms {
+        max-height: min(28vh, 180px);
+        margin-bottom: 12px;
+      }
+      #kos-menu.is-mobile-ui .kos-mp-room {
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+      #kos-menu.is-mobile-ui .kos-field-inline {
+        margin-bottom: 6px;
+      }
+      #kos-menu.is-mobile-ui .kos-field-inline input[type=number] {
+        max-width: 78px;
+        font-size: 16px;
+        padding: 8px 6px;
+      }
+
+      #kos-menu.is-mobile-ui .kos-shell-settings {
+        width: 100%;
+        max-width: none;
+        height: 100%;
+        max-height: none;
+        margin: 0;
+        border: none;
+        border-left: none;
+        border-radius: 0;
+        box-shadow: none;
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(18px) saturate(1.15);
+        -webkit-backdrop-filter: blur(18px) saturate(1.15);
+        padding:
+          max(10px, env(safe-area-inset-top))
+          max(14px, env(safe-area-inset-right))
+          max(12px, env(safe-area-inset-bottom))
+          max(14px, env(safe-area-inset-left));
+        overflow: hidden;
+      }
+      #kos-menu.is-mobile-ui .kos-settings-chrome {
+        z-index: 5;
+        flex-shrink: 0;
+        background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.94) 78%, rgba(255,255,255,0.72) 100%);
+        border-bottom: 1px solid rgba(10, 30, 80, 0.06);
+      }
+      #kos-menu.is-mobile-ui .kos-settings-bar {
+        flex-direction: row;
+        align-items: center;
+        gap: 10px;
+        min-height: 36px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-back {
+        margin: 0;
+        padding: 8px 4px;
+        flex-shrink: 0;
+        font-size: 12px;
+      }
+      #kos-menu.is-mobile-ui .kos-settings-brand {
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-logo-sm {
+        width: 26px;
+        margin: 0;
+        flex-shrink: 0;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-heading {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: -0.03em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-tabs {
+        margin: 4px 0 0;
+        flex-wrap: nowrap;
+        gap: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        border-bottom-color: rgba(10, 30, 80, 0.08);
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-tabs::-webkit-scrollbar { display: none; }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab {
+        flex: 1 0 auto;
+        min-width: 0;
+        padding: 9px 10px 10px;
+        font-size: 12.5px;
+      }
+      #kos-menu.is-mobile-ui .kos-settings-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        padding: 12px 0 8px;
+        scrollbar-width: thin;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab-panel.is-on {
+        padding-bottom: 8px;
+      }
+      #kos-menu.is-mobile-ui .kos-mset { gap: 8px; }
+      #kos-menu.is-mobile-ui .kos-mset-card {
+        padding: 11px 11px 10px;
+        border-radius: 12px;
+        box-shadow: none;
+      }
+      #kos-menu.is-mobile-ui .kos-mset-head { margin-bottom: 8px; }
+      #kos-menu.is-mobile-ui .kos-mset-head strong { font-size: 13px; }
+      #kos-menu.is-mobile-ui .kos-mset-head em { font-size: 11px; }
+      #kos-menu.is-mobile-ui .kos-seg button {
+        padding: 9px 6px;
+        font-size: 11.5px;
+      }
+      #kos-menu.is-mobile-ui .kos-mobile-editor-actions {
+        position: static;
+        background: none;
+        padding: 0;
+        margin: 0 0 8px;
+      }
+      #kos-menu.is-mobile-ui .kos-mobile-list {
+        max-height: none;
+        overflow: visible;
+      }
+      #kos-menu.is-mobile-ui .kos-xhair-controls {
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
+      }
+
+      /* Wide / short phones: brand left, docked controls right */
       @media (orientation: landscape) and (max-height: 520px) {
         #kos-menu.is-mobile-ui .kos-shell-main {
-          grid-template-columns: minmax(120px, 30vw) minmax(240px, 1fr);
-          grid-template-areas: "hero rail";
-          align-items: center;
-          align-content: center;
-          justify-items: stretch;
-          gap: 8px 20px;
+          flex-direction: row;
+          align-items: stretch;
+          justify-content: space-between;
+          gap: 14px;
           padding:
-            max(10px, env(safe-area-inset-top))
-            max(16px, env(safe-area-inset-right))
-            max(10px, env(safe-area-inset-bottom))
-            max(16px, env(safe-area-inset-left));
+            max(8px, env(safe-area-inset-top))
+            max(12px, env(safe-area-inset-right))
+            max(8px, env(safe-area-inset-bottom))
+            max(12px, env(safe-area-inset-left));
         }
         #kos-menu.is-mobile-ui .kos-hero {
+          flex: 0 0 auto;
+          width: min(150px, 28vw);
           align-items: center;
           justify-content: center;
-          padding-bottom: 0;
+          padding: 0;
         }
         #kos-menu.is-mobile-ui .kos-logo-hero {
-          width: min(180px, 28vw, 72vh);
+          width: min(120px, 24vw, 58vh);
         }
         #kos-menu.is-mobile-ui .kos-menu-rail {
-          max-width: 460px;
+          flex: 1 1 auto;
+          max-width: min(420px, 58vw);
+          align-self: center;
           gap: 8px;
+          padding: 10px 12px 9px;
+          border-radius: 14px;
         }
         #kos-menu.is-mobile-ui .kos-btn {
-          min-height: 42px;
-          padding: 9px 12px;
-          font-size: 14px;
+          min-height: 38px;
+          padding: 7px 10px;
+          font-size: 13px;
         }
-        #kos-menu.is-mobile-ui .kos-btn-primary { font-size: 14px; }
-        #kos-menu.is-mobile-ui .kos-field span {
-          font-size: 9px;
+        #kos-menu.is-mobile-ui .kos-btn-primary {
+          min-height: 40px;
+          font-size: 12px;
         }
+        #kos-menu.is-mobile-ui .kos-btn-ghost-line {
+          min-height: 36px;
+          padding: 6px 8px 6px 10px;
+          font-size: 13px;
+        }
+        #kos-menu.is-mobile-ui .kos-field span { font-size: 8px; }
         #kos-menu.is-mobile-ui .kos-field input {
-          padding: 7px 2px 6px;
+          padding: 5px 2px 6px;
           font-size: 14px;
         }
-        #kos-menu.is-mobile-ui .kos-shell-sub,
-        #kos-menu.is-mobile-ui .kos-shell-settings {
-          max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-          padding: 14px 16px 16px;
+        #kos-menu.is-mobile-ui .kos-shell-sub {
+          max-height: calc(100dvh - 10px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+          padding: 12px 14px 12px;
         }
-        #kos-menu.is-mobile-ui .kos-logo-sm { width: min(72px, 18vw); }
-        #kos-menu.is-mobile-ui .kos-heading { font-size: 20px; margin: 4px 0; }
-        #kos-menu.is-mobile-ui .kos-hint { margin-bottom: 10px; font-size: 12px; }
-        #kos-menu.is-mobile-ui .kos-chip { padding: 9px 6px; font-size: 12px; }
+        #kos-menu.is-mobile-ui .kos-shell-settings {
+          padding:
+            max(6px, env(safe-area-inset-top))
+            max(12px, env(safe-area-inset-right))
+            max(8px, env(safe-area-inset-bottom))
+            max(12px, env(safe-area-inset-left));
+        }
+        #kos-menu.is-mobile-ui .kos-shell-settings .kos-logo-sm { width: 22px; }
+        #kos-menu.is-mobile-ui .kos-shell-settings .kos-heading { font-size: 16px; }
+        #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab { padding: 7px 9px 8px; font-size: 12px; }
+        #kos-menu.is-mobile-ui .kos-settings-body { padding-top: 8px; }
+        #kos-menu.is-mobile-ui .kos-shell-sub .kos-logo-sm { width: min(52px, 14vw); }
+        #kos-menu.is-mobile-ui .kos-shell-sub:not(.kos-shell-settings) .kos-heading { font-size: 18px; margin: 2px 0; }
+        #kos-menu.is-mobile-ui .kos-hint { margin-bottom: 8px; font-size: 12px; }
+        #kos-menu.is-mobile-ui .kos-chip { padding: 8px 6px; font-size: 11.5px; }
       }
 
       @media (prefers-reduced-motion: reduce) {
