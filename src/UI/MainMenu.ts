@@ -106,7 +106,7 @@ export class MainMenu {
     this.root.querySelectorAll('.kos-tab-panel').forEach((el) => {
       el.classList.toggle('is-on', el.getAttribute('data-panel') === tab)
     })
-    const body = this.root.querySelector('.kos-settings-body') as HTMLElement | null
+    const body = this.root.querySelector('.kos-panel-body') as HTMLElement | null
     if (body) body.scrollTop = 0
     if (tab === 'mobile') this.syncMobileControlsPanel()
   }
@@ -224,7 +224,7 @@ export class MainMenu {
         <div class="kos-load">
           <img class="kos-logo kos-logo-load" src="/logo.png" alt="KoS FPS Shooting" width="420" height="420" />
           <div class="kos-load-wrap">
-            <div class="kos-load-track"><div class="kos-load-fill"></div></div>
+            <div class="kos-load-track" aria-hidden="true"><div class="kos-load-fill"></div></div>
             <p class="kos-load-label">Loading…</p>
             <p class="kos-load-error" hidden></p>
           </div>
@@ -259,91 +259,128 @@ export class MainMenu {
       </section>
 
       <section class="kos-screen" data-screen="mp">
-        <div class="kos-shell kos-shell-sub">
-          <button type="button" class="kos-back" data-action="back-main">← Back</button>
-          <h2 class="kos-heading">Multiplayer</h2>
-
-          <div class="kos-section-label">Open rooms</div>
-          <div class="kos-mp-rooms" id="kos-mp-rooms">
-            <div class="kos-mp-rooms-empty" id="kos-mp-rooms-empty">Looking for rooms…</div>
+        <div class="kos-shell kos-shell-sub kos-shell-panel">
+          <div class="kos-panel-chrome">
+            <div class="kos-panel-bar">
+              <button type="button" class="kos-back" data-action="back-main">← Back</button>
+              <div class="kos-panel-brand">
+                <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
+                <h2 class="kos-heading">Multiplayer</h2>
+              </div>
+            </div>
           </div>
+          <div class="kos-panel-body">
+            <div class="kos-mset">
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Open rooms</strong>
+                  <em>Tap a room to join</em>
+                </div>
+                <div class="kos-mp-rooms" id="kos-mp-rooms">
+                  <div class="kos-mp-rooms-empty" id="kos-mp-rooms-empty">Looking for rooms…</div>
+                </div>
+              </div>
 
-          <label class="kos-field kos-field-inline">
-            <span>Bots</span>
-            <input id="kos-mp-bot-count" type="number" min="0" max="10" step="1" value="10" inputmode="numeric" />
-          </label>
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Create room</strong>
+                  <em>Host on Pool Day</em>
+                </div>
+                <label class="kos-field kos-field-inline">
+                  <span>Bots</span>
+                  <input id="kos-mp-bot-count" type="number" min="0" max="10" step="1" value="10" inputmode="numeric" />
+                </label>
+                <div class="kos-chip-row" id="kos-mp-diff">
+                  <button type="button" class="kos-chip" data-mp-diff="easy">Easy</button>
+                  <button type="button" class="kos-chip is-on" data-mp-diff="medium">Medium</button>
+                  <button type="button" class="kos-chip" data-mp-diff="hard">Hard</button>
+                </div>
+                <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="mp-host">
+                  <span class="kos-btn-label">Create Room</span>
+                </button>
+              </div>
 
-          <div class="kos-chip-row" id="kos-mp-diff">
-            <button type="button" class="kos-chip" data-mp-diff="easy">Easy</button>
-            <button type="button" class="kos-chip is-on" data-mp-diff="medium">Medium</button>
-            <button type="button" class="kos-chip" data-mp-diff="hard">Hard</button>
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Join with code</strong>
+                  <em>Enter a room code</em>
+                </div>
+                <label class="kos-field">
+                  <input id="kos-mp-code" type="text" maxlength="8" placeholder="Room code" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:0.14em;font-weight:800" />
+                </label>
+                <button type="button" class="kos-btn kos-btn-ghost-line kos-start" data-action="mp-join">
+                  <span class="kos-btn-label">Join</span>
+                </button>
+                <p class="kos-hint" id="kos-mp-status"></p>
+              </div>
+            </div>
           </div>
-
-          <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="mp-host">
-            <span class="kos-btn-label">Create Room</span>
-          </button>
-
-          <div class="kos-mp-or">or code</div>
-
-          <label class="kos-field">
-            <input id="kos-mp-code" type="text" maxlength="8" placeholder="Room code" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:0.14em;font-weight:800" />
-          </label>
-          <button type="button" class="kos-btn kos-btn-ghost-line kos-start" data-action="mp-join">
-            <span class="kos-btn-label">Join</span>
-          </button>
-          <p class="kos-hint" id="kos-mp-status"></p>
         </div>
       </section>
 
       <section class="kos-screen" data-screen="bots">
-        <div class="kos-shell kos-shell-sub">
-          <button type="button" class="kos-back" data-action="back-main">← Back</button>
-          <div class="kos-sub-brand">
-            <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
+        <div class="kos-shell kos-shell-sub kos-shell-panel">
+          <div class="kos-panel-chrome">
+            <div class="kos-panel-bar">
+              <button type="button" class="kos-back" data-action="back-main">← Back</button>
+              <div class="kos-panel-brand">
+                <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
+                <h2 class="kos-heading">Play with Bots</h2>
+              </div>
+            </div>
           </div>
-          <h2 class="kos-heading">Play with Bots</h2>
-          <p class="kos-hint">Pick a map, difficulty, and how many bots spawn.</p>
+          <div class="kos-panel-body">
+            <div class="kos-mset">
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Map</strong>
+                  <em id="kos-map-hint">Classic pool arena — bots ready.</em>
+                </div>
+                <div class="kos-chip-row" id="kos-map">
+                  <button type="button" class="kos-chip is-on" data-map="pool_day">Pool Day</button>
+                  <button type="button" class="kos-chip" data-map="de_dust2">Dust II</button>
+                </div>
+              </div>
 
-          <div class="kos-section-label">Map</div>
-          <div class="kos-chip-row" id="kos-map">
-            <button type="button" class="kos-chip is-on" data-map="pool_day">Pool Day</button>
-            <button type="button" class="kos-chip" data-map="de_dust2">Dust II</button>
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Match setup</strong>
+                  <em>Difficulty and bot count</em>
+                </div>
+                <div class="kos-section-label">Difficulty</div>
+                <div class="kos-chip-row" id="kos-diff">
+                  <button type="button" class="kos-chip" data-diff="easy">Easy</button>
+                  <button type="button" class="kos-chip is-on" data-diff="medium">Medium</button>
+                  <button type="button" class="kos-chip" data-diff="hard">Hard</button>
+                </div>
+                <label class="kos-field kos-field-inline">
+                  <span>How many bots</span>
+                  <input id="kos-bot-count" type="number" min="0" max="10" step="1" value="5" inputmode="numeric" />
+                </label>
+                <p class="kos-hint tight-left">Type any amount (0–10). Dust II starts at 0 while we tune it.</p>
+                <label class="kos-check kos-match-opt">
+                  <input id="kos-refill-kill" type="checkbox" />
+                  <span>
+                    <strong>Refill ammo on kill</strong>
+                    <em>After each kill, mag goes full instantly (e.g. 30)</em>
+                  </span>
+                </label>
+              </div>
+
+              <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="start-bots">
+                <span class="kos-btn-label">Start Match</span>
+              </button>
+            </div>
           </div>
-          <p class="kos-hint tight-left" id="kos-map-hint">Classic pool arena — bots ready.</p>
-
-          <div class="kos-section-label">Difficulty</div>
-          <div class="kos-chip-row" id="kos-diff">
-            <button type="button" class="kos-chip" data-diff="easy">Easy</button>
-            <button type="button" class="kos-chip is-on" data-diff="medium">Medium</button>
-            <button type="button" class="kos-chip" data-diff="hard">Hard</button>
-          </div>
-
-          <label class="kos-field kos-field-inline">
-            <span>How many bots</span>
-            <input id="kos-bot-count" type="number" min="0" max="10" step="1" value="5" inputmode="numeric" />
-          </label>
-          <p class="kos-hint tight-left">Type any amount (0–10). Dust II starts at 0 while we tune it.</p>
-
-          <label class="kos-check kos-match-opt">
-            <input id="kos-refill-kill" type="checkbox" />
-            <span>
-              <strong>Refill ammo on kill</strong>
-              <em>After each kill, mag goes full instantly (e.g. 30)</em>
-            </span>
-          </label>
-
-          <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="start-bots">
-            <span class="kos-btn-label">Start Match</span>
-          </button>
         </div>
       </section>
 
       <section class="kos-screen" data-screen="settings">
-        <div class="kos-shell kos-shell-sub kos-shell-settings">
-          <div class="kos-settings-chrome">
-            <div class="kos-settings-bar">
+        <div class="kos-shell kos-shell-sub kos-shell-settings kos-shell-panel">
+          <div class="kos-panel-chrome">
+            <div class="kos-panel-bar">
               <button type="button" class="kos-back" data-action="back-main">← Back</button>
-              <div class="kos-settings-brand">
+              <div class="kos-panel-brand">
                 <img class="kos-logo kos-logo-sm" src="/logo.png" alt="KoS" width="180" height="180" />
                 <h2 class="kos-heading">Settings</h2>
               </div>
@@ -356,37 +393,57 @@ export class MainMenu {
             </div>
           </div>
 
-          <div class="kos-settings-body">
+          <div class="kos-panel-body">
           <div class="kos-tab-panel is-on" data-panel="video">
-            <p class="kos-hint" data-desktop-only>Render resolution is stretched to fill your screen (CS-style). Switching aspect (4:3 ↔ 16:9) changes the stretch.</p>
-            <p class="kos-hint" data-mobile-only>Native display resolution is used on mobile. Frame rate and Performance control smoothness.</p>
-            <p class="kos-hint tight" id="kos-res-active" data-desktop-only>Active: 1280×960</p>
-            <div class="kos-res-groups" id="kos-res-groups" data-desktop-only></div>
-            <p class="kos-section-label" style="margin-top:18px" data-desktop-only>Graphics</p>
-            <div class="kos-chip-row" id="kos-gfx-row" data-desktop-only>
-              <button type="button" class="kos-chip" data-gfx="low">Low</button>
-              <button type="button" class="kos-chip" data-gfx="medium">Medium</button>
-              <button type="button" class="kos-chip" data-gfx="high">High</button>
-            </div>
-            <p class="kos-section-label" style="margin-top:18px">Frame rate</p>
-            <p class="kos-hint tight" id="kos-fps-hint">Auto matches your display refresh.</p>
-            <div class="kos-chip-row" id="kos-fps-row">
-              <button type="button" class="kos-chip" data-fps="0">Auto</button>
-              <button type="button" class="kos-chip" data-fps="60">60</button>
-              <button type="button" class="kos-chip" data-fps="120" data-mobile-only>120</button>
-              <button type="button" class="kos-chip" data-fps="120" data-desktop-only>120</button>
-              <button type="button" class="kos-chip" data-fps="144" data-desktop-only>144</button>
-              <button type="button" class="kos-chip" data-fps="999" data-desktop-only>Unlimited</button>
+            <div class="kos-mset">
+              <div class="kos-mset-card" data-desktop-only>
+                <div class="kos-mset-head">
+                  <strong>Resolution</strong>
+                  <em>Stretched to fill your screen (CS-style)</em>
+                </div>
+                <p class="kos-hint tight" id="kos-res-active">Active: 1280×960</p>
+                <div class="kos-res-groups" id="kos-res-groups"></div>
+              </div>
+              <div class="kos-mset-card" data-desktop-only>
+                <div class="kos-mset-head">
+                  <strong>Graphics</strong>
+                  <em>Quality preset</em>
+                </div>
+                <div class="kos-chip-row" id="kos-gfx-row">
+                  <button type="button" class="kos-chip" data-gfx="low">Low</button>
+                  <button type="button" class="kos-chip" data-gfx="medium">Medium</button>
+                  <button type="button" class="kos-chip" data-gfx="high">High</button>
+                </div>
+              </div>
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>Frame rate</strong>
+                  <em id="kos-fps-hint">Auto matches your display refresh.</em>
+                </div>
+                <p class="kos-hint" data-mobile-only>Native display resolution is used on mobile. Frame rate and Performance control smoothness.</p>
+                <div class="kos-chip-row" id="kos-fps-row">
+                  <button type="button" class="kos-chip" data-fps="0">Auto</button>
+                  <button type="button" class="kos-chip" data-fps="60">60</button>
+                  <button type="button" class="kos-chip" data-fps="120" data-mobile-only>120</button>
+                  <button type="button" class="kos-chip" data-fps="120" data-desktop-only>120</button>
+                  <button type="button" class="kos-chip" data-fps="144" data-desktop-only>144</button>
+                  <button type="button" class="kos-chip" data-fps="999" data-desktop-only>Unlimited</button>
+                </div>
+              </div>
             </div>
           </div>
 
           <div class="kos-tab-panel" data-panel="crosshair">
-            <div class="kos-xhair-preview-wrap">
-              <canvas id="kos-xhair-preview" width="120" height="120"></canvas>
-              <p class="kos-hint tight">Live preview</p>
+            <div class="kos-mset">
+              <div class="kos-mset-card kos-xhair-card">
+                <div class="kos-xhair-preview-wrap">
+                  <canvas id="kos-xhair-preview" width="120" height="120"></canvas>
+                  <p class="kos-hint tight">Live preview</p>
+                </div>
+                <div class="kos-xhair-controls" id="kos-xhair-controls"></div>
+                <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-xhair">Reset Crosshair</button>
+              </div>
             </div>
-            <div class="kos-xhair-controls" id="kos-xhair-controls"></div>
-            <button type="button" class="kos-btn kos-btn-ghost" data-action="reset-xhair">Reset Crosshair</button>
           </div>
 
           <div class="kos-tab-panel" data-panel="keybinds" data-desktop-only>
@@ -1366,29 +1423,42 @@ export class MainMenu {
 
       .kos-load {
         margin: auto;
-        display: flex; flex-direction: column; align-items: center;
-        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: min(420px, 100%);
+        padding: 24px 20px;
+        gap: 0;
       }
       .kos-logo-load {
-        width: min(340px, 72vw);
+        width: min(260px, 58vw, 34vh);
         height: auto;
         display: block;
         filter: drop-shadow(0 16px 40px rgba(26, 95, 255, 0.18));
         animation: kos-logo-in 0.8s var(--kos-ease) both;
       }
-      .kos-load-wrap { width: min(280px, 70vw); margin-top: 28px; text-align: center; }
+      .kos-load-wrap {
+        width: min(240px, 72vw);
+        margin-top: 18px;
+        text-align: center;
+        flex-shrink: 0;
+      }
       .kos-load-track {
-        height: 4px;
-        background: rgba(26, 95, 255, 0.10);
+        height: 5px;
+        border-radius: 99px;
+        background: rgba(26, 95, 255, 0.12);
         overflow: hidden;
+        box-shadow: inset 0 0 0 1px rgba(26, 95, 255, 0.06);
       }
       .kos-load-fill {
         height: 100%; width: 0%;
+        border-radius: inherit;
         background: linear-gradient(90deg, var(--kos-blue), var(--kos-gold-bright));
         transition: width 240ms var(--kos-ease);
       }
       .kos-load-label {
-        margin: 14px 0 0; font-size: 11px; font-weight: 700;
+        margin: 10px 0 0; font-size: 11px; font-weight: 700;
         letter-spacing: 0.22em; text-transform: uppercase; color: var(--kos-muted);
       }
       .kos-load-error { color: #dc2626; font-size: 13px; font-weight: 600; margin-top: 10px; }
@@ -1458,28 +1528,31 @@ export class MainMenu {
         width: min(640px, 94vw);
         padding-top: clamp(18px, 3vh, 28px);
       }
-      .kos-settings-chrome {
+      .kos-shell-panel {
+        padding-top: clamp(18px, 3vh, 28px);
+      }
+      .kos-panel-chrome {
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
         align-items: stretch;
         width: 100%;
       }
-      .kos-settings-bar {
+      .kos-panel-bar {
         display: flex;
         flex-direction: column;
         align-items: stretch;
         gap: 0;
         width: 100%;
       }
-      .kos-settings-brand {
+      .kos-panel-brand {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
         gap: 0;
         min-width: 0;
       }
-      .kos-settings-body {
+      .kos-panel-body {
         flex: 1 1 auto;
         min-height: 0;
         width: 100%;
@@ -1494,8 +1567,8 @@ export class MainMenu {
         display: block;
         filter: drop-shadow(0 8px 20px rgba(26, 95, 255, 0.12));
       }
-      .kos-shell-settings .kos-logo-sm { margin-bottom: 2px; }
-      .kos-shell-settings .kos-back { margin-bottom: 8px; }
+      .kos-shell-panel .kos-logo-sm { margin-bottom: 2px; }
+      .kos-shell-panel .kos-back { margin-bottom: 8px; }
 
       .kos-heading {
         margin: 8px 0 6px;
@@ -1505,7 +1578,12 @@ export class MainMenu {
         line-height: 1.1;
         color: var(--kos-ink);
       }
-      .kos-shell-settings .kos-heading { margin: 4px 0 0; }
+      .kos-shell-panel .kos-heading { margin: 4px 0 0; }
+      .kos-xhair-card .kos-xhair-preview-wrap {
+        margin: -2px -2px 10px;
+        border: none;
+      }
+      .kos-xhair-card .kos-btn-ghost { margin-top: 8px; }
       .kos-hint {
         margin: 0 0 22px;
         font-size: 14px; font-weight: 500;
@@ -2230,7 +2308,33 @@ export class MainMenu {
         -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
       }
-      #kos-menu.is-mobile-ui .kos-screen[data-screen="settings"].is-active {
+      #kos-menu.is-mobile-ui .kos-screen[data-screen="loading"].is-active {
+        overflow: hidden;
+        align-items: center;
+        justify-content: center;
+      }
+      #kos-menu.is-mobile-ui .kos-load {
+        padding:
+          max(16px, env(safe-area-inset-top))
+          max(16px, env(safe-area-inset-right))
+          max(16px, env(safe-area-inset-bottom))
+          max(16px, env(safe-area-inset-left));
+      }
+      #kos-menu.is-mobile-ui .kos-logo-load {
+        width: min(156px, 42vw, 20vh);
+      }
+      #kos-menu.is-mobile-ui .kos-load-wrap {
+        width: min(220px, 78vw);
+        margin-top: 14px;
+      }
+      #kos-menu.is-mobile-ui .kos-load-track { height: 6px; }
+      #kos-menu.is-mobile-ui .kos-load-label {
+        margin-top: 8px;
+        font-size: 10px;
+      }
+      #kos-menu.is-mobile-ui .kos-screen[data-screen="settings"].is-active,
+      #kos-menu.is-mobile-ui .kos-screen[data-screen="bots"].is-active,
+      #kos-menu.is-mobile-ui .kos-screen[data-screen="mp"].is-active {
         overflow: hidden;
         flex-direction: column;
         align-items: stretch;
@@ -2267,67 +2371,7 @@ export class MainMenu {
         font-size: 15px;
       }
 
-      #kos-menu.is-mobile-ui .kos-shell-sub {
-        width: min(440px, calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right)));
-        max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-        margin:
-          max(6px, env(safe-area-inset-top))
-          max(10px, env(safe-area-inset-right))
-          max(6px, env(safe-area-inset-bottom))
-          max(10px, env(safe-area-inset-left));
-        padding: 14px 14px 16px;
-        border-radius: 16px;
-        box-shadow: 0 16px 40px rgba(10, 30, 80, 0.12);
-      }
-      #kos-menu.is-mobile-ui .kos-shell-sub .kos-back {
-        margin-bottom: 6px;
-        padding: 4px 0;
-        font-size: 12px;
-      }
-      #kos-menu.is-mobile-ui .kos-shell-sub .kos-logo-sm {
-        width: min(64px, 18vw);
-      }
-      #kos-menu.is-mobile-ui .kos-shell-sub:not(.kos-shell-settings) .kos-heading {
-        font-size: 22px;
-        margin: 2px 0 4px;
-      }
-      #kos-menu.is-mobile-ui .kos-shell-sub .kos-hint {
-        margin-bottom: 12px;
-        font-size: 12.5px;
-        line-height: 1.4;
-      }
-      #kos-menu.is-mobile-ui .kos-shell-sub .kos-section-label { margin: 2px 0 8px; }
-      #kos-menu.is-mobile-ui .kos-shell-sub .kos-chip-row { gap: 6px; margin-bottom: 14px; }
-      #kos-menu.is-mobile-ui .kos-shell-sub .kos-chip {
-        padding: 9px 8px;
-        font-size: 12px;
-      }
-      #kos-menu.is-mobile-ui .kos-shell-sub .kos-btn-primary {
-        min-height: 46px;
-        font-size: 13px;
-      }
-      #kos-menu.is-mobile-ui .kos-shell-sub .kos-match-opt {
-        margin: 2px 0 14px;
-        padding: 11px 12px 11px 12px;
-      }
-      #kos-menu.is-mobile-ui .kos-mp-rooms {
-        max-height: min(28vh, 180px);
-        margin-bottom: 12px;
-      }
-      #kos-menu.is-mobile-ui .kos-mp-room {
-        padding: 10px 12px;
-        font-size: 14px;
-      }
-      #kos-menu.is-mobile-ui .kos-field-inline {
-        margin-bottom: 6px;
-      }
-      #kos-menu.is-mobile-ui .kos-field-inline input[type=number] {
-        max-width: 78px;
-        font-size: 16px;
-        padding: 8px 6px;
-      }
-
-      #kos-menu.is-mobile-ui .kos-shell-settings {
+      #kos-menu.is-mobile-ui .kos-shell-panel {
         width: 100%;
         max-width: none;
         height: 100%;
@@ -2347,37 +2391,37 @@ export class MainMenu {
           max(12px, env(safe-area-inset-left));
         overflow: hidden;
       }
-      #kos-menu.is-mobile-ui .kos-settings-chrome {
+      #kos-menu.is-mobile-ui .kos-panel-chrome {
         z-index: 5;
         flex-shrink: 0;
         background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.94) 78%, rgba(255,255,255,0.72) 100%);
         border-bottom: 1px solid rgba(10, 30, 80, 0.06);
       }
-      #kos-menu.is-mobile-ui .kos-settings-bar {
+      #kos-menu.is-mobile-ui .kos-panel-bar {
         flex-direction: row;
         align-items: center;
         gap: 8px;
         min-height: 32px;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-back {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-back {
         margin: 0;
         padding: 6px 2px;
         flex-shrink: 0;
         font-size: 12px;
       }
-      #kos-menu.is-mobile-ui .kos-settings-brand {
+      #kos-menu.is-mobile-ui .kos-panel-brand {
         flex-direction: row;
         align-items: center;
         gap: 6px;
         flex: 1;
         min-width: 0;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-logo-sm {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-logo-sm {
         width: 22px;
         margin: 0;
         flex-shrink: 0;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-heading {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-heading {
         margin: 0;
         font-size: 16px;
         letter-spacing: -0.03em;
@@ -2385,7 +2429,7 @@ export class MainMenu {
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-tabs {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-tabs {
         margin: 2px 0 0;
         flex-wrap: nowrap;
         gap: 0;
@@ -2394,14 +2438,14 @@ export class MainMenu {
         scrollbar-width: none;
         border-bottom-color: rgba(10, 30, 80, 0.08);
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-tabs::-webkit-scrollbar { display: none; }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-tabs::-webkit-scrollbar { display: none; }
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-tab {
         flex: 1 0 auto;
         min-width: 0;
         padding: 7px 8px 8px;
         font-size: 12px;
       }
-      #kos-menu.is-mobile-ui .kos-settings-body {
+      #kos-menu.is-mobile-ui .kos-panel-body {
         flex: 1 1 auto;
         min-height: 0;
         overflow-x: hidden;
@@ -2411,25 +2455,61 @@ export class MainMenu {
         padding: 8px 0 6px;
         scrollbar-width: thin;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab-panel.is-on {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-tab-panel.is-on {
         padding-bottom: 4px;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-hint {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-hint {
         margin: 0 0 8px;
         font-size: 11.5px;
         line-height: 1.35;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-section-label {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-hint.tight-left {
+        margin: 4px 0 8px;
+        font-size: 11px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-section-label {
         margin: 8px 0 6px;
         font-size: 9px;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-chip-row {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-chip-row {
         gap: 5px;
         margin-bottom: 10px;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-chip {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-chip {
         padding: 7px 6px;
         font-size: 11px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-btn-primary {
+        min-height: 44px;
+        font-size: 13px;
+        margin-top: 2px;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-btn-ghost-line {
+        min-height: 40px;
+        margin-top: 6px;
+        font-size: 13px;
+        justify-content: center;
+      }
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-match-opt {
+        margin: 4px 0 0;
+        padding: 8px 9px;
+      }
+      #kos-menu.is-mobile-ui .kos-mp-rooms {
+        max-height: min(26vh, 160px);
+        margin: 0;
+      }
+      #kos-menu.is-mobile-ui .kos-mp-room {
+        padding: 9px 10px;
+        font-size: 13px;
+      }
+      #kos-menu.is-mobile-ui .kos-mp-or { display: none; }
+      #kos-menu.is-mobile-ui .kos-field-inline {
+        margin-bottom: 6px;
+      }
+      #kos-menu.is-mobile-ui .kos-field-inline input[type=number] {
+        max-width: 78px;
+        font-size: 16px;
+        padding: 8px 6px;
       }
       #kos-menu.is-mobile-ui .kos-mset { gap: 6px; }
       #kos-menu.is-mobile-ui .kos-mset-card {
@@ -2515,11 +2595,22 @@ export class MainMenu {
         padding-right: 0;
         gap: 2px;
       }
-      #kos-menu.is-mobile-ui .kos-shell-settings .kos-btn-ghost {
+      #kos-menu.is-mobile-ui .kos-shell-panel .kos-btn-ghost {
         margin-top: 8px;
         min-height: 38px;
         font-size: 12px;
         padding: 8px 12px;
+      }
+      #kos-menu.is-mobile-ui .kos-xhair-card .kos-xhair-preview-wrap {
+        margin: 0 0 8px;
+      }
+      #kos-menu.is-mobile-ui .kos-panel-body .kos-slider {
+        gap: 0;
+        padding: 2px 0;
+        font-size: 11px;
+      }
+      #kos-menu.is-mobile-ui .kos-panel-body .kos-slider input[type=range] {
+        height: 22px;
       }
 
       /* Wide / short phones (iPhone 11 landscape): logo beside buttons */
@@ -2562,29 +2653,30 @@ export class MainMenu {
           padding: 7px 2px 6px;
           font-size: 14px;
         }
-        #kos-menu.is-mobile-ui .kos-shell-sub {
-          max-height: calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-          padding: 14px 16px 16px;
+        #kos-menu.is-mobile-ui .kos-logo-load {
+          width: min(110px, 22vw, 36vh);
         }
-        #kos-menu.is-mobile-ui .kos-shell-settings {
+        #kos-menu.is-mobile-ui .kos-load-wrap {
+          margin-top: 10px;
+          width: min(200px, 40vw);
+        }
+        #kos-menu.is-mobile-ui .kos-shell-panel {
           padding:
             max(4px, env(safe-area-inset-top))
             max(10px, env(safe-area-inset-right))
             max(6px, env(safe-area-inset-bottom))
             max(10px, env(safe-area-inset-left));
         }
-        #kos-menu.is-mobile-ui .kos-shell-settings .kos-logo-sm { width: 18px; }
-        #kos-menu.is-mobile-ui .kos-shell-settings .kos-heading { font-size: 15px; }
-        #kos-menu.is-mobile-ui .kos-shell-settings .kos-tab { padding: 5px 8px 6px; font-size: 11px; }
-        #kos-menu.is-mobile-ui .kos-settings-body { padding: 6px 0 4px; }
+        #kos-menu.is-mobile-ui .kos-shell-panel .kos-logo-sm { width: 18px; }
+        #kos-menu.is-mobile-ui .kos-shell-panel .kos-heading { font-size: 15px; }
+        #kos-menu.is-mobile-ui .kos-shell-panel .kos-tab { padding: 5px 8px 6px; font-size: 11px; }
+        #kos-menu.is-mobile-ui .kos-panel-body { padding: 6px 0 4px; }
         #kos-menu.is-mobile-ui .kos-mset { gap: 5px; }
         #kos-menu.is-mobile-ui .kos-mset-card { padding: 6px 8px; }
         #kos-menu.is-mobile-ui .kos-mset-head { margin-bottom: 4px; }
         #kos-menu.is-mobile-ui .kos-seg button { padding: 5px 4px; font-size: 10.5px; }
-        #kos-menu.is-mobile-ui .kos-shell-sub .kos-logo-sm { width: min(72px, 18vw); }
-        #kos-menu.is-mobile-ui .kos-shell-sub:not(.kos-shell-settings) .kos-heading { font-size: 20px; margin: 4px 0; }
-        #kos-menu.is-mobile-ui .kos-hint { margin-bottom: 10px; font-size: 12px; }
-        #kos-menu.is-mobile-ui .kos-chip { padding: 9px 6px; font-size: 12px; }
+        #kos-menu.is-mobile-ui .kos-hint { margin-bottom: 6px; font-size: 11px; }
+        #kos-menu.is-mobile-ui .kos-chip { padding: 7px 5px; font-size: 11px; }
       }
 
       @media (prefers-reduced-motion: reduce) {
