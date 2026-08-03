@@ -378,6 +378,8 @@ export class InputManager implements IUpdatable {
   }
 
   onKeyDown(event: KeyboardEvent): void {
+    this.blockBrowserShortcut(event)
+
     if (event.key === 'Tab') {
       event.preventDefault()
       if (!event.repeat && this.gameplayEnabled) {
@@ -403,10 +405,37 @@ export class InputManager implements IUpdatable {
     }
 
     if (!this.gameplayEnabled) return
+    // Keep Space from scrolling the page while playing
+    if (event.code === 'Space' || event.key === ' ') event.preventDefault()
     const code = this.normalizeKey(event)
     const action = this.codeToAction.get(code)
     if (action && action !== Key.Left_Click && action !== Key.Right_Click) {
       this.keys.get(action)?.setPressed(true)
+    }
+  }
+
+  /**
+   * Cancel the browser's own shortcuts (save, bookmark, find, print, reload, history)
+   * without consuming the key — the press still reaches the gameplay bindings, so a
+   * key bound to Ctrl keeps working and Ctrl+W still walks forward while crouched.
+   * Ctrl+W / Ctrl+N / Ctrl+T are reserved by the browser and may still close or open a tab.
+   */
+  private blockBrowserShortcut(event: KeyboardEvent): void {
+    if (!this.gameplayEnabled) return
+    if (Game.getInstance().isCommandConsoleOpen()) return
+    const tag = (event.target as HTMLElement | null)?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+    // A bare modifier press is never a shortcut and may be bound to crouch / walk
+    if (event.key === 'Control' || event.key === 'Shift' || event.key === 'Alt' || event.key === 'Meta') {
+      return
+    }
+
+    // Leave the browser's own window controls alone
+    if (event.key === 'F11' || event.key === 'F12') return
+
+    if (event.ctrlKey || event.metaKey || event.altKey || /^F\d{1,2}$/.test(event.key)) {
+      event.preventDefault()
     }
   }
 

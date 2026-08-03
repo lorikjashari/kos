@@ -124,6 +124,9 @@ export class Game implements IUpdatable {
   /** 0 = uncapped (follows display, including 120Hz ProMotion); else hard cap. */
   private fpsCap = 0
   private lastFrameTS = 0
+  /** Real time elapsed since the last drawn frame — kept so a capped frame rate
+   * still animates at real speed instead of losing the skipped frames' time. */
+  private renderAcc = 0
   private displayHz = 60
   /** /editormode sandbox */
   public editorActive = false
@@ -1805,6 +1808,7 @@ export class Game implements IUpdatable {
     if (dt > 0.05) dt = 0.05
 
     if (this.matchStarted && this.matchPaused) {
+      this.renderAcc = 0
       if (this.shouldRenderFrame(now)) this.renderer.update(0)
       return
     }
@@ -1857,8 +1861,14 @@ export class Game implements IUpdatable {
     this.physics.update(dt)
     this.currentPlayer.player.postPhysics(dt)
 
+    // Hand the renderer every second that passed since the last draw, not just this
+    // frame's slice — otherwise a frame cap slows viewmodel / camera animation down to
+    // a fraction of real speed while the world keeps running at full rate.
+    this.renderAcc += dt
     if (!this.shouldRenderFrame(now)) return
-    this.renderer.update(dt)
+    const renderDt = Math.min(0.05, this.renderAcc)
+    this.renderAcc = 0
+    this.renderer.update(renderDt)
   }
 
   private shouldRenderFrame(now: number): boolean {
@@ -1875,6 +1885,7 @@ export class Game implements IUpdatable {
   public startUpdateLoop() {
     this.lastUpdateTS = performance.now()
     this.lastFrameTS = 0
+    this.renderAcc = 0
     this.update()
   }
   public addPlayer(playerWrapper: PlayerWrapper) {
