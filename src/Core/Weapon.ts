@@ -21,6 +21,21 @@ export interface WeaponConfig {
   /** KoS spray pattern: pitch up / yaw side per shot index */
   recoilPattern: RecoilKick[]
   firstShotMultiplier: number
+  /**
+   * Cone half-angles in radians, summed by Player.currentSpread(). Base applies to
+   * a standing first shot and is deliberately tiny so aim still decides duels; the
+   * rest punish moving, jumping and holding the trigger.
+   */
+  baseSpread: number
+  moveSpread: number
+  airSpread: number
+  spraySpread: number
+  /** Beyond this distance body/leg damage tapers toward damageFalloffMin */
+  falloffStart: number
+  falloffEnd: number
+  damageFalloffMin: number
+  /** Spare rounds carried outside the mag */
+  reserveAmmo: number
 }
 
 /** Approximate AK-47 spray (pitch up, yaw left/right) — CS-inspired */
@@ -88,6 +103,14 @@ export const WEAPONS: Record<string, WeaponConfig> = {
     bulletSpeed: 900,
     recoilPattern: AK_RECOIL,
     firstShotMultiplier: 0.55,
+    baseSpread: 0.0006,
+    moveSpread: 0.019,
+    airSpread: 0.036,
+    spraySpread: 0.012,
+    falloffStart: 45,
+    falloffEnd: 130,
+    damageFalloffMin: 0.68,
+    reserveAmmo: 90,
   },
   Usp: {
     key: 'Usp',
@@ -104,6 +127,14 @@ export const WEAPONS: Record<string, WeaponConfig> = {
     bulletSpeed: 850,
     recoilPattern: USP_RECOIL,
     firstShotMultiplier: 0.7,
+    baseSpread: 0.0009,
+    moveSpread: 0.014,
+    airSpread: 0.03,
+    spraySpread: 0.009,
+    falloffStart: 30,
+    falloffEnd: 95,
+    damageFalloffMin: 0.6,
+    reserveAmmo: 60,
   },
   Knife: {
     key: 'Knife',
@@ -120,6 +151,14 @@ export const WEAPONS: Record<string, WeaponConfig> = {
     bulletSpeed: 0,
     recoilPattern: [{ pitch: 0.008, yaw: 0 }],
     firstShotMultiplier: 1,
+    baseSpread: 0,
+    moveSpread: 0,
+    airSpread: 0,
+    spraySpread: 0,
+    falloffStart: 0,
+    falloffEnd: 0,
+    damageFalloffMin: 1,
+    reserveAmmo: 0,
   },
   AWP: {
     key: 'AWP',
@@ -147,6 +186,16 @@ export const WEAPONS: Record<string, WeaponConfig> = {
       { pitch: 0.018, yaw: 0.0 },
     ],
     firstShotMultiplier: 1,
+    // Hipfired it is wildly inaccurate; scoped it is exact (see Player.currentSpread)
+    baseSpread: 0.012,
+    moveSpread: 0.05,
+    airSpread: 0.07,
+    spraySpread: 0,
+    // A sniper that stops one-shotting at range stops being a sniper
+    falloffStart: 0,
+    falloffEnd: 0,
+    damageFalloffMin: 1,
+    reserveAmmo: 30,
   },
 }
 

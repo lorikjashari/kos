@@ -11,6 +11,7 @@ import {
   type NetRole,
 } from './NetTypes'
 import { roomDirectory, RoomDirectory } from './RoomDirectory'
+import type { MatchLength } from '../Core/MatchStats'
 
 export type MultiplayerStartConfig = {
   mode: 'host' | 'join'
@@ -19,6 +20,7 @@ export type MultiplayerStartConfig = {
   difficulty?: 'easy' | 'medium' | 'hard'
   /** Host-only: how many bots to fill with (0–10). 0 = 1v1 / pure PvP. */
   botCount?: number
+  matchLength?: MatchLength
 }
 
 type HumanRec = { id: string; name: string }
@@ -227,13 +229,20 @@ export class MultiplayerMatch {
         break
       }
       case 'killfeed': {
-        Game.getInstance().renderer.hud?.pushKillFeed({
-          killer: msg.killer,
-          victim: msg.victim,
-          weaponKey: msg.weapon,
-          headshot: msg.headshot,
-          isLocal: msg.killer === this.localName || msg.victim === this.localName,
-        })
+        // Damage against a human is applied on the victim's client, so this feed is
+        // the only signal the shooter gets that the kill actually landed. Without
+        // it, kills against real players never reached the local scoreboard.
+        if (msg.killer === this.localName && msg.victim !== this.localName) {
+          Game.getInstance().onNetworkKill(msg.victim, msg.weapon, msg.headshot)
+        } else {
+          Game.getInstance().renderer.hud?.pushKillFeed({
+            killer: msg.killer,
+            victim: msg.victim,
+            weaponKey: msg.weapon,
+            headshot: msg.headshot,
+            isLocal: msg.victim === this.localName,
+          })
+        }
         if (this.isHost) this.session.broadcast(msg, fromId)
         break
       }

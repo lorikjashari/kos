@@ -10,7 +10,7 @@ import { GroundRaycastProperty, HitscanProperty, HitscanResult } from '../Interf
 import { AmmoInstance } from '../Physics/Ammo'
 import { WeaponConfig, getWeaponConfig } from './Weapon'
 import { raycastBotMeshes } from './BotMeshHit'
-import { damageForBodyPart } from './BodyPart'
+import { damageAtRange } from './BodyPart'
 import { FPSMesh } from '../View/Mesh/FPSMesh'
 import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
 
@@ -81,9 +81,12 @@ export class Player extends Pawn implements IUpdatable {
     Knife: 0,
     AWP: 10,
   }
+  /** Spare rounds outside the mag, per weapon. Reloads draw from here. */
+  private reserveByWeapon: Record<string, number> = {}
+  /** Kevlar every spawn — halves incoming damage until it is chewed through */
+  public static readonly SPAWN_ARMOR = 50
   public health = 100
-  public armor = 0
-  public money = 800
+  public armor = Player.SPAWN_ARMOR
   public isWalking = false
   public isCrouching = false
   public recoilIndex = 0
@@ -613,8 +616,12 @@ export class Player extends Pawn implements IUpdatable {
     this.reloadTimer -= dt
     if (this.reloadTimer <= 0) {
       this.isReloading = false
-      this.ammoInMag = this.currentWeapon.magazineSize
-      this.ammoByWeapon[this.currentWeapon.key] = this.ammoInMag
+      const key = this.currentWeapon.key
+      const needed = this.currentWeapon.magazineSize - this.ammoInMag
+      const taken = Math.min(needed, this.reserveAmmo(key))
+      this.ammoInMag += taken
+      this.reserveByWeapon[key] = this.reserveAmmo(key) - taken
+      this.ammoByWeapon[key] = this.ammoInMag
       this.reloadTimer = 0
     }
   }
@@ -648,10 +655,20 @@ export class Player extends Pawn implements IUpdatable {
     this.mapSpeedScale = Math.max(0.25, scale)
   }
 
+  public reserveAmmo(weaponKey = this.currentWeapon.key): number {
+    return Math.max(0, this.reserveByWeapon[weaponKey] ?? 0)
+  }
+
+  public addReserveAmmo(weaponKey: string, rounds: number): void {
+    const cap = getWeaponConfig(weaponKey).reserveAmmo
+    this.reserveByWeapon[weaponKey] = Math.min(cap, this.reserveAmmo(weaponKey) + Math.max(0, rounds))
+  }
+
   public startReload(): boolean {
     if (this.isReloading) return false
     if (this.currentWeapon.fireMode === 'melee') return false
     if (this.ammoInMag >= this.currentWeapon.magazineSize) return false
+    if (this.reserveAmmo() <= 0) return false
     this.isReloading = true
     this.reloadTimer = this.currentWeapon.reloadTime
     this.recoilIndex = 0
@@ -731,13 +748,53 @@ export class Player extends Pawn implements IUpdatable {
     }
   }
 
+  /**
+   * Cone half-angle in radians for this shot. A standing first shot is dead
+   * accurate so precision aiming still rewards; running and spraying open it up,
+   * which is what makes holding an angle and closing distance mean anything.
+   */
+  private currentSpread(): number {
+    const weapon = this.currentWeapon
+    if (weapon.fireMode === 'melee') return 0
+    // A scoped AWP is a precision tool — never jitter it
+    if (weapon.key === 'AWP') {
+      const renderer = Game.getInstance().currentPlayer?.renderer
+      if (renderer instanceof FPSRenderer && renderer.isScoped()) return 0
+    }
+
+    const speed = Math.hypot(this.velocity.x, this.velocity.z)
+    const moving = Math.min(1, speed / 8)
+    const airborne = this.isOnGround ? 0 : 1
+    const spray = Math.min(1, this.recoilIndex / 10)
+
+    const base = weapon.baseSpread
+    return base + moving * weapon.moveSpread + airborne * weapon.airSpread + spray * weapon.spraySpread
+  }
+
+  /** Random direction inside a cone around `dir`. */
+  private applySpread(dir: Vector3D, spread: number): Vector3D {
+    if (spread <= 0) return dir
+    const up = Math.abs(dir.y) > 0.95 ? new Vector3D(1, 0, 0) : new Vector3D(0, 1, 0)
+    const right = new Vector3D().crossVectors(dir, up).normalize()
+    const trueUp = new Vector3D().crossVectors(right, dir).normalize()
+    const angle = Math.random() * Math.PI * 2
+    // sqrt keeps the distribution even across the disc instead of centre-heavy
+    const radius = Math.sqrt(Math.random()) * spread
+    return dir
+      .clone()
+      .add(right.multiplyScalar(Math.cos(angle) * radius))
+      .add(trueUp.multiplyScalar(Math.sin(angle) * radius))
+      .normalize()
+  }
+
   public shoot(): HitscanResult {
     if (this.isDead) {
       return { hasHit: false, hitPosition: undefined }
     }
-    const { from, to } = this.createHitscanPoints(this.currentWeapon.maxRange)
-    const dir = this.lookingDirection.clone().normalize()
     const maxRange = this.currentWeapon.maxRange
+    const from = this.position.clone().add(new Vector3D(0, this.eyeOffsetY, 0))
+    const dir = this.applySpread(this.lookingDirection.clone().normalize(), this.currentSpread())
+    const to = new Vector3D().addVectors(from, dir.clone().multiplyScalar(maxRange))
 
     const hitScanResult: HitscanResult = {
       hasHit: false,
@@ -785,7 +842,7 @@ export class Player extends Pawn implements IUpdatable {
       hitScanResult.botIndex = meshHit.botIndex
       const bot = game.trainingBots[meshHit.botIndex]
       if (bot?.isNetworkPuppet) {
-        const damage = damageForBodyPart(meshHit.part, this.currentWeapon.key)
+        const damage = damageAtRange(meshHit.part, this.currentWeapon.key, meshDist)
         hitScanResult.damageDealt = damage
         const headshot = meshHit.part === 'head'
         game.getMultiplayer()?.sendHitToTarget({
@@ -796,7 +853,7 @@ export class Player extends Pawn implements IUpdatable {
           weapon: this.currentWeapon.key,
         })
       } else if (bot) {
-        const result = bot.takeDamage(meshHit.part, this.currentWeapon.key, true)
+        const result = bot.takeDamage(meshHit.part, this.currentWeapon.key, true, meshDist)
         hitScanResult.damageDealt = result.damage
         hitScanResult.killed = result.killed
         if (result.killed) {
@@ -820,6 +877,8 @@ export class Player extends Pawn implements IUpdatable {
     if (this.currentWeapon.fireMode !== 'melee') {
       this.ammoInMag = Math.max(0, this.ammoInMag - 1)
       this.ammoByWeapon[this.currentWeapon.key] = this.ammoInMag
+      game.stats.shotsFired++
+      if (hitScanResult.hitBot) game.stats.shotsHit++
     }
     // After the shot is spent — refill to full mag if kill refill is on
     if (hitScanResult.killed && game.refillAmmoOnKill) {
@@ -830,11 +889,13 @@ export class Player extends Pawn implements IUpdatable {
     return hitScanResult
   }
 
-  /** Instant full mag (used by refill-on-kill) */
+  /** Instant full mag and topped-up reserve (used by refill-on-kill) */
   public refillCurrentMag(): void {
     if (this.currentWeapon.fireMode === 'melee') return
+    const key = this.currentWeapon.key
     this.ammoInMag = this.currentWeapon.magazineSize
-    this.ammoByWeapon[this.currentWeapon.key] = this.ammoInMag
+    this.ammoByWeapon[key] = this.ammoInMag
+    this.reserveByWeapon[key] = getWeaponConfig(key).reserveAmmo
     this.isReloading = false
     this.reloadTimer = 0
   }
@@ -845,6 +906,12 @@ export class Player extends Pawn implements IUpdatable {
     const primaryKey = this.primaryWeaponKey
     this.currentWeapon = getWeaponConfig(primaryKey)
     this.rateOfFire = this.currentWeapon.rateOfFire
+    this.reserveByWeapon = {
+      AK47: primaryKey === 'AK47' ? getWeaponConfig('AK47').reserveAmmo : 0,
+      Usp: getWeaponConfig('Usp').reserveAmmo,
+      Knife: 0,
+      AWP: primaryKey === 'AWP' ? getWeaponConfig('AWP').reserveAmmo : 0,
+    }
     this.ammoByWeapon = {
       AK47: primaryKey === 'AK47' ? getWeaponConfig('AK47').magazineSize : 0,
       Usp: getWeaponConfig('Usp').magazineSize,
@@ -948,6 +1015,7 @@ export class Player extends Pawn implements IUpdatable {
     this.jumpIgnoreGroundMs = 0
     this.jumpRechargeTimer = this.jumpRechargeTime
     this.health = 100
+    this.armor = Player.SPAWN_ARMOR
     this.isDead = false
     this.isAlive = true
     this.deathTimer = 0

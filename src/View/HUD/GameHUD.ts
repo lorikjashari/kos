@@ -2,6 +2,7 @@ import { Player } from '../../Core/Player'
 import { WeaponIconRenderer } from './WeaponIconRenderer'
 import { Game } from '../../Game'
 import { isTouchDevice } from '../../UI/MobileDevice'
+import { formatClock, formatPlaytime, ratio, type MatchResult } from '../../Core/MatchStats'
 
 type FeedPush = {
   killer: string
@@ -10,6 +11,29 @@ type FeedPush = {
   headshot: boolean
   assist?: string
   isLocal: boolean
+}
+
+export type MatchStatus = {
+  kills: number
+  leaderKills: number
+  killLimit: number
+  /** null when the mode has no clock */
+  secondsLeft: number | null
+}
+
+function ordinal(n: number): string {
+  const rem100 = n % 100
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`
+  switch (n % 10) {
+    case 1:
+      return `${n}st`
+    case 2:
+      return `${n}nd`
+    case 3:
+      return `${n}rd`
+    default:
+      return `${n}th`
+  }
 }
 
 export class GameHUD {
@@ -22,6 +46,9 @@ export class GameHUD {
   private healthText!: HTMLElement
   private healthFill!: HTMLElement
   private ammoFill!: HTMLElement
+  private armorWrapEl!: HTMLElement
+  private armorText!: HTMLElement
+  private armorFill!: HTMLElement
   private iconRenderer = new WeaponIconRenderer()
   private lastAmmo = -1
   private lastWeapon = ''
@@ -45,8 +72,18 @@ export class GameHUD {
   private sbRowsEl!: HTMLElement
   private pauseMenuEl!: HTMLElement
   private pauseBtnEl!: HTMLElement
+  private matchBarEl!: HTMLElement
+  private matchYouEl!: HTMLElement
+  private matchGoalEl!: HTMLElement
+  private matchClockEl!: HTMLElement
+  private matchLeadEl!: HTMLElement
+  private resultEl!: HTMLElement
+  private resultHandlers: { onRematch: () => void; onMenu: () => void } | null = null
+  private lastMatchStatusKey = ''
   private damageFlashUntil = 0
   private lastHealthShown = 100
+  private lastReserve = -1
+  private lastArmorShown = -1
   private deathShown = false
   private lastLockdownShown = -1
   private feedId = 0
@@ -70,6 +107,13 @@ export class GameHUD {
             <div class="cs-vital-bar"><div class="cs-vital-fill" id="hud-hp-fill"></div></div>
           </div>
         </div>
+        <div class="cs-vital cs-vital-armor" id="hud-armor-wrap" aria-hidden="true">
+          <div class="cs-vital-icon is-armor">◈</div>
+          <div class="cs-vital-main">
+            <div class="cs-vital-num" id="hud-armor">0</div>
+            <div class="cs-vital-bar"><div class="cs-vital-fill is-armor" id="hud-armor-fill"></div></div>
+          </div>
+        </div>
       </div>
 
       <div class="cs-bottom-right">
@@ -85,6 +129,17 @@ export class GameHUD {
           </div>
           <div class="cs-ammo-bar"><div class="cs-ammo-fill" id="hud-ammo-fill"></div></div>
         </div>
+      </div>
+
+      <div class="cs-matchbar" id="hud-matchbar" aria-hidden="true">
+        <div class="cs-matchbar-score">
+          <span class="cs-matchbar-you" id="hud-match-you">0</span>
+          <span class="cs-matchbar-slash">/</span>
+          <span class="cs-matchbar-goal" id="hud-match-goal">30</span>
+        </div>
+        <div class="cs-matchbar-sep"></div>
+        <div class="cs-matchbar-clock" id="hud-match-clock">10:00</div>
+        <div class="cs-matchbar-lead" id="hud-match-lead"></div>
       </div>
 
       <div class="cs-killfeed" id="hud-killfeed" aria-live="polite"></div>
@@ -147,6 +202,34 @@ export class GameHUD {
             <span class="cs-sb-col">A</span>
           </div>
           <div class="cs-sb-rows" id="hud-sb-rows"></div>
+        </div>
+      </div>
+
+      <div class="cs-result" id="hud-result" aria-hidden="true">
+        <div class="cs-result-panel">
+          <div class="cs-result-kicker" id="hud-result-kicker">Match over</div>
+          <div class="cs-result-title" id="hud-result-title">Victory</div>
+          <div class="cs-result-sub" id="hud-result-sub"></div>
+
+          <div class="cs-result-stats" id="hud-result-stats"></div>
+
+          <div class="cs-result-board">
+            <div class="cs-result-head">
+              <span class="cs-sb-col rank">#</span>
+              <span class="cs-sb-col name">Player</span>
+              <span class="cs-sb-col">K</span>
+              <span class="cs-sb-col">D</span>
+              <span class="cs-sb-col">A</span>
+            </div>
+            <div class="cs-result-rows" id="hud-result-rows"></div>
+          </div>
+
+          <div class="cs-result-career" id="hud-result-career"></div>
+
+          <div class="cs-result-actions">
+            <button type="button" class="cs-result-btn is-primary" data-result="rematch">Play again</button>
+            <button type="button" class="cs-result-btn" data-result="menu">Back to menu</button>
+          </div>
         </div>
       </div>
 
@@ -219,6 +302,9 @@ export class GameHUD {
     this.healthText = document.getElementById('hud-hp')!
     this.healthFill = document.getElementById('hud-hp-fill')!
     this.ammoFill = document.getElementById('hud-ammo-fill')!
+    this.armorWrapEl = document.getElementById('hud-armor-wrap')!
+    this.armorText = document.getElementById('hud-armor')!
+    this.armorFill = document.getElementById('hud-armor-fill')!
     this.hitmarkerEl = document.getElementById('hud-hitmarker')!
     this.damageFlashEl = document.getElementById('hud-damage-flash')!
     this.deathEl = document.getElementById('hud-death')!
@@ -231,6 +317,21 @@ export class GameHUD {
     this.lockdownLabelEl = document.getElementById('hud-lockdown-label')!
     this.loadoutEl = document.getElementById('hud-loadout')!
     this.killFeedEl = document.getElementById('hud-killfeed')!
+    this.matchBarEl = document.getElementById('hud-matchbar')!
+    this.matchYouEl = document.getElementById('hud-match-you')!
+    this.matchGoalEl = document.getElementById('hud-match-goal')!
+    this.matchClockEl = document.getElementById('hud-match-clock')!
+    this.matchLeadEl = document.getElementById('hud-match-lead')!
+    this.resultEl = document.getElementById('hud-result')!
+    this.resultEl.querySelectorAll('[data-result]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const action = (btn as HTMLElement).dataset.result
+        if (action === 'rematch') this.resultHandlers?.onRematch()
+        else this.resultHandlers?.onMenu()
+      })
+    })
     const blockSelect = (e: Event) => e.preventDefault()
     for (const el of [this.root, this.topRoot]) {
       el.addEventListener('selectstart', blockSelect)
@@ -332,7 +433,10 @@ export class GameHUD {
   private syncTopLayer(): void {
     const pauseOn = !!this.pauseMenuEl?.classList.contains('is-open')
     const scoresOn = !!this.scoreboardEl?.classList.contains('is-on')
-    this.topRoot.style.zIndex = pauseOn || scoresOn ? '50' : ''
+    const resultOn = this.isMatchResultOpen()
+    this.topRoot.style.zIndex = pauseOn || scoresOn || resultOn ? '50' : ''
+    // The pause button must not sit on top of the results panel
+    this.pauseMenuEl?.classList.toggle('is-hidden', resultOn)
   }
 
   private refreshScoreboard(): void {
@@ -606,6 +710,7 @@ export class GameHUD {
         opacity: 1;
         visibility: visible;
       }
+      .cs-pause-menu.is-hidden { display: none; }
       .cs-pause-menu {
         position: absolute;
         top: max(12px, env(safe-area-inset-top));
@@ -801,6 +906,14 @@ export class GameHUD {
       .cs-ammo-fill { transform-origin: right center; }
       .cs-vital-fill.is-low { background: #ff4d4d; }
       .cs-ammo-fill.is-low { background: #ff5555; }
+      .cs-ammo-reserve.is-out { color: #ff6b6b; }
+
+      .cs-vital-armor { display: none; }
+      .cs-vital-armor.is-on { display: flex; }
+      .cs-vital-icon.is-armor { color: #8fc3ff; font-size: calc(var(--hud-icon) * 0.85); }
+      .cs-vital-fill.is-armor { background: #6fb2ff; }
+      .cs-vital-armor .cs-vital-num { font-size: calc(var(--hud-num) * 0.62); opacity: 0.92; }
+      .cs-vital-armor .cs-vital-bar { width: calc(var(--hud-bar-w) * 0.72); }
 
       .cs-weapon-row {
         display: flex;
@@ -1444,13 +1557,316 @@ export class GameHUD {
         from { background-position: 0 0; }
         to { background-position: 0 40px; }
       }
+
+      /* ---- match status bar ---- */
+      .cs-matchbar {
+        position: absolute;
+        top: max(10px, env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 14px;
+        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(10,14,20,0.72), rgba(10,14,20,0.5));
+        border: 1px solid rgba(255,255,255,0.1);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+      .cs-matchbar.is-on { display: flex; }
+      .cs-matchbar.is-close { border-color: rgba(255,170,60,0.5); }
+      .cs-matchbar-score { display: flex; align-items: baseline; gap: 3px; }
+      .cs-matchbar-you { font-size: 19px; color: #fff; }
+      .cs-matchbar-slash { font-size: 13px; opacity: 0.45; }
+      .cs-matchbar-goal { font-size: 13px; opacity: 0.7; }
+      .cs-matchbar.no-goal .cs-matchbar-slash,
+      .cs-matchbar.no-goal .cs-matchbar-goal { display: none; }
+      .cs-matchbar-sep { width: 1px; height: 16px; background: rgba(255,255,255,0.16); }
+      .cs-matchbar-clock { font-size: 15px; font-variant-numeric: tabular-nums; opacity: 0.9; }
+      .cs-matchbar-clock.is-urgent { color: #ff8f5e; animation: kos-clock-pulse 1s ease-in-out infinite; }
+      .cs-matchbar-lead {
+        display: none;
+        font-size: 12px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        background: rgba(255,120,90,0.2);
+        color: #ffb9a4;
+      }
+      .cs-matchbar-lead.is-on { display: block; }
+      @keyframes kos-clock-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+      /* ---- match results ---- */
+      .cs-result {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: radial-gradient(120% 90% at 50% 0%, rgba(12,18,28,0.86), rgba(4,6,10,0.95));
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        pointer-events: auto;
+        z-index: 60;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      .cs-result.is-on { display: flex; }
+      .cs-result-panel {
+        width: min(560px, 100%);
+        max-height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 22px;
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(20,26,36,0.96), rgba(12,16,24,0.96));
+        border: 1px solid rgba(255,255,255,0.1);
+        box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+        animation: kos-result-in 0.3s cubic-bezier(0.2,0.8,0.3,1) both;
+      }
+      @keyframes kos-result-in {
+        from { opacity: 0; transform: translateY(14px) scale(0.98); }
+        to { opacity: 1; transform: none; }
+      }
+      .cs-result-kicker {
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        opacity: 0.55;
+      }
+      .cs-result-title { font-size: 38px; font-weight: 800; line-height: 1; }
+      .cs-result-title.is-win {
+        background: linear-gradient(180deg, #ffe08a, #ffb038);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .cs-result-sub { font-size: 13px; opacity: 0.7; margin-top: -6px; }
+      .cs-result-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+        gap: 8px;
+      }
+      .cs-result-stat {
+        padding: 9px 6px;
+        border-radius: 10px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.06);
+        text-align: center;
+      }
+      .cs-result-stat-v { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .cs-result-stat-l { font-size: 10px; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.06em; }
+      .cs-result-board {
+        border-radius: 12px;
+        background: rgba(0,0,0,0.28);
+        border: 1px solid rgba(255,255,255,0.06);
+        overflow: hidden;
+      }
+      .cs-result-head, .cs-result-row {
+        display: grid;
+        grid-template-columns: 28px 1fr 40px 40px 40px;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 12px;
+        font-size: 13px;
+      }
+      .cs-result-head {
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        opacity: 0.45;
+        border-bottom: 1px solid rgba(255,255,255,0.07);
+      }
+      .cs-result-rows { max-height: 190px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      .cs-result-row + .cs-result-row { border-top: 1px solid rgba(255,255,255,0.04); }
+      .cs-result-row.is-you { background: rgba(90,160,255,0.14); font-weight: 700; }
+      .cs-result-row.is-top .rank { color: #ffc55c; }
+      .cs-result-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .cs-result-career {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 14px;
+        padding-top: 4px;
+        border-top: 1px solid rgba(255,255,255,0.07);
+      }
+      .cs-result-career-title {
+        width: 100%;
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        opacity: 0.45;
+      }
+      .cs-result-career-bit { display: flex; align-items: baseline; gap: 5px; font-size: 12px; }
+      .cs-result-career-bit b { font-size: 15px; font-variant-numeric: tabular-nums; }
+      .cs-result-career-bit span { opacity: 0.55; }
+      .cs-result-actions { display: flex; gap: 10px; }
+      .cs-result-btn {
+        flex: 1;
+        padding: 12px 16px;
+        border-radius: 11px;
+        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(255,255,255,0.06);
+        color: #fff;
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 0.12s ease, background 0.15s ease;
+      }
+      .cs-result-btn:hover { background: rgba(255,255,255,0.12); }
+      .cs-result-btn:active { transform: scale(0.98); }
+      .cs-result-btn.is-primary {
+        background: linear-gradient(180deg, #4d8dff, #2f6ae0);
+        border-color: rgba(140,180,255,0.5);
+      }
+      .cs-result-btn.is-primary:hover { background: linear-gradient(180deg, #5f9bff, #3b78f0); }
+
+      @media (max-width: 560px), (max-height: 460px) {
+        .cs-result-panel { padding: 16px; gap: 11px; border-radius: 14px; }
+        .cs-result-title { font-size: 28px; }
+        .cs-result-stats { grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); gap: 6px; }
+        .cs-result-stat { padding: 7px 4px; }
+        .cs-result-stat-v { font-size: 16px; }
+        .cs-result-rows { max-height: 132px; }
+        .cs-matchbar { padding: 4px 11px; gap: 8px; }
+        .cs-matchbar-you { font-size: 16px; }
+        .cs-matchbar-clock { font-size: 13px; }
+      }
     `
     document.head.appendChild(style)
   }
 
+  public setMatchStatus(status: MatchStatus | null): void {
+    if (!this.matchBarEl) return
+    if (!status) {
+      this.matchBarEl.classList.remove('is-on')
+      this.matchBarEl.setAttribute('aria-hidden', 'true')
+      this.lastMatchStatusKey = ''
+      return
+    }
+    const clock = status.secondsLeft === null ? '' : formatClock(status.secondsLeft)
+    const key = `${status.kills}|${status.killLimit}|${clock}|${status.leaderKills}`
+    if (key === this.lastMatchStatusKey) return
+    this.lastMatchStatusKey = key
+
+    this.matchBarEl.classList.add('is-on')
+    this.matchBarEl.setAttribute('aria-hidden', 'false')
+    this.matchYouEl.textContent = String(status.kills)
+    this.matchGoalEl.textContent = status.killLimit > 0 ? String(status.killLimit) : '∞'
+    this.matchBarEl.classList.toggle('no-goal', status.killLimit <= 0)
+    this.matchClockEl.textContent = clock
+    this.matchClockEl.style.display = clock ? '' : 'none'
+    this.matchBarEl.querySelector<HTMLElement>('.cs-matchbar-sep')!.style.display = clock ? '' : 'none'
+
+    const urgent = status.secondsLeft !== null && status.secondsLeft <= 30
+    this.matchClockEl.classList.toggle('is-urgent', urgent)
+
+    // Only worth showing who's ahead when it isn't you
+    const behind = status.leaderKills - status.kills
+    if (status.killLimit > 0 && behind > 0) {
+      this.matchLeadEl.textContent = `-${behind}`
+      this.matchLeadEl.classList.add('is-on')
+    } else {
+      this.matchLeadEl.classList.remove('is-on')
+    }
+    const close = status.killLimit > 0 && status.leaderKills >= status.killLimit - 3
+    this.matchBarEl.classList.toggle('is-close', close)
+  }
+
+  public showMatchResult(result: MatchResult, handlers: { onRematch: () => void; onMenu: () => void }): void {
+    if (!this.resultEl) return
+    this.resultHandlers = handlers
+    this.setMatchStatus(null)
+    this.hideDeath()
+    this.hideLoadoutPicker()
+
+    const kicker = document.getElementById('hud-result-kicker')!
+    const title = document.getElementById('hud-result-title')!
+    const sub = document.getElementById('hud-result-sub')!
+
+    kicker.textContent = result.reason === 'timeLimit' ? 'Time up' : 'Score limit reached'
+    title.textContent = result.won ? 'Victory' : `#${result.placement}`
+    title.classList.toggle('is-win', result.won)
+    sub.textContent = result.won
+      ? `You topped the board of ${result.totalPlayers} · ${formatClock(result.durationSec)}`
+      : `${ordinal(result.placement)} of ${result.totalPlayers} · ${formatClock(result.durationSec)}`
+
+    const kd = ratio(result.kills, result.deaths)
+    const stats: Array<[string, string]> = [
+      ['Kills', String(result.kills)],
+      ['Deaths', String(result.deaths)],
+      ['Assists', String(result.assists)],
+      ['K/D', kd.toFixed(2)],
+      ['Accuracy', `${Math.round(result.accuracy * 100)}%`],
+      ['Headshots', String(result.headshots)],
+      ['Best streak', String(result.bestStreak)],
+    ]
+    document.getElementById('hud-result-stats')!.innerHTML = stats
+      .map(
+        ([label, value]) =>
+          `<div class="cs-result-stat"><div class="cs-result-stat-v">${this.escapeHtml(
+            value
+          )}</div><div class="cs-result-stat-l">${this.escapeHtml(label)}</div></div>`
+      )
+      .join('')
+
+    document.getElementById('hud-result-rows')!.innerHTML = result.rows
+      .map(
+        (row, i) => `
+        <div class="cs-result-row${row.isYou ? ' is-you' : ''}${i === 0 ? ' is-top' : ''}">
+          <span class="cs-sb-col rank">${i + 1}</span>
+          <span class="cs-sb-col name">${this.escapeHtml(row.name)}</span>
+          <span class="cs-sb-col">${row.kills}</span>
+          <span class="cs-sb-col">${row.deaths}</span>
+          <span class="cs-sb-col">${row.assists}</span>
+        </div>`
+      )
+      .join('')
+
+    const c = result.career
+    const careerBits: Array<[string, string]> = [
+      ['Matches', String(c.matches)],
+      ['Wins', String(c.wins)],
+      ['Lifetime K/D', ratio(c.kills, c.deaths).toFixed(2)],
+      ['Best match', String(c.bestKills)],
+      ['Played', formatPlaytime(c.secondsPlayed)],
+    ]
+    document.getElementById('hud-result-career')!.innerHTML =
+      `<div class="cs-result-career-title">Career</div>` +
+      careerBits
+        .map(
+          ([label, value]) =>
+            `<div class="cs-result-career-bit"><b>${this.escapeHtml(value)}</b><span>${this.escapeHtml(
+              label
+            )}</span></div>`
+        )
+        .join('')
+
+    this.resultEl.classList.add('is-on')
+    this.resultEl.setAttribute('aria-hidden', 'false')
+    this.syncTopLayer()
+  }
+
+  public hideMatchResult(): void {
+    if (!this.resultEl) return
+    this.resultEl.classList.remove('is-on')
+    this.resultEl.setAttribute('aria-hidden', 'true')
+    this.resultHandlers = null
+    this.syncTopLayer()
+  }
+
+  public isMatchResultOpen(): boolean {
+    return !!this.resultEl?.classList.contains('is-on')
+  }
+
   private reserveFor(player: Player): number {
     if (player.currentWeapon.fireMode === 'melee') return 0
-    return player.currentWeapon.magazineSize * 3
+    return player.reserveAmmo()
   }
 
   public update(player: Player): void {
@@ -1479,13 +1895,25 @@ export class GameHUD {
     this.healthFill.style.transform = `scaleX(${Math.max(0, Math.min(1, player.health / 100))})`
     this.healthFill.classList.toggle('is-low', player.health <= 25)
 
+    const armor = Math.max(0, Math.round(player.armor))
+    if (armor !== this.lastArmorShown) {
+      this.lastArmorShown = armor
+      this.armorWrapEl.classList.toggle('is-on', armor > 0)
+      this.armorWrapEl.setAttribute('aria-hidden', armor > 0 ? 'false' : 'true')
+      this.armorText.textContent = String(armor)
+      this.armorFill.style.transform = `scaleX(${Math.max(0, Math.min(1, armor / 100))})`
+    }
+
     if (weapon.key !== this.lastWeapon) {
       this.setWeaponIcon(weapon.key)
     }
 
-    if (player.ammoInMag !== this.lastAmmo || weapon.key !== this.lastWeapon) {
+    const reserve = this.reserveFor(player)
+    if (player.ammoInMag !== this.lastAmmo || weapon.key !== this.lastWeapon || reserve !== this.lastReserve) {
+      this.lastReserve = reserve
       this.ammoMagEl.textContent = isMelee ? '—' : String(player.ammoInMag)
-      this.ammoReserveEl.textContent = isMelee ? '—' : String(this.reserveFor(player))
+      this.ammoReserveEl.textContent = isMelee ? '—' : String(reserve)
+      this.ammoReserveEl.classList.toggle('is-out', !isMelee && reserve <= 0)
       this.ammoMagEl.classList.toggle('is-low', !isMelee && player.ammoInMag <= 5)
       const magFraction =
         isMelee || !weapon.magazineSize ? 1 : Math.max(0, Math.min(1, player.ammoInMag / weapon.magazineSize))

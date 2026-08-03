@@ -15,7 +15,17 @@ import { BotDifficulty, TrainingBot } from './Core/TrainingBot'
 import { TrainingBotRenderer } from './View/Renderer/TrainingBotRenderer'
 import { FPSRenderer } from './View/Renderer/PlayerRenderer/FPSRenderer'
 import type { BotMatchConfig } from './UI/MainMenu'
-import { MatchStats, pickBotNames, type ScoreRow } from './Core/MatchStats'
+import {
+  CareerStats,
+  DEFAULT_MATCH_LENGTH,
+  MatchStats,
+  pickBotNames,
+  rulesForLength,
+  type MatchEndReason,
+  type MatchResult,
+  type MatchRules,
+  type ScoreRow,
+} from './Core/MatchStats'
 import * as THREE from 'three'
 import {
   BOT_GROUND_Y,
@@ -89,6 +99,10 @@ export class Game implements IUpdatable {
   /** Waiting for AWP+USP / AK+USP pick before lockdown */
   private awaitingLoadout = false
   public stats = new MatchStats()
+  private matchRules: MatchRules = rulesForLength(DEFAULT_MATCH_LENGTH)
+  private matchElapsed = 0
+  /** Set once the win condition fires; freezes combat until rematch or menu */
+  private matchOver = false
   private nameQueue: string[] = []
   private onReturnToMenu: (() => void) | null = null
   private onHideMenu: (() => void) | null = null
@@ -1029,6 +1043,9 @@ export class Game implements IUpdatable {
     this.combatLive = false
     this.awaitingLoadout = true
     this.lockdownTimer = 0
+    this.matchRules = rulesForLength(config.matchLength)
+    this.matchElapsed = 0
+    this.matchOver = false
     this.inputManager.gameplayEnabled = true
     this.syncMobileControls()
     this.applyMapMoveSpeed(this.activeMapId)
@@ -1057,6 +1074,8 @@ export class Game implements IUpdatable {
     this.renderer.hud?.setLockdown(null)
     this.renderer.hud?.setScoreboardVisible(false)
     this.renderer.hud?.setPauseMenuOpen(false)
+    this.renderer.hud?.hideMatchResult()
+    this.renderer.hud?.setMatchStatus(null)
     this.renderer.hud?.showLoadoutPicker((primary) => this.confirmMatchLoadout(primary))
 
     this.inputManager.unlock()
@@ -1076,6 +1095,7 @@ export class Game implements IUpdatable {
       playerName: config.playerName,
       refillAmmoOnKill: false,
       mapId: 'pool_day',
+      matchLength: config.matchLength ?? DEFAULT_MATCH_LENGTH,
     })
     this.showMpBanner(code, role === 'host')
     return code
@@ -1316,6 +1336,8 @@ export class Game implements IUpdatable {
     this.combatLive = false
     this.awaitingLoadout = false
     this.lockdownTimer = 0
+    this.matchOver = false
+    this.matchElapsed = 0
     this.clearBots()
     this.stats.reset()
     this.inputManager.gameplayEnabled = false
@@ -1324,6 +1346,8 @@ export class Game implements IUpdatable {
     this.renderer.hud?.setPauseMenuOpen(false)
     this.renderer.hud?.setLockdown(null)
     this.renderer.hud?.hideLoadoutPicker()
+    this.renderer.hud?.hideMatchResult()
+    this.renderer.hud?.setMatchStatus(null)
     this.renderer.hud?.setScoreboardVisible(false)
     const hudRoot = document.getElementById('game-hud')
     if (hudRoot) hudRoot.style.display = 'none'
@@ -1427,7 +1451,92 @@ export class Game implements IUpdatable {
   }
 
   public isCombatLive(): boolean {
-    return this.matchStarted && this.combatLive && this.lockdownTimer <= 0
+    return this.matchStarted && this.combatLive && !this.matchOver && this.lockdownTimer <= 0
+  }
+
+  public isMatchOver(): boolean {
+    return this.matchOver
+  }
+
+  /** Highest kill count on the board, used for the "first to N" race. */
+  private leadingKills(): number {
+    let best = this.stats.kills
+    for (const bot of this.trainingBots) {
+      if (bot.kills > best) best = bot.kills
+    }
+    return best
+  }
+
+  private checkMatchEnd(): void {
+    if (!this.matchStarted || this.matchOver) return
+    const { killLimit, timeLimitSec } = this.matchRules
+    if (killLimit > 0 && this.leadingKills() >= killLimit) {
+      this.endMatch('killLimit')
+      return
+    }
+    if (timeLimitSec > 0 && this.matchElapsed >= timeLimitSec) {
+      this.endMatch('timeLimit')
+    }
+  }
+
+  private endMatch(reason: MatchEndReason): void {
+    if (this.matchOver) return
+    this.matchOver = true
+    this.combatLive = false
+
+    const rows = this.getScoreboardRows()
+    const placement = Math.max(1, rows.findIndex((r) => r.isYou) + 1)
+    const result: MatchResult = {
+      reason,
+      won: placement === 1,
+      placement,
+      totalPlayers: rows.length,
+      rows,
+      durationSec: this.matchElapsed,
+      kills: this.stats.kills,
+      deaths: this.stats.deaths,
+      assists: this.stats.assists,
+      headshots: this.stats.headshots,
+      bestStreak: this.stats.bestStreak,
+      accuracy: this.stats.accuracy(),
+      career: CareerStats.record(this.stats, placement === 1, this.matchElapsed),
+    }
+
+    this.inputManager.gameplayEnabled = false
+    this.inputManager.unlock()
+    this.syncMobileControls()
+    this.renderer.hud?.setLockdown(null)
+    this.renderer.hud?.setScoreboardVisible(false)
+    this.renderer.hud?.setPauseMenuOpen(false)
+    this.renderer.hud?.setMatchStatus(null)
+    this.renderer.hud?.showMatchResult(result, {
+      onRematch: () => this.rematch(),
+      onMenu: () => this.returnToMenu(),
+    })
+  }
+
+  public rematch(): void {
+    const config = this.lastMatchConfig
+    this.renderer.hud?.hideMatchResult()
+    if (!config) {
+      this.returnToMenu()
+      return
+    }
+    this.startBotMatch(config)
+  }
+
+  private syncMatchStatus(): void {
+    const { killLimit, timeLimitSec } = this.matchRules
+    if (killLimit <= 0 && timeLimitSec <= 0) {
+      this.renderer.hud?.setMatchStatus(null)
+      return
+    }
+    this.renderer.hud?.setMatchStatus({
+      kills: this.stats.kills,
+      leaderKills: this.leadingKills(),
+      killLimit,
+      secondsLeft: timeLimitSec > 0 ? Math.max(0, timeLimitSec - this.matchElapsed) : null,
+    })
   }
 
   public async prepareCombat(): Promise<void> {
@@ -1533,7 +1642,7 @@ export class Game implements IUpdatable {
 
   /** Player got the kill */
   public onPlayerKill(victim: TrainingBot, weaponKey: string, headshot: boolean): void {
-    this.stats.kills++
+    this.stats.recordKill(headshot)
     // Assist credit for bots that damaged the victim
     for (const name of victim.damagers) {
       if (name === this.playerName) continue
@@ -1547,6 +1656,23 @@ export class Game implements IUpdatable {
       headshot,
       isLocal: true,
     })
+    this.checkMatchEnd()
+  }
+
+  /**
+   * A human you shot in multiplayer. Their damage is applied on their own client,
+   * so this is the only place the local scoreboard learns about the kill.
+   */
+  public onNetworkKill(victimName: string, weaponKey: string, headshot: boolean): void {
+    this.stats.recordKill(headshot)
+    this.renderer.hud?.pushKillFeed({
+      killer: this.playerName || 'Player',
+      victim: victimName,
+      weaponKey,
+      headshot,
+      isLocal: true,
+    })
+    this.checkMatchEnd()
   }
 
   /** Bot killed another bot — always track K; show feed only if you assisted */
@@ -1570,10 +1696,11 @@ export class Game implements IUpdatable {
       const helper = this.trainingBots.find((b) => b.name === name)
       if (helper) helper.assists++
     }
+    this.checkMatchEnd()
   }
 
   public onPlayerDeath(): void {
-    this.stats.deaths++
+    this.stats.recordDeath()
   }
 
   public clearBots(): void {
@@ -1683,6 +1810,12 @@ export class Game implements IUpdatable {
           this.flushPendingBots(8)
         }
       }
+
+      if (this.combatLive && !this.matchOver) {
+        this.matchElapsed += dt
+        this.checkMatchEnd()
+      }
+      if (!this.matchOver) this.syncMatchStatus()
 
       const botsActive = this.combatLive
       for (let i = 0; i < this.trainingBots.length; i++) {

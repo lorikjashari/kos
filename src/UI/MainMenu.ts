@@ -24,6 +24,14 @@ import type { MobileControls } from './MobileControls'
 import { isTouchDevice } from './MobileDevice'
 import type { MobileHoldMode, MobilePerfProfile, MobileResMode } from './SettingsStore'
 import { roomDirectory, type PublicRoomInfo } from '../Net/RoomDirectory'
+import {
+  CareerStats,
+  DEFAULT_MATCH_LENGTH,
+  MATCH_LENGTHS,
+  formatPlaytime,
+  ratio,
+  type MatchLength,
+} from '../Core/MatchStats'
 
 export type BotMatchConfig = {
   difficulty: BotDifficulty
@@ -33,6 +41,8 @@ export type BotMatchConfig = {
   refillAmmoOnKill: boolean
   /** Selected arena */
   mapId: MapId
+  /** Score/time target that ends the match */
+  matchLength: MatchLength
 }
 
 type MenuCallbacks = {
@@ -43,6 +53,7 @@ type MenuCallbacks = {
     playerName: string
     difficulty: BotDifficulty
     botCount: number
+    matchLength: MatchLength
   }) => void
   onSettingsChanged: (settings: PlayerSettings) => void
 }
@@ -61,6 +72,7 @@ export class MainMenu {
   private selectedDifficulty: BotDifficulty = 'medium'
   private selectedBotCount = 5
   private selectedMapId: MapId = DEFAULT_MAP_ID
+  private selectedMatchLength: MatchLength = DEFAULT_MATCH_LENGTH
   private currentScreen: 'loading' | 'main' | 'bots' | 'mp' | 'settings' = 'loading'
   private mobileControls: MobileControls | null = null
   private editingMobileLayout = false
@@ -168,6 +180,7 @@ export class MainMenu {
       el.classList.toggle('is-active', el.getAttribute('data-screen') === id)
     })
     this.root.classList.toggle('is-bg-blur', id !== 'main')
+    if (id === 'main') this.refreshCareerCard()
     this.syncMenuMusic()
     if (id === 'mp') this.startRoomWatch()
     else this.stopRoomWatch()
@@ -192,6 +205,35 @@ export class MainMenu {
     } catch {
       return null
     }
+  }
+
+  /** Lifetime totals under the menu buttons. Hidden entirely before a first match. */
+  private refreshCareerCard(): void {
+    const el = this.root.querySelector('#kos-career') as HTMLElement | null
+    if (!el) return
+    const c = CareerStats.load()
+    if (c.matches <= 0) {
+      el.hidden = true
+      return
+    }
+    const accuracy = c.shotsFired > 0 ? Math.round((c.shotsHit / c.shotsFired) * 100) : 0
+    const bits: Array<[string, string]> = [
+      ['Matches', String(c.matches)],
+      ['Wins', String(c.wins)],
+      ['K/D', ratio(c.kills, c.deaths).toFixed(2)],
+      ['Kills', String(c.kills)],
+      ['Accuracy', `${accuracy}%`],
+      ['Best match', String(c.bestKills)],
+      ['Streak', String(c.bestStreak)],
+      ['Played', formatPlaytime(c.secondsPlayed)],
+    ]
+    el.hidden = false
+    el.innerHTML =
+      `<div class="kos-career-title">Your record</div><div class="kos-career-grid">` +
+      bits
+        .map(([label, value]) => `<div class="kos-career-bit"><b>${value}</b><span>${label}</span></div>`)
+        .join('') +
+      `</div>`
   }
 
   private syncMenuMusic(): void {
@@ -254,6 +296,8 @@ export class MainMenu {
                 <span class="kos-btn-label">Settings</span>
               </button>
             </nav>
+
+            <div class="kos-career" id="kos-career" hidden></div>
           </div>
         </div>
       </section>
@@ -358,6 +402,18 @@ export class MainMenu {
                   <input id="kos-bot-count" type="number" min="0" max="10" step="1" value="5" inputmode="numeric" />
                 </label>
                 <p class="kos-hint tight-left">Type any amount (0–10). Dust II starts at 0 while we tune it.</p>
+                <div class="kos-section-label">Match length</div>
+                <div class="kos-chip-row" id="kos-length">
+                  ${(Object.keys(MATCH_LENGTHS) as MatchLength[])
+                    .map(
+                      (key) =>
+                        `<button type="button" class="kos-chip${
+                          key === DEFAULT_MATCH_LENGTH ? ' is-on' : ''
+                        }" data-length="${key}">${MATCH_LENGTHS[key].label}</button>`
+                    )
+                    .join('')}
+                </div>
+                <p class="kos-hint tight-left" id="kos-length-hint">${MATCH_LENGTHS[DEFAULT_MATCH_LENGTH].hint}</p>
                 <label class="kos-check kos-match-opt">
                   <input id="kos-refill-kill" type="checkbox" />
                   <span>
@@ -733,7 +789,7 @@ export class MainMenu {
       }
 
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
+        '[data-action], [data-diff], [data-length], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -859,6 +915,14 @@ export class MainMenu {
         this.root.querySelectorAll('[data-diff]').forEach((el) => el.classList.toggle('is-on', el === t))
       }
 
+      const length = t.getAttribute('data-length') as MatchLength | null
+      if (length) {
+        this.selectedMatchLength = length
+        this.root.querySelectorAll('[data-length]').forEach((el) => el.classList.toggle('is-on', el === t))
+        const hint = this.root.querySelector('#kos-length-hint')
+        if (hint) hint.textContent = MATCH_LENGTHS[length].hint
+      }
+
       const mpDiff = t.getAttribute('data-mp-diff') as BotDifficulty | null
       if (mpDiff) {
         this.selectedDifficulty = mpDiff
@@ -942,6 +1006,7 @@ export class MainMenu {
       playerName: this.settings.playerName,
       refillAmmoOnKill: refill,
       mapId: this.selectedMapId,
+      matchLength: this.selectedMatchLength,
     })
   }
 
@@ -969,6 +1034,7 @@ export class MainMenu {
       playerName: this.settings.playerName,
       difficulty: this.selectedDifficulty,
       botCount,
+      matchLength: this.selectedMatchLength,
     })
   }
 
@@ -1542,6 +1608,48 @@ export class MainMenu {
         max-width: 380px;
         animation: kos-slide-up 560ms var(--kos-ease) 80ms both;
       }
+
+      .kos-career {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 13px 15px;
+        border-radius: 14px;
+        background: rgba(10,14,22,0.42);
+        border: 1px solid rgba(255,255,255,0.08);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        animation: kos-slide-up 560ms var(--kos-ease) 160ms both;
+      }
+      .kos-career-title {
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        opacity: 0.5;
+      }
+      .kos-career-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 9px 6px;
+      }
+      .kos-career-bit { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+      .kos-career-bit b {
+        font-size: 16px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.1;
+      }
+      .kos-career-bit span {
+        font-size: 9px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        opacity: 0.5;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #kos-menu.is-mobile-ui .kos-career { padding: 10px 12px; gap: 6px; }
+      #kos-menu.is-mobile-ui .kos-career-bit b { font-size: 14px; }
 
       @keyframes kos-logo-in {
         from { opacity: 0; transform: scale(0.94) translateY(16px); }

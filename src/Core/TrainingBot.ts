@@ -1,6 +1,6 @@
 import { Vector3D } from './Vector'
 import { Physics } from '../Physics/Physics'
-import { BodyPart, damageForBodyPart } from './BodyPart'
+import { BodyPart, damageAtRange, damageForBodyPart } from './BodyPart'
 import { IUpdatable } from '../Interface/IUpdatable'
 import { Game } from '../Game'
 import type { Player } from './Player'
@@ -146,14 +146,16 @@ export class TrainingBot implements IUpdatable {
   public takeDamage(
     part: BodyPart,
     weaponKey: string,
-    fromPlayer = false
+    fromPlayer = false,
+    distance?: number
   ): { damage: number; killed: boolean; wasAlive: boolean } {
     const wasAlive = this.isAlive
     if (!this.isAlive) {
       return { damage: 0, killed: false, wasAlive: false }
     }
 
-    const damage = damageForBodyPart(part, weaponKey)
+    const damage =
+      distance === undefined ? damageForBodyPart(part, weaponKey) : damageAtRange(part, weaponKey, distance)
     this.health = Math.max(0, this.health - damage)
     if (fromPlayer) {
       this.playerDamageDealt += damage
