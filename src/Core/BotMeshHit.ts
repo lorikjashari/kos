@@ -42,6 +42,16 @@ export interface BotMeshHit {
 }
 
 /**
+ * Safety net for models whose head geometry overlaps the torso (the zones on the
+ * CS terrorist meet at seams, but the robot's tagged meshes interpenetrate).
+ * When a torso surface wins by less than this, but the ray also passed through
+ * the same bot's head, the shot was aimed at the head — score it as one.
+ * Deliberately small: a ray fired steeply upward through the chest can legally
+ * exit into the head volume, and that must stay a body hit.
+ */
+const HEAD_PRIORITY_MARGIN = 0.35
+
+/**
  * Raycast against actual robot meshes (exact silhouette / curves).
  * Call after mesh matrixWorld is up to date for the frame.
  */
@@ -53,6 +63,7 @@ export function raycastBotMeshes(
 ): BotMeshHit | undefined {
   const raycaster = new THREE.Raycaster(origin, direction.clone().normalize(), 0, maxDistance)
   let best: BotMeshHit | undefined
+  let bestHead: BotMeshHit | undefined
 
   for (const t of targets) {
     if (!t.alive || !t.root.visible) continue
@@ -63,19 +74,29 @@ export function raycastBotMeshes(
       if (isGunPart(hit.object)) continue
       const part = findBodyPart(hit.object)
       if (!part) continue
-      if (!best || hit.distance < best.distance) {
-        best = {
-          botIndex: t.botIndex,
-          part,
-          point: hit.point.clone(),
-          normal: (hit.face?.normal.clone() ?? new THREE.Vector3(0, 0, 1))
-            .transformDirection(hit.object.matrixWorld)
-            .normalize(),
-          distance: hit.distance,
-          object: hit.object,
-        }
+      const candidate: BotMeshHit = {
+        botIndex: t.botIndex,
+        part,
+        point: hit.point.clone(),
+        normal: (hit.face?.normal.clone() ?? new THREE.Vector3(0, 0, 1))
+          .transformDirection(hit.object.matrixWorld)
+          .normalize(),
+        distance: hit.distance,
+        object: hit.object,
       }
+      if (!best || candidate.distance < best.distance) best = candidate
+      if (part === 'head' && (!bestHead || candidate.distance < bestHead.distance)) bestHead = candidate
     }
+  }
+
+  if (
+    best &&
+    bestHead &&
+    best.part !== 'head' &&
+    bestHead.botIndex === best.botIndex &&
+    bestHead.distance - best.distance <= HEAD_PRIORITY_MARGIN
+  ) {
+    return bestHead
   }
   return best
 }

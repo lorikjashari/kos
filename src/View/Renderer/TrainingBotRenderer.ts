@@ -60,7 +60,11 @@ export class TrainingBotRenderer implements IUpdatable {
   /** Invisible hit capsules — synced to skeleton so aim matches the silhouette */
   private hitZoneByPart: Partial<Record<BodyPart | string, THREE.Mesh>> = {}
   private readonly _hzWorld = new THREE.Vector3()
+  private readonly _hzNeck = new THREE.Vector3()
+  private readonly _hzHips = new THREE.Vector3()
   private targetHitHeight = 3.8
+  /** Neck bone → top of the skull, measured off the bind pose at build time */
+  private headSpan = 3.8 * 0.18
   private readonly _animQ = new THREE.Quaternion()
   private readonly _animE = new THREE.Euler()
   /** When true, procedural anim is paused so manual bone edits (editor rig) persist */
@@ -306,6 +310,7 @@ export class TrainingBotRenderer implements IUpdatable {
     this.tagBodyParts()
     this.collectHitMeshes()
     this.mesh.updateMatrixWorld(true)
+    this.measureHeadSpan(targetH)
     this.syncHitZonesToBones()
     this.game.addToRenderer(this.mesh)
   }
@@ -845,37 +850,43 @@ export class TrainingBotRenderer implements IUpdatable {
   }
 
   /**
-   * Capsule hit volumes for the CS terrorist.
-   * Sized to cover the visual silhouette (previous radii were ~half as wide —
-   * shots that looked on-target often missed). Skinned mesh raycasts bind-pose
-   * geometry, so we keep dedicated zones and lock them to bones each frame.
+   * Hit volumes for the CS terrorist.
+   *
+   * Boxes, not capsules: a capsule's hemispherical caps bulge past the bone span
+   * you size it from, so the torso always swallowed the neck and jaw, and because
+   * it was also wider than the skull its front face sat nearer the muzzle than
+   * the head behind it — clean headshots scored as body hits. Boxes have exact
+   * bounds, so the zones can meet at seams with no overlap at all.
+   *
+   * Geometry is a unit cube; `spanZone` scales/positions it from live bone
+   * positions each frame (skinned meshes raycast bind-pose verts, so the zones
+   * have to follow the skeleton themselves).
    */
   private attachHeightHitZones(root: THREE.Object3D, height: number): void {
     this.hitZoneByPart = {}
-    const mk = (id: string, part: BodyPart, y: number, h: number, r: number) => {
-      const geo = new THREE.CapsuleGeometry(r, Math.max(0.05, h - r * 2), 4, 8)
+    const mk = (id: string, part: BodyPart) => {
       const mat = new THREE.MeshBasicMaterial({
         visible: false,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
-      const mesh = new THREE.Mesh(geo, mat)
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat)
       mesh.name = `HitZone_${id}`
       mesh.userData.bodyPart = part
-      mesh.position.set(0, y, 0)
       mesh.frustumCulled = false
       root.add(mesh)
       this.hitZoneByPart[id] = mesh
       return mesh
     }
 
-    // Wider than the old 0.22 / 0.28 / 0.16 — match ~CS player width at height 3.8
-    mk('legs', 'legs', height * 0.22, height * 0.48, 0.42)
-    mk('body', 'body', height * 0.58, height * 0.48, 0.62)
-    mk('head', 'head', height * 0.9, height * 0.28, 0.34)
-    // Shoulder / upper-arm volumes so arms aren't dead space
-    mk('armL', 'body', height * 0.62, height * 0.28, 0.26).position.x = -0.55
-    mk('armR', 'body', height * 0.62, height * 0.28, 0.26).position.x = 0.55
+    mk('legs', 'legs')
+    mk('body', 'body')
+    mk('head', 'head')
+
+    // Height-fraction fallback until the first bone sync (or if the rig is missing)
+    this.spanZone('legs', 0, height * 0.46, height * 0.26, height * 0.17)
+    this.spanZone('body', height * 0.46, height * 0.82, height * 0.34, height * 0.19)
+    this.spanZone('head', height * 0.82, height, height * 0.16, height * 0.16)
 
     // Decorative skin is not raycastable (bind-pose verts ≠ animated pose)
     root.traverse((child) => {
@@ -885,49 +896,65 @@ export class TrainingBotRenderer implements IUpdatable {
     })
   }
 
-  /** Keep hit capsules on the animated skeleton so walking bots stay hittable. */
+  /** Size + place a unit-cube hit zone to span [bottom, top] in root-local space. */
+  private spanZone(id: string, bottom: number, top: number, width: number, depth: number, x = 0, z = 0): void {
+    const zone = this.hitZoneByPart[id]
+    if (!zone) return
+    const h = Math.max(0.05, top - bottom)
+    zone.scale.set(width, h, depth)
+    zone.position.set(x, bottom + h * 0.5, z)
+  }
+
+  /**
+   * In the bind pose the model's highest point is the top of the head, so the
+   * distance from the neck bone up to it is the head's real height — no need to
+   * guess a fraction that only fits one character model.
+   */
+  private measureHeadSpan(height: number): void {
+    const neckY = this.boneLocalY(this.csAnimBones.neck || this.csAnimBones.spineU)
+    if (neckY === undefined) return
+    // Guard against a rig whose arms reach above the head in bind pose
+    this.headSpan = Math.min(height * 0.26, Math.max(height * 0.11, height - neckY))
+  }
+
+  /** Root-local position of a bone. False when the rig doesn't have it. */
+  private boneLocalInto(bone: THREE.Bone | undefined, out: THREE.Vector3): boolean {
+    if (!bone) return false
+    bone.getWorldPosition(this._hzWorld)
+    this.mesh.worldToLocal(this._hzWorld)
+    out.copy(this._hzWorld)
+    return true
+  }
+
+  /** Root-local Y of a bone, or undefined when the rig doesn't have it. */
+  private boneLocalY(bone: THREE.Bone | undefined): number | undefined {
+    if (!this.boneLocalInto(bone, this._hzWorld)) return undefined
+    return this._hzWorld.y
+  }
+
+  /** Keep hit zones on the animated skeleton so walking bots stay hittable. */
   private syncHitZonesToBones(): void {
     if (!this.staticModel || Object.keys(this.hitZoneByPart).length === 0) return
     const b = this.csAnimBones
     const h = this.targetHitHeight
 
-    const place = (id: string, bone: THREE.Bone | undefined, ox: number, oy: number, oz: number) => {
-      const zone = this.hitZoneByPart[id]
-      if (!zone || !bone) return false
-      bone.getWorldPosition(this._hzWorld)
-      this.mesh.worldToLocal(this._hzWorld)
-      zone.position.set(this._hzWorld.x + ox, this._hzWorld.y + oy, this._hzWorld.z + oz)
-      return true
-    }
+    if (!this.boneLocalInto(b.neck || b.spineU, this._hzNeck)) return
+    if (!this.boneLocalInto(b.hips || b.spineL, this._hzHips)) return
+    const neckY = this._hzNeck.y
 
-    // Head sits above the neck
-    if (!place('head', b.neck || b.spineU, 0, h * 0.06, 0.02)) {
-      const zone = this.hitZoneByPart.head
-      if (zone) zone.position.set(0, h * 0.9, 0)
-    }
+    // Chin/jaw hangs below the neck bone, so the head starts a little under it.
+    const headBottom = neckY - h * 0.03
+    const headTop = neckY + this.headSpan
+    // Seams, not overlaps: every world point belongs to exactly one zone.
+    const hipSeam = this._hzHips.y - h * 0.03
+    // Lean/turn moves the head off the root axis — track it rather than assume centre
+    const leanX = (this._hzNeck.x + this._hzHips.x) * 0.5
+    const leanZ = (this._hzNeck.z + this._hzHips.z) * 0.5
 
-    // Torso on upper spine
-    if (!place('body', b.spineU || b.spineL || b.hips, 0, h * 0.02, 0.04)) {
-      const zone = this.hitZoneByPart.body
-      if (zone) zone.position.set(0, h * 0.58, 0)
-    }
-
-    // Legs / pelvis
-    if (!place('legs', b.hips, 0, -h * 0.12, 0)) {
-      const zone = this.hitZoneByPart.legs
-      if (zone) zone.position.set(0, h * 0.22, 0)
-    }
-
-    // Arms follow shoulders so gun-hold pose stays covered
-    const armOffY = -h * 0.02
-    if (!place('armL', b.shoulderL || b.clavL, -0.12, armOffY, 0.08)) {
-      const zone = this.hitZoneByPart.armL
-      if (zone) zone.position.set(-0.55, h * 0.62, 0)
-    }
-    if (!place('armR', b.shoulderR || b.clavR, 0.12, armOffY, 0.08)) {
-      const zone = this.hitZoneByPart.armR
-      if (zone) zone.position.set(0.55, h * 0.62, 0)
-    }
+    this.spanZone('head', headBottom, headTop, h * 0.17, h * 0.17, this._hzNeck.x, this._hzNeck.z)
+    // Torso is wide enough to include the upper arms — arm hits are body damage
+    this.spanZone('body', hipSeam, headBottom, h * 0.35, h * 0.19, leanX, leanZ)
+    this.spanZone('legs', 0, hipSeam, h * 0.26, h * 0.17, this._hzHips.x, this._hzHips.z)
   }
 
   /** Clone materials so opacity/emissive edits never leak to other bots */
@@ -1376,9 +1403,14 @@ export class TrainingBotRenderer implements IUpdatable {
   private applyHitboxOverlay(): void {
     this.clearHitboxOverlay()
     this.overlayOn = true
+    // With dedicated zones the skin isn't raycastable, so colouring it too just
+    // drew a body-coloured silhouette over the real volumes and hid them.
+    const zonesOnly = Object.keys(this.hitZoneByPart).length > 0
     this.mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh) || !child.material) return
       if (child.userData?.isGun || child.userData?.isTeamOutline) return
+      const isZone = String(child.name).startsWith('HitZone_')
+      if (zonesOnly && !isZone) return
       const part = (child.userData.bodyPart as BodyPart | undefined) ?? this.inferFromParent(child)
       this.storedMaterials.push({ mesh: child, original: child.material })
       child.material = new THREE.MeshBasicMaterial({
@@ -1386,7 +1418,7 @@ export class TrainingBotRenderer implements IUpdatable {
         wireframe: true,
         transparent: true,
         opacity: 0.9,
-        depthTest: true,
+        depthTest: !isZone,
         side: THREE.DoubleSide,
       })
     })
