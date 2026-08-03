@@ -841,7 +841,12 @@ export class Player extends Pawn implements IUpdatable {
       hitScanResult.bodyPart = meshHit.part
       hitScanResult.botIndex = meshHit.botIndex
       const bot = game.trainingBots[meshHit.botIndex]
-      if (bot?.isNetworkPuppet) {
+      const teammate = game.isCoopTeams() && !!bot?.netPeerId
+      if (teammate) {
+        // Co-op: shots pass through humans rather than hurting them
+        hitScanResult.hitBot = false
+        hitScanResult.damageDealt = 0
+      } else if (bot?.isNetworkPuppet) {
         const damage = damageAtRange(meshHit.part, this.currentWeapon.key, meshDist)
         hitScanResult.damageDealt = damage
         const headshot = meshHit.part === 'head'

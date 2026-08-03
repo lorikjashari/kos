@@ -25,6 +25,7 @@ import {
   type MatchResult,
   type MatchRules,
   type ScoreRow,
+  type TeamMode,
 } from './Core/MatchStats'
 import * as THREE from 'three'
 import {
@@ -103,6 +104,7 @@ export class Game implements IUpdatable {
   private matchElapsed = 0
   /** Set once the win condition fires; freezes combat until rematch or menu */
   private matchOver = false
+  private teamMode: TeamMode = 'ffa'
   private nameQueue: string[] = []
   private onReturnToMenu: (() => void) | null = null
   private onHideMenu: (() => void) | null = null
@@ -1089,6 +1091,7 @@ export class Game implements IUpdatable {
     const { code, role } = await mp.start(config)
     const botCount =
       role === 'host' ? botTargetForHumans(1, config.botCount ?? 10) : 0
+    this.teamMode = config.teamMode ?? 'ffa'
     this.startBotMatch({
       difficulty: config.difficulty || 'medium',
       botCount,
@@ -1456,6 +1459,15 @@ export class Game implements IUpdatable {
 
   public isMatchOver(): boolean {
     return this.matchOver
+  }
+
+  /** Humans on one side, bots on the other. Off means everyone for themselves. */
+  public isCoopTeams(): boolean {
+    return this.teamMode === 'coop' && !!this.multiplayer
+  }
+
+  public setTeamMode(mode: TeamMode): void {
+    this.teamMode = mode
   }
 
   /** Highest kill count on the board, used for the "first to N" race. */

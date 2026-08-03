@@ -437,14 +437,19 @@ export class TrainingBot implements IUpdatable {
     const physics = game.getPhysics()
     const myEye = this.position.clone().add(new Vector3D(0, this.eyeHeight, 0))
 
+    const coop = game.isCoopTeams()
     for (const other of game.trainingBots) {
       if (other === this || !other.isAlive) continue
+      // In co-op the AI is one side and every human the other, so bots stop
+      // fighting each other and remote players become valid targets
+      if (coop && !other.isNetworkPuppet) continue
       const d = this.flatDist(this.position, other.position)
       const eye = other.position.clone().add(new Vector3D(0, other.eyeHeight, 0))
       let score = d
       if (other.playerDamageDealt >= 20) score -= 10
       if (other.health < 50) score -= 6
       if (this.huntBias === 'any') score -= 3
+      if (coop) score -= 12
       // Prefer visible fights so they actually clash
       if (d < 55 && this.hasLineOfSight(physics, myEye, eye)) score -= 14
       cands.push({

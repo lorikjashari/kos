@@ -31,6 +31,7 @@ import {
   formatPlaytime,
   ratio,
   type MatchLength,
+  type TeamMode,
 } from '../Core/MatchStats'
 
 export type BotMatchConfig = {
@@ -54,6 +55,7 @@ type MenuCallbacks = {
     difficulty: BotDifficulty
     botCount: number
     matchLength: MatchLength
+    teamMode: TeamMode
   }) => void
   onSettingsChanged: (settings: PlayerSettings) => void
 }
@@ -73,6 +75,7 @@ export class MainMenu {
   private selectedBotCount = 5
   private selectedMapId: MapId = DEFAULT_MAP_ID
   private selectedMatchLength: MatchLength = DEFAULT_MATCH_LENGTH
+  private selectedTeamMode: TeamMode = 'coop'
   private currentScreen: 'loading' | 'main' | 'bots' | 'mp' | 'settings' = 'loading'
   private mobileControls: MobileControls | null = null
   private editingMobileLayout = false
@@ -339,6 +342,11 @@ export class MainMenu {
                   <button type="button" class="kos-chip is-on" data-mp-diff="medium">Medium</button>
                   <button type="button" class="kos-chip" data-mp-diff="hard">Hard</button>
                 </div>
+                <div class="kos-chip-row" id="kos-mp-team">
+                  <button type="button" class="kos-chip is-on" data-team="coop">Team up</button>
+                  <button type="button" class="kos-chip" data-team="ffa">Free-for-all</button>
+                </div>
+                <p class="kos-hint tight-left" id="kos-team-hint">Everyone who joins fights the bots with you.</p>
                 <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="mp-host">
                   <span class="kos-btn-label">Create Room</span>
                 </button>
@@ -789,7 +797,7 @@ export class MainMenu {
       }
 
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-length], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
+        '[data-action], [data-diff], [data-length], [data-team], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -915,6 +923,19 @@ export class MainMenu {
         this.root.querySelectorAll('[data-diff]').forEach((el) => el.classList.toggle('is-on', el === t))
       }
 
+      const team = t.getAttribute('data-team') as TeamMode | null
+      if (team) {
+        this.selectedTeamMode = team
+        this.root.querySelectorAll('[data-team]').forEach((el) => el.classList.toggle('is-on', el === t))
+        const hint = this.root.querySelector('#kos-team-hint')
+        if (hint) {
+          hint.textContent =
+            team === 'coop'
+              ? 'Everyone who joins fights the bots with you.'
+              : 'Every player for themselves, bots included.'
+        }
+      }
+
       const length = t.getAttribute('data-length') as MatchLength | null
       if (length) {
         this.selectedMatchLength = length
@@ -1035,6 +1056,7 @@ export class MainMenu {
       difficulty: this.selectedDifficulty,
       botCount,
       matchLength: this.selectedMatchLength,
+      teamMode: this.selectedTeamMode,
     })
   }
 

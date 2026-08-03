@@ -51,6 +51,9 @@ export function rulesForLength(length: MatchLength | undefined): MatchRules {
   return MATCH_LENGTHS[length ?? DEFAULT_MATCH_LENGTH].rules
 }
 
+/** 'coop' puts every human on one side against the bots. */
+export type TeamMode = 'ffa' | 'coop'
+
 export type MatchEndReason = 'killLimit' | 'timeLimit'
 
 export type MatchResult = {

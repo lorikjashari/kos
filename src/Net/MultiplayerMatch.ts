@@ -11,7 +11,7 @@ import {
   type NetRole,
 } from './NetTypes'
 import { roomDirectory, RoomDirectory } from './RoomDirectory'
-import type { MatchLength } from '../Core/MatchStats'
+import type { MatchLength, TeamMode } from '../Core/MatchStats'
 
 export type MultiplayerStartConfig = {
   mode: 'host' | 'join'
@@ -21,6 +21,7 @@ export type MultiplayerStartConfig = {
   /** Host-only: how many bots to fill with (0–10). 0 = 1v1 / pure PvP. */
   botCount?: number
   matchLength?: MatchLength
+  teamMode?: TeamMode
 }
 
 type HumanRec = { id: string; name: string }
@@ -40,6 +41,8 @@ export class MultiplayerMatch {
   private lastShootSent = 0
   private enabled = false
   private pendingShoot = false
+  /** Host's choice; clients adopt it from welcome/roster */
+  private teamMode: TeamMode = 'ffa'
 
   public get active(): boolean {
     return this.enabled && this.role !== 'offline'
@@ -65,6 +68,7 @@ export class MultiplayerMatch {
     this.stop()
     this.localName = (config.playerName || 'Player').slice(0, 24)
     this.fillBots = Math.max(0, Math.min(MP_FILL_BOTS, Math.round(config.botCount ?? MP_FILL_BOTS)))
+    this.teamMode = config.teamMode ?? 'ffa'
     this.enabled = true
     this.humans.clear()
 
@@ -182,6 +186,7 @@ export class MultiplayerMatch {
           hostName: this.localName,
           humans: [...this.humans.values()],
           botTarget: botTargetForHumans(this.humans.size, this.fillBots),
+          teamMode: this.teamMode,
         })
         this.broadcastRoster()
         this.reconcileBotCount()
@@ -195,9 +200,14 @@ export class MultiplayerMatch {
           id: this.session.localPeerId,
           name: this.localName,
         })
+        // The host owns the rule set; a joining client adopts it
+        this.teamMode = msg.teamMode ?? 'ffa'
+        Game.getInstance().setTeamMode(this.teamMode)
         break
       }
       case 'roster': {
+        this.teamMode = msg.teamMode ?? this.teamMode
+        Game.getInstance().setTeamMode(this.teamMode)
         const keep = new Set(msg.humans.map((h) => h.id))
         this.humans.clear()
         for (const h of msg.humans) this.humans.set(h.id, h)
@@ -324,6 +334,7 @@ export class MultiplayerMatch {
       t: 'roster',
       humans: [...this.humans.values()],
       botTarget: botTargetForHumans(this.humans.size, this.fillBots),
+      teamMode: this.teamMode,
     }
     this.session.broadcast(msg)
   }

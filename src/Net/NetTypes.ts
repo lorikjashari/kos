@@ -1,9 +1,17 @@
+import type { TeamMode } from '../Core/MatchStats'
+
 export type NetRole = 'host' | 'client' | 'offline'
 
 export type NetMsg =
   | { t: 'hello'; name: string; peerId: string }
-  | { t: 'welcome'; hostName: string; humans: Array<{ id: string; name: string }>; botTarget: number }
-  | { t: 'roster'; humans: Array<{ id: string; name: string }>; botTarget: number }
+  | {
+      t: 'welcome'
+      hostName: string
+      humans: Array<{ id: string; name: string }>
+      botTarget: number
+      teamMode: TeamMode
+    }
+  | { t: 'roster'; humans: Array<{ id: string; name: string }>; botTarget: number; teamMode: TeamMode }
   | {
       t: 'player'
       id: string
