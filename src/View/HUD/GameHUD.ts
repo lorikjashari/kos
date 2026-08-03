@@ -19,6 +19,8 @@ export type MatchStatus = {
   killLimit: number
   /** null when the mode has no clock */
   secondsLeft: number | null
+  /** Set only in team deathmatch */
+  teams?: { you: 'T' | 'CT'; T: number; CT: number } | null
 }
 
 function ordinal(n: number): string {
@@ -140,6 +142,19 @@ export class GameHUD {
         <div class="cs-matchbar-sep"></div>
         <div class="cs-matchbar-clock" id="hud-match-clock">10:00</div>
         <div class="cs-matchbar-lead" id="hud-match-lead"></div>
+      </div>
+
+      <div class="cs-teambar" id="hud-teambar" aria-hidden="true">
+        <div class="cs-teambar-side is-t" id="hud-team-t">
+          <span class="cs-teambar-tag">T</span>
+          <span class="cs-teambar-score" id="hud-team-t-score">0</span>
+        </div>
+        <div class="cs-teambar-vs">vs</div>
+        <div class="cs-teambar-side is-ct" id="hud-team-ct">
+          <span class="cs-teambar-score" id="hud-team-ct-score">0</span>
+          <span class="cs-teambar-tag">CT</span>
+        </div>
+        <div class="cs-teambar-soon" id="hud-team-soon">Bomb defusal — soon</div>
       </div>
 
       <div class="cs-killfeed" id="hud-killfeed" aria-live="polite"></div>
@@ -401,6 +416,7 @@ export class GameHUD {
         e.stopPropagation()
       })
     })
+
   }
 
   public setPauseMenuOpen(open: boolean): void {
@@ -445,9 +461,11 @@ export class GameHUD {
     this.sbRowsEl.innerHTML = rows
       .map(
         (r, i) => `
-      <div class="cs-sb-row ${r.isYou ? 'is-you' : ''}">
+      <div class="cs-sb-row ${r.isYou ? 'is-you' : ''} ${r.team ? `team-${r.team.toLowerCase()}` : ''}">
         <span class="cs-sb-col rank">${i + 1}</span>
-        <span class="cs-sb-col name">${this.escapeHtml(r.name)}${r.isYou ? '<em>YOU</em>' : ''}</span>
+        <span class="cs-sb-col name">${
+          r.team ? `<i class="cs-sb-team">${r.team}</i>` : ''
+        }${this.escapeHtml(r.name)}${r.isYou ? '<em>YOU</em>' : ''}</span>
         <span class="cs-sb-col">${r.kills}</span>
         <span class="cs-sb-col">${r.deaths}</span>
         <span class="cs-sb-col">${r.assists}</span>
@@ -1343,6 +1361,20 @@ export class GameHUD {
         color: rgba(255,255,255,0.4);
       }
       .cs-sb-row.is-you .cs-sb-col.rank { color: #8eb6ff; }
+      .cs-sb-row.team-t { border-left-color: rgba(224,164,74,0.65); }
+      .cs-sb-row.team-ct { border-left-color: rgba(90,168,255,0.65); }
+      .cs-sb-team {
+        display: inline-block;
+        min-width: 20px;
+        margin-right: 7px;
+        font-size: 9px;
+        font-style: normal;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        opacity: 0.85;
+      }
+      .cs-sb-row.team-t .cs-sb-team { color: #e0a44a; }
+      .cs-sb-row.team-ct .cs-sb-team { color: #5aa8ff; }
       .cs-sb-col.name {
         text-align: left;
         font-size: clamp(12px, 1.45vh, 14px);
@@ -1577,6 +1609,44 @@ export class GameHUD {
         letter-spacing: 0.02em;
       }
       .cs-matchbar.is-on { display: flex; }
+      /* Team strip sits under the match bar so both stay legible */
+      .cs-teambar {
+        position: absolute;
+        top: calc(max(10px, env(safe-area-inset-top)) + 42px);
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 12px;
+        border-radius: 11px;
+        background: linear-gradient(180deg, rgba(10,14,20,0.7), rgba(10,14,20,0.46));
+        border: 1px solid rgba(255,255,255,0.09);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        font-weight: 800;
+        white-space: nowrap;
+      }
+      .cs-teambar.is-on { display: flex; }
+      .cs-teambar-side { display: flex; align-items: center; gap: 6px; opacity: 0.72; }
+      .cs-teambar-side.is-you { opacity: 1; }
+      .cs-teambar-tag { font-size: 11px; letter-spacing: 0.16em; }
+      .cs-teambar-score { font-size: 18px; font-variant-numeric: tabular-nums; color: #fff; }
+      .cs-teambar-side.is-t .cs-teambar-tag { color: #e0a44a; }
+      .cs-teambar-side.is-ct .cs-teambar-tag { color: #5aa8ff; }
+      .cs-teambar-vs { font-size: 10px; letter-spacing: 0.18em; opacity: 0.4; }
+      .cs-teambar-soon {
+        margin-left: 4px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.62);
+        background: rgba(255,255,255,0.06);
+        border: 1px dashed rgba(255,255,255,0.2);
+      }
       .cs-matchbar.is-close { border-color: rgba(255,170,60,0.5); }
       .cs-matchbar-score { display: flex; align-items: baseline; gap: 3px; }
       .cs-matchbar-you { font-size: 19px; color: #fff; }
@@ -1736,6 +1806,9 @@ export class GameHUD {
         .cs-matchbar { padding: 4px 11px; gap: 8px; }
         .cs-matchbar-you { font-size: 16px; }
         .cs-matchbar-clock { font-size: 13px; }
+        .cs-teambar { padding: 3px 9px; gap: 7px; top: calc(max(10px, env(safe-area-inset-top)) + 34px); }
+        .cs-teambar-score { font-size: 15px; }
+        .cs-teambar-soon { display: none; }
       }
     `
     document.head.appendChild(style)
@@ -1746,9 +1819,11 @@ export class GameHUD {
     if (!status) {
       this.matchBarEl.classList.remove('is-on')
       this.matchBarEl.setAttribute('aria-hidden', 'true')
+      this.setTeamScores(null)
       this.lastMatchStatusKey = ''
       return
     }
+    this.setTeamScores(status.teams ?? null)
     const clock = status.secondsLeft === null ? '' : formatClock(status.secondsLeft)
     const key = `${status.kills}|${status.killLimit}|${clock}|${status.leaderKills}`
     if (key === this.lastMatchStatusKey) return
@@ -1776,6 +1851,23 @@ export class GameHUD {
     }
     const close = status.killLimit > 0 && status.leaderKills >= status.killLimit - 3
     this.matchBarEl.classList.toggle('is-close', close)
+  }
+
+  /** Team deathmatch score strip. Passing null hides it. */
+  public setTeamScores(teams: { you: 'T' | 'CT'; T: number; CT: number } | null): void {
+    const bar = document.getElementById('hud-teambar')
+    if (!bar) return
+    if (!teams) {
+      bar.classList.remove('is-on')
+      bar.setAttribute('aria-hidden', 'true')
+      return
+    }
+    bar.classList.add('is-on')
+    bar.setAttribute('aria-hidden', 'false')
+    document.getElementById('hud-team-t-score')!.textContent = String(teams.T)
+    document.getElementById('hud-team-ct-score')!.textContent = String(teams.CT)
+    document.getElementById('hud-team-t')!.classList.toggle('is-you', teams.you === 'T')
+    document.getElementById('hud-team-ct')!.classList.toggle('is-you', teams.you === 'CT')
   }
 
   public showMatchResult(result: MatchResult, handlers: { onRematch: () => void; onMenu: () => void }): void {

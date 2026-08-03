@@ -1,4 +1,5 @@
 import { Vector3D } from './Vector'
+import type { Team } from './Teams'
 
 export type MapId = 'pool_day' | 'de_dust2'
 
@@ -26,6 +27,8 @@ export type MapDefinition = {
   spawns: ReadonlyArray<SpawnPoint>
   /** Default bots when this map is selected in the menu */
   defaultBotCount: number
+  /** Per-side spawn sets. Present = this map can run team deathmatch. */
+  teamSpawns?: Record<Team, ReadonlyArray<SpawnPoint>>
 }
 
 export const MAP_CATALOG: Record<MapId, MapDefinition> = {
@@ -80,7 +83,39 @@ export const MAP_CATALOG: Record<MapId, MapDefinition> = {
       { x: 113.4, y: 2.0, z: 62.1 },
       { x: -11.7, y: 14.7, z: 112.9 },
     ],
+    // Team deathmatch uses the real CS spawn pits instead of the free-for-all ring
+    teamSpawns: {
+      T: [
+        { x: -28.4, y: 23.1, z: 119.9 },
+        { x: -20.7, y: 23.1, z: 119.3 },
+        { x: -18.7, y: 23.1, z: 126.4 },
+        { x: -20.5, y: 23.3, z: 133.6 },
+        { x: -27.7, y: 23.1, z: 129.3 },
+        { x: -34.1, y: 23.5, z: 134.2 },
+        { x: -35.4, y: 24.7, z: 139.2 },
+        { x: -25.6, y: 24.8, z: 139.5 },
+        { x: -8.4, y: 22.1, z: 131.4 },
+        { x: -6.8, y: 21.7, z: 125.1 },
+      ],
+      CT: [
+        { x: 45.5, y: 6.2, z: -78.1 },
+        { x: 38.3, y: 6.2, z: -79.4 },
+        { x: 32.4, y: 6.2, z: -72.1 },
+        { x: 30.4, y: 6.2, z: -80.1 },
+        { x: 35.6, y: 6.2, z: -83.8 },
+        { x: 44.2, y: 6.2, z: -83.6 },
+        { x: 50.6, y: 6.2, z: -88.8 },
+        { x: 45.1, y: 6.2, z: -90.0 },
+        { x: 38.4, y: 6.2, z: -88.7 },
+        { x: 29.9, y: 6.2, z: -88.2 },
+      ],
+    },
   },
+}
+
+export function mapSupportsTeams(id: MapId): boolean {
+  const def = getMapDefinition(id)
+  return !!def.teamSpawns && def.teamSpawns.T.length > 0 && def.teamSpawns.CT.length > 0
 }
 
 export const DEFAULT_MAP_ID: MapId = 'pool_day'

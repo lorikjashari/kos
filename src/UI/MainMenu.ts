@@ -1,5 +1,13 @@
 import type { BotDifficulty } from '../Core/TrainingBot'
-import { DEFAULT_MAP_ID, getMapDefinition, type MapId } from '../Core/MapCatalog'
+import { DEFAULT_MAP_ID, getMapDefinition, mapSupportsTeams, type MapId } from '../Core/MapCatalog'
+import {
+  clampTeamSize,
+  DEFAULT_TEAM_SIZE,
+  MAX_TEAM_SIZE,
+  MIN_TEAM_SIZE,
+  TEAM_LABEL,
+  type Team,
+} from '../Core/Teams'
 import {
   DEFAULT_CROSSHAIR,
   DEFAULT_KEYBINDS,
@@ -44,6 +52,12 @@ export type BotMatchConfig = {
   mapId: MapId
   /** Score/time target that ends the match */
   matchLength: MatchLength
+  /** T vs CT deathmatch instead of free-for-all (Dust II only) */
+  teamPlay?: boolean
+  /** Side you play on when teamPlay is set */
+  playerTeam?: Team
+  /** Players per side, 5–10 */
+  teamSize?: number
 }
 
 type MenuCallbacks = {
@@ -57,6 +71,9 @@ type MenuCallbacks = {
     matchLength: MatchLength
     teamMode: TeamMode
     mapId: MapId
+    teamPlay: boolean
+    playerTeam: Team
+    teamSize: number
   }) => void
   onSettingsChanged: (settings: PlayerSettings) => void
 }
@@ -77,6 +94,11 @@ export class MainMenu {
   private selectedMapId: MapId = DEFAULT_MAP_ID
   private selectedMatchLength: MatchLength = DEFAULT_MATCH_LENGTH
   private selectedTeamMode: TeamMode = 'coop'
+  private teamPlay = false
+  private selectedTeam: Team = 'CT'
+  private selectedTeamSize = DEFAULT_TEAM_SIZE
+  private mpTeamPlay = false
+  private mpTeam: Team = 'CT'
   private currentScreen: 'loading' | 'main' | 'bots' | 'mp' | 'settings' = 'loading'
   private mobileControls: MobileControls | null = null
   private editingMobileLayout = false
@@ -351,8 +373,25 @@ export class MainMenu {
                 <div class="kos-chip-row" id="kos-mp-team">
                   <button type="button" class="kos-chip is-on" data-team="coop">Team up</button>
                   <button type="button" class="kos-chip" data-team="ffa">Free-for-all</button>
+                  <button type="button" class="kos-chip" data-team="teams">T vs CT</button>
                 </div>
                 <p class="kos-hint tight-left" id="kos-team-hint">Everyone who joins fights the bots with you.</p>
+                <div class="kos-team-setup" id="kos-mp-team-setup" hidden>
+                  <div class="kos-section-label">Your side</div>
+                  <div class="kos-chip-row" id="kos-mp-side">
+                    <button type="button" class="kos-chip" data-mp-side="T">Terrorists</button>
+                    <button type="button" class="kos-chip is-on" data-mp-side="CT">Counter-Terrorists</button>
+                  </div>
+                  <label class="kos-field kos-field-inline">
+                    <span>Players per side</span>
+                    <input id="kos-mp-team-size" type="number" min="${MIN_TEAM_SIZE}" max="${MAX_TEAM_SIZE}" step="1" value="${DEFAULT_TEAM_SIZE}" inputmode="numeric" />
+                  </label>
+                  <p class="kos-hint tight-left">Joiners are balanced across sides; bots fill the rest. Up to 10v10.</p>
+                  <div class="kos-soon-banner">
+                    <strong>Bomb Defusal</strong>
+                    <span>Plant and defuse on A / B site — coming soon</span>
+                  </div>
+                </div>
                 <button type="button" class="kos-btn kos-btn-primary kos-start" data-action="mp-host">
                   <span class="kos-btn-label">Create Room</span>
                 </button>
@@ -400,6 +439,37 @@ export class MainMenu {
                 </div>
               </div>
 
+              <div class="kos-mset-card" id="kos-mode-card">
+                <div class="kos-mset-head">
+                  <strong>Game mode</strong>
+                  <em id="kos-mode-hint">Free-for-all — everyone for themselves.</em>
+                </div>
+                <div class="kos-chip-row" id="kos-mode">
+                  <button type="button" class="kos-chip is-on" data-mode="ffa">Deathmatch</button>
+                  <button type="button" class="kos-chip" data-mode="teams">Team Deathmatch</button>
+                  <button type="button" class="kos-chip is-soon" disabled data-mode="bomb">
+                    Bomb Defusal<span class="kos-soon">Soon</span>
+                  </button>
+                </div>
+                <p class="kos-hint tight-left" id="kos-mode-note">Team Deathmatch needs Dust II.</p>
+                <div class="kos-team-setup" id="kos-team-setup" hidden>
+                  <div class="kos-section-label">Your side</div>
+                  <div class="kos-chip-row" id="kos-side">
+                    <button type="button" class="kos-chip" data-side="T">Terrorists</button>
+                    <button type="button" class="kos-chip is-on" data-side="CT">Counter-Terrorists</button>
+                  </div>
+                  <label class="kos-field kos-field-inline">
+                    <span>Players per side</span>
+                    <input id="kos-team-size" type="number" min="${MIN_TEAM_SIZE}" max="${MAX_TEAM_SIZE}" step="1" value="${DEFAULT_TEAM_SIZE}" inputmode="numeric" />
+                  </label>
+                  <p class="kos-hint tight-left" id="kos-team-hint-bots">5v5 — bots fill every empty slot. Teammates get a faint outline.</p>
+                  <div class="kos-soon-banner">
+                    <strong>Bomb Defusal</strong>
+                    <span>Plant and defuse on A / B site — coming soon</span>
+                  </div>
+                </div>
+              </div>
+
               <div class="kos-mset-card">
                 <div class="kos-mset-head">
                   <strong>Match setup</strong>
@@ -411,11 +481,11 @@ export class MainMenu {
                   <button type="button" class="kos-chip is-on" data-diff="medium">Medium</button>
                   <button type="button" class="kos-chip" data-diff="hard">Hard</button>
                 </div>
-                <label class="kos-field kos-field-inline">
+                <label class="kos-field kos-field-inline" id="kos-bot-count-row">
                   <span>How many bots</span>
                   <input id="kos-bot-count" type="number" min="0" max="10" step="1" value="5" inputmode="numeric" />
                 </label>
-                <p class="kos-hint tight-left">Type any amount (0–10).</p>
+                <p class="kos-hint tight-left" id="kos-bot-count-hint">Type any amount (0–10).</p>
                 <div class="kos-section-label">Match length</div>
                 <div class="kos-chip-row" id="kos-length">
                   ${(Object.keys(MATCH_LENGTHS) as MatchLength[])
@@ -805,7 +875,7 @@ export class MainMenu {
       }
 
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-length], [data-team], [data-mp-diff], [data-mp-map], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
+        '[data-action], [data-diff], [data-length], [data-team], [data-mode], [data-side], [data-mp-side], [data-mp-diff], [data-mp-map], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -935,17 +1005,43 @@ export class MainMenu {
         this.root.querySelectorAll('[data-diff]').forEach((el) => el.classList.toggle('is-on', el === t))
       }
 
-      const team = t.getAttribute('data-team') as TeamMode | null
+      const team = t.getAttribute('data-team') as TeamMode | 'teams' | null
       if (team) {
-        this.selectedTeamMode = team
+        this.mpTeamPlay = team === 'teams'
+        this.selectedTeamMode = team === 'teams' ? 'ffa' : team
         this.root.querySelectorAll('[data-team]').forEach((el) => el.classList.toggle('is-on', el === t))
         const hint = this.root.querySelector('#kos-team-hint')
         if (hint) {
           hint.textContent =
             team === 'coop'
               ? 'Everyone who joins fights the bots with you.'
-              : 'Every player for themselves, bots included.'
+              : team === 'teams'
+                ? 'T vs CT — needs Dust II. Bots fill the empty slots.'
+                : 'Every player for themselves, bots included.'
         }
+        if (this.mpTeamPlay) this.selectMap('de_dust2')
+        this.syncTeamControls()
+      }
+
+      const mode = t.getAttribute('data-mode')
+      if (mode === 'ffa' || mode === 'teams') {
+        this.teamPlay = mode === 'teams'
+        if (this.teamPlay) this.selectMap('de_dust2')
+        this.root.querySelectorAll('[data-mode]').forEach((el) => el.classList.toggle('is-on', el === t))
+        this.syncTeamControls()
+      }
+
+      const side = t.getAttribute('data-side') as Team | null
+      if (side === 'T' || side === 'CT') {
+        this.selectedTeam = side
+        this.root.querySelectorAll('[data-side]').forEach((el) => el.classList.toggle('is-on', el === t))
+        this.syncTeamControls()
+      }
+
+      const mpSide = t.getAttribute('data-mp-side') as Team | null
+      if (mpSide === 'T' || mpSide === 'CT') {
+        this.mpTeam = mpSide
+        this.root.querySelectorAll('[data-mp-side]').forEach((el) => el.classList.toggle('is-on', el === t))
       }
 
       const length = t.getAttribute('data-length') as MatchLength | null
@@ -986,6 +1082,13 @@ export class MainMenu {
       botCountInput.value = String(this.selectedBotCount)
     })
 
+    const teamSizeInput = this.root.querySelector('#kos-team-size') as HTMLInputElement | null
+    teamSizeInput?.addEventListener('change', () => {
+      this.selectedTeamSize = this.readTeamSize('#kos-team-size')
+      this.syncTeamControls()
+    })
+    this.syncTeamControls()
+
     const previewCanvas = this.root.querySelector('#kos-xhair-preview') as HTMLCanvasElement
     this.crosshairPreview = new CrosshairRenderer(previewCanvas, this.settings.crosshair)
     this.buildCrosshairControls()
@@ -1002,6 +1105,63 @@ export class MainMenu {
       this.crosshairPreview.resize()
       this.gameCrosshair.resize()
     })
+  }
+
+  /**
+   * Team play only exists on maps with authored side spawns, so the pickers and
+   * the derived bot count follow whichever map is selected.
+   */
+  private syncTeamControls(): void {
+    const supported = mapSupportsTeams(this.selectedMapId)
+    if (!supported) {
+      this.teamPlay = false
+      this.mpTeamPlay = false
+    }
+    this.root.querySelectorAll('[data-mode]').forEach((el) => {
+      const value = el.getAttribute('data-mode')
+      if (value === 'bomb') return
+      el.classList.toggle('is-on', value === (this.teamPlay ? 'teams' : 'ffa'))
+    })
+    this.root.querySelectorAll('[data-team]').forEach((el) => {
+      if (el.getAttribute('data-team') !== 'teams') return
+      el.classList.toggle('is-on', this.mpTeamPlay)
+    })
+
+    const setup = this.root.querySelector('#kos-team-setup') as HTMLElement | null
+    if (setup) setup.hidden = !this.teamPlay
+    const mpSetup = this.root.querySelector('#kos-mp-team-setup') as HTMLElement | null
+    if (mpSetup) mpSetup.hidden = !this.mpTeamPlay
+
+    const note = this.root.querySelector('#kos-mode-note') as HTMLElement | null
+    if (note) {
+      note.textContent = supported
+        ? 'Team Deathmatch runs on Dust II with real T / CT spawns.'
+        : 'Team Deathmatch is Dust II only — picking it switches the map.'
+    }
+    const modeHint = this.root.querySelector('#kos-mode-hint') as HTMLElement | null
+    if (modeHint) {
+      modeHint.textContent = this.teamPlay
+        ? `${TEAM_LABEL[this.selectedTeam]} — kill the other side.`
+        : 'Free-for-all — everyone for themselves.'
+    }
+    const teamHint = this.root.querySelector('#kos-team-hint-bots') as HTMLElement | null
+    if (teamHint) {
+      const size = this.selectedTeamSize
+      teamHint.textContent = `${size}v${size} — bots fill every empty slot. Teammates get a faint outline.`
+    }
+
+    // Bot count is derived from the team size once teams are on
+    const countRow = this.root.querySelector('#kos-bot-count-row') as HTMLElement | null
+    if (countRow) countRow.hidden = this.teamPlay
+    const countHint = this.root.querySelector('#kos-bot-count-hint') as HTMLElement | null
+    if (countHint) countHint.hidden = this.teamPlay
+  }
+
+  private readTeamSize(id: string): number {
+    const input = this.root.querySelector(id) as HTMLInputElement | null
+    const size = clampTeamSize(Number(input?.value))
+    if (input) input.value = String(size)
+    return size
   }
 
   private selectMap(mapId: MapId): void {
@@ -1023,6 +1183,7 @@ export class MainMenu {
     this.root.querySelectorAll('[data-mp-map]').forEach((el) => {
       el.classList.toggle('is-on', el.getAttribute('data-mp-map') === mapId)
     })
+    this.syncTeamControls()
   }
 
   private readBotCount(): number {
@@ -1036,6 +1197,7 @@ export class MainMenu {
     const name = (this.root.querySelector('#kos-name') as HTMLInputElement).value.trim().slice(0, 24)
     this.settings.playerName = name || 'Player'
     this.selectedBotCount = this.readBotCount()
+    this.selectedTeamSize = this.readTeamSize('#kos-team-size')
     const refill = !!(this.root.querySelector('#kos-refill-kill') as HTMLInputElement | null)?.checked
     this.persist()
     this.stopMenuAudio()
@@ -1046,6 +1208,9 @@ export class MainMenu {
       refillAmmoOnKill: refill,
       mapId: this.selectedMapId,
       matchLength: this.selectedMatchLength,
+      teamPlay: this.teamPlay,
+      playerTeam: this.selectedTeam,
+      teamSize: this.selectedTeamSize,
     })
   }
 
@@ -1076,6 +1241,9 @@ export class MainMenu {
       matchLength: this.selectedMatchLength,
       teamMode: this.selectedTeamMode,
       mapId: this.selectedMapId,
+      teamPlay: this.mpTeamPlay,
+      playerTeam: this.mpTeam,
+      teamSize: this.readTeamSize('#kos-mp-team-size'),
     })
   }
 
@@ -2073,6 +2241,40 @@ export class MainMenu {
         color: #fff;
         box-shadow: 0 8px 20px rgba(26, 95, 255, 0.28);
       }
+      .kos-chip:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+        background: #f4f5f8;
+      }
+      .kos-chip:disabled:hover { border-color: var(--kos-line); color: var(--kos-muted); }
+      .kos-chip.is-soon { position: relative; }
+      .kos-soon {
+        display: block;
+        margin-top: 3px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--kos-blue);
+      }
+      .kos-team-setup {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px dashed var(--kos-line);
+      }
+      .kos-team-setup[hidden] { display: none; }
+      .kos-soon-banner {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px dashed rgba(26, 95, 255, 0.35);
+        background: rgba(26, 95, 255, 0.06);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .kos-soon-banner strong { font-size: 12px; letter-spacing: 0.06em; color: var(--kos-blue-deep); }
+      .kos-soon-banner span { font-size: 11px; color: var(--kos-muted); }
       .kos-start {
         width: 100%; margin-top: 8px; justify-content: center;
         font-size: 15px; letter-spacing: 0.08em;

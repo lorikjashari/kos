@@ -33,11 +33,13 @@ import {
   DEFAULT_MAP_ID,
   deriveSpawnsFromGeometry,
   getMapDefinition,
+  mapSupportsTeams,
   spawnsFromBounds,
   type MapId,
   type ProbeFn,
   type SpawnPoint,
 } from './Core/MapCatalog'
+import { clampTeamSize, DEFAULT_TEAM_SIZE, otherTeam, TEAM_COLOR, type Team } from './Core/Teams'
 import {
   flatDistXZ,
   shuffleInPlace,
@@ -93,7 +95,13 @@ export class Game implements IUpdatable {
   /** Seconds left in pre-round lockdown (0 = live) */
   public lockdownTimer = 0
   public readonly lockdownDuration = 3
-  private pendingBotSpawns: Array<{ pos: Vector3D; yaw: number; difficulty: BotDifficulty; name: string }> = []
+  private pendingBotSpawns: Array<{
+    pos: Vector3D
+    yaw: number
+    difficulty: BotDifficulty
+    name: string
+    team: Team | null
+  }> = []
   private botSpawnAcc = 0
   private effectsWarmed = false
   private graphicsWarmed = false
@@ -107,6 +115,11 @@ export class Game implements IUpdatable {
   /** Set once the win condition fires; freezes combat until rematch or menu */
   private matchOver = false
   private teamMode: TeamMode = 'ffa'
+  /** Team deathmatch (T vs CT). Only maps with authored side spawns can run it. */
+  private teamPlay = false
+  private playerTeam: Team = 'CT'
+  private teamSize = DEFAULT_TEAM_SIZE
+  private teamScores: Record<Team, number> = { T: 0, CT: 0 }
   private nameQueue: string[] = []
   private onReturnToMenu: (() => void) | null = null
   private onHideMenu: (() => void) | null = null
@@ -1057,18 +1070,28 @@ export class Game implements IUpdatable {
     this.syncMobileControls()
     this.applyMapMoveSpeed(this.activeMapId)
 
+    this.teamScores = { T: 0, CT: 0 }
+    this.teamSize = clampTeamSize(config.teamSize)
+    this.teamPlay = !!config.teamPlay && mapSupportsTeams(this.activeMapId)
+    if (this.teamPlay) this.playerTeam = config.playerTeam ?? 'CT'
+
+    // Team play fills both sides to the chosen size; the player takes one slot.
+    // A bot count of 0 still means "no bots" (pure PvP lobbies and joining clients).
+    const botCount = this.teamPlay && config.botCount > 0 ? this.teamSize * 2 - 1 : config.botCount
+
     // Assign unique spawns: player first, then bots (never same point)
-    const assignment = this.assignMatchSpawns(config.botCount)
+    const assignment = this.assignMatchSpawns(botCount)
     if (this.currentPlayer) {
       this.currentPlayer.player.teleportToSpawn(assignment.playerPos)
     }
 
-    this.nameQueue = pickBotNames(config.botCount)
+    this.nameQueue = pickBotNames(botCount)
     this.pendingBotSpawns = assignment.botPositions.map((pos, i) => ({
       pos,
       yaw: Math.random() * Math.PI * 2,
       difficulty: config.difficulty,
       name: this.nameQueue[i] || `BOT ${i + 1}`,
+      team: assignment.botTeams[i] ?? null,
     }))
     this.botSpawnAcc = 0
     // Two up front, the rest trickle in during the loadout pick / lockdown so a
@@ -1105,6 +1128,9 @@ export class Game implements IUpdatable {
       refillAmmoOnKill: false,
       mapId,
       matchLength: config.matchLength ?? DEFAULT_MATCH_LENGTH,
+      teamPlay: config.teamPlay,
+      playerTeam: config.playerTeam,
+      teamSize: config.teamSize,
     })
     this.showMpBanner(code, role === 'host')
     return code
@@ -1149,12 +1175,14 @@ export class Game implements IUpdatable {
       const difficulty = this.lastMatchConfig?.difficulty || 'medium'
       const names = pickBotNames(need)
       for (let i = 0; i < need; i++) {
-        const pos = this.pickRespawnPosition(new Vector3D(0, 2, 0), true)
+        const team = this.teamPlay ? this.smallestTeam() : null
+        const pos = this.pickRespawnPosition(new Vector3D(0, 2, 0), true, team)
         this.pendingBotSpawns.push({
           pos,
           yaw: Math.random() * Math.PI * 2,
           difficulty,
           name: names[i] || `BOT ${live.length + i + 1}`,
+          team,
         })
       }
     }
@@ -1374,7 +1402,12 @@ export class Game implements IUpdatable {
    * Pick unique spawn points from MATCH_SPAWNS.
    * Player gets one; bots get others — never the same coordinate.
    */
-  private assignMatchSpawns(botCount: number): { playerPos: Vector3D; botPositions: Vector3D[] } {
+  private assignMatchSpawns(botCount: number): {
+    playerPos: Vector3D
+    botPositions: Vector3D[]
+    botTeams: Array<Team | null>
+  } {
+    if (this.teamPlay) return this.assignTeamSpawns(botCount)
     const spawns = this.activeSpawns
     const indices = shuffleInPlace([...spawns.keys()])
     const playerIdx = indices[0] ?? 0
@@ -1390,7 +1423,41 @@ export class Game implements IUpdatable {
       used.add(idx)
       botPositions.push(spawnToBotVector(spawns[idx]))
     }
-    return { playerPos, botPositions }
+    return { playerPos, botPositions, botTeams: botPositions.map(() => null) }
+  }
+
+  /**
+   * Team deathmatch: each side starts in its own spawn pit. The player takes one
+   * slot on their chosen side, bots fill the rest of both sides.
+   */
+  private assignTeamSpawns(botCount: number): {
+    playerPos: Vector3D
+    botPositions: Vector3D[]
+    botTeams: Array<Team | null>
+  } {
+    const sides = this.teamSpawnLists()
+    const mine = shuffleInPlace([...(sides?.[this.playerTeam] ?? this.activeSpawns)])
+    const theirs = shuffleInPlace([...(sides?.[otherTeam(this.playerTeam)] ?? this.activeSpawns)])
+    const playerPos = spawnToPlayerVector(mine.shift() ?? { x: 0, y: 2, z: 0 })
+
+    const botPositions: Vector3D[] = []
+    const botTeams: Array<Team | null> = []
+    const friends = Math.min(this.teamSize - 1, mine.length)
+    const enemies = Math.min(botCount - friends, theirs.length)
+
+    for (let i = 0; i < friends; i++) {
+      botPositions.push(spawnToBotVector(mine[i]))
+      botTeams.push(this.playerTeam)
+    }
+    for (let i = 0; i < enemies; i++) {
+      botPositions.push(spawnToBotVector(theirs[i]))
+      botTeams.push(otherTeam(this.playerTeam))
+    }
+    return { playerPos, botPositions, botTeams }
+  }
+
+  private teamSpawnLists(): Record<Team, ReadonlyArray<SpawnPoint>> | null {
+    return getMapDefinition(this.activeMapId).teamSpawns ?? null
   }
 
   /**
@@ -1401,7 +1468,8 @@ export class Game implements IUpdatable {
    * Respawn: pick a free spawn far from everyone currently alive.
    * @param forBot — bots use ground Y; player uses capsule Y from the list
    */
-  public pickRespawnPosition(preferAwayFrom?: Vector3D, forBot = false): Vector3D {
+  public pickRespawnPosition(preferAwayFrom?: Vector3D, forBot = false, team?: Team | null): Vector3D {
+    const spawnList = (this.teamPlay && team && this.teamSpawnLists()?.[team]) || this.activeSpawns
     const occupied: Array<{ x: number; z: number }> = []
     const player = this.currentPlayer?.player
     if (player && !player.isDead) {
@@ -1416,8 +1484,8 @@ export class Game implements IUpdatable {
     type Ranked = { idx: number; score: number }
     const ranked: Ranked[] = []
 
-    for (let i = 0; i < this.activeSpawns.length; i++) {
-      const s = this.activeSpawns[i]
+    for (let i = 0; i < spawnList.length; i++) {
+      const s = spawnList[i]
       let nearest = Infinity
       for (const o of occupied) {
         nearest = Math.min(nearest, flatDistXZ(s.x, s.z, o.x, o.z))
@@ -1431,11 +1499,11 @@ export class Game implements IUpdatable {
 
     ranked.sort((a, b) => b.score - a.score)
     const clear = ranked.find((r) => {
-      const s = this.activeSpawns[r.idx]
+      const s = spawnList[r.idx]
       return occupied.every((o) => flatDistXZ(s.x, s.z, o.x, o.z) >= minClear)
     })
     const pick = clear ?? ranked[0]
-    const s = this.activeSpawns[pick?.idx ?? 0] ?? { x: 0, y: 2, z: 0 }
+    const s = spawnList[pick?.idx ?? 0] ?? { x: 0, y: 2, z: 0 }
     return forBot ? spawnToBotVector(s) : spawnToPlayerVector(s)
   }
 
@@ -1447,6 +1515,7 @@ export class Game implements IUpdatable {
         deaths: this.stats.deaths,
         assists: this.stats.assists,
         isYou: true,
+        team: this.teamPlay ? this.playerTeam : undefined,
       },
     ]
     for (const bot of this.trainingBots) {
@@ -1456,9 +1525,14 @@ export class Game implements IUpdatable {
         deaths: bot.deaths,
         assists: bot.assists,
         isYou: false,
+        team: this.teamPlay ? (bot.team ?? undefined) : undefined,
       })
     }
     rows.sort((a, b) => b.kills - a.kills || b.assists - a.assists || a.deaths - b.deaths)
+    if (this.teamPlay) {
+      // Your side first so the board reads as two teams, not one ladder
+      rows.sort((a, b) => Number(b.team === this.playerTeam) - Number(a.team === this.playerTeam))
+    }
     return rows
   }
 
@@ -1479,13 +1553,94 @@ export class Game implements IUpdatable {
     this.teamMode = mode
   }
 
+  /** T vs CT deathmatch is running */
+  public isTeamPlay(): boolean {
+    return this.teamPlay
+  }
+
+  public getLocalPlayerTeam(): Team | null {
+    return this.teamPlay ? this.playerTeam : null
+  }
+
+  public getTeamSize(): number {
+    return this.teamSize
+  }
+
+  public getTeamScores(): Record<Team, number> {
+    return { ...this.teamScores }
+  }
+
+  /** Clients adopt the side the host put them on. */
+  public setLocalPlayerTeam(team: Team): void {
+    if (this.playerTeam === team) return
+    this.playerTeam = team
+    this.moveLocalPlayerToTeamSpawn()
+  }
+
+  /** Turn team play on for a multiplayer match the host configured. */
+  public enableTeamPlay(team: Team, teamSize: number): void {
+    this.teamSize = clampTeamSize(teamSize)
+    if (!mapSupportsTeams(this.activeMapId)) return
+    const changed = !this.teamPlay || this.playerTeam !== team
+    this.teamPlay = true
+    this.playerTeam = team
+    if (changed) this.moveLocalPlayerToTeamSpawn()
+  }
+
+  private moveLocalPlayerToTeamSpawn(): void {
+    if (!this.teamPlay) return
+    const player = this.currentPlayer?.player
+    if (!player || player.isDead) return
+    player.teleportToSpawn(this.pickRespawnPosition(undefined, false, this.playerTeam))
+  }
+
+  public isFriendlyToLocalPlayer(bot: TrainingBot): boolean {
+    if (!this.teamPlay || !bot.team) return false
+    return bot.team === this.playerTeam
+  }
+
+  /** Outline tint for a teammate silhouette; null when they shouldn't be outlined. */
+  public teamOutlineColor(bot: TrainingBot): number | null {
+    if (!this.teamPlay || !bot.team) return null
+    return TEAM_COLOR[bot.team]
+  }
+
+  public areBotsFriendly(a: TrainingBot, b: TrainingBot): boolean {
+    if (!this.teamPlay) return false
+    return !!a.team && a.team === b.team
+  }
+
+  /** Side with fewer bodies — used when filling a lobby with bots mid-match. */
+  private smallestTeam(): Team {
+    const count: Record<Team, number> = { T: 0, CT: 0 }
+    count[this.playerTeam]++
+    for (const bot of this.trainingBots) {
+      if (bot.team) count[bot.team]++
+    }
+    for (const pending of this.pendingBotSpawns) {
+      if (pending.team) count[pending.team]++
+    }
+    return count.T <= count.CT ? 'T' : 'CT'
+  }
+
+  private creditTeam(team: Team | null | undefined): void {
+    if (!this.teamPlay || !team) return
+    this.teamScores[team]++
+  }
+
   /** Highest kill count on the board, used for the "first to N" race. */
   private leadingKills(): number {
+    if (this.teamPlay) return Math.max(this.teamScores.T, this.teamScores.CT)
     let best = this.stats.kills
     for (const bot of this.trainingBots) {
       if (bot.kills > best) best = bot.kills
     }
     return best
+  }
+
+  /** Team play races to a shared team score instead of an individual one. */
+  private raceScore(): number {
+    return this.teamPlay ? this.teamScores[this.playerTeam] : this.stats.kills
   }
 
   private checkMatchEnd(): void {
@@ -1507,9 +1662,12 @@ export class Game implements IUpdatable {
 
     const rows = this.getScoreboardRows()
     const placement = Math.max(1, rows.findIndex((r) => r.isYou) + 1)
+    const won = this.teamPlay
+      ? this.teamScores[this.playerTeam] >= this.teamScores[otherTeam(this.playerTeam)]
+      : placement === 1
     const result: MatchResult = {
       reason,
-      won: placement === 1,
+      won,
       placement,
       totalPlayers: rows.length,
       rows,
@@ -1520,7 +1678,7 @@ export class Game implements IUpdatable {
       headshots: this.stats.headshots,
       bestStreak: this.stats.bestStreak,
       accuracy: this.stats.accuracy(),
-      career: CareerStats.record(this.stats, placement === 1, this.matchElapsed),
+      career: CareerStats.record(this.stats, won, this.matchElapsed),
     }
 
     this.inputManager.gameplayEnabled = false
@@ -1550,13 +1708,24 @@ export class Game implements IUpdatable {
     const { killLimit, timeLimitSec } = this.matchRules
     if (killLimit <= 0 && timeLimitSec <= 0) {
       this.renderer.hud?.setMatchStatus(null)
+      // An endless team match still needs the side scores
+      if (this.teamPlay) {
+        this.renderer.hud?.setTeamScores({
+          you: this.playerTeam,
+          T: this.teamScores.T,
+          CT: this.teamScores.CT,
+        })
+      }
       return
     }
     this.renderer.hud?.setMatchStatus({
-      kills: this.stats.kills,
+      kills: this.raceScore(),
       leaderKills: this.leadingKills(),
       killLimit,
       secondsLeft: timeLimitSec > 0 ? Math.max(0, timeLimitSec - this.matchElapsed) : null,
+      teams: this.teamPlay
+        ? { you: this.playerTeam, T: this.teamScores.T, CT: this.teamScores.CT }
+        : null,
     })
   }
 
@@ -1651,6 +1820,7 @@ export class Game implements IUpdatable {
     while (n < maxThisFrame && this.pendingBotSpawns.length > 0) {
       const p = this.pendingBotSpawns.shift()!
       const bot = new TrainingBot(p.pos, p.yaw, p.difficulty, p.name)
+      bot.team = p.team
       bot.visualModel = 'CsTerrorist'
       bot.weaponKey = botGuns[Math.floor(Math.random() * botGuns.length)]
       bot.addToWorld(this.physics)
@@ -1664,6 +1834,7 @@ export class Game implements IUpdatable {
   /** Player got the kill */
   public onPlayerKill(victim: TrainingBot, weaponKey: string, headshot: boolean): void {
     this.stats.recordKill(headshot)
+    this.creditTeam(this.playerTeam)
     // Assist credit for bots that damaged the victim
     for (const name of victim.damagers) {
       if (name === this.playerName) continue
@@ -1686,6 +1857,7 @@ export class Game implements IUpdatable {
    */
   public onNetworkKill(victimName: string, weaponKey: string, headshot: boolean): void {
     this.stats.recordKill(headshot)
+    this.creditTeam(this.playerTeam)
     this.renderer.hud?.pushKillFeed({
       killer: this.playerName || 'Player',
       victim: victimName,
@@ -1698,6 +1870,7 @@ export class Game implements IUpdatable {
 
   /** Bot killed another bot — always track K; show feed only if you assisted */
   public onBotKilledByBot(killer: TrainingBot, victim: TrainingBot): void {
+    this.creditTeam(killer.team)
     const playerName = this.playerName || 'Player'
     const assisted = victim.playerDamageDealt >= 20 || victim.damagers.has(playerName)
     if (assisted) {
@@ -1722,6 +1895,8 @@ export class Game implements IUpdatable {
 
   public onPlayerDeath(): void {
     this.stats.recordDeath()
+    // Friendly fire is off in team play, so the kill always belongs to the other side
+    this.creditTeam(this.teamPlay ? otherTeam(this.playerTeam) : null)
   }
 
   public clearBots(): void {
@@ -1740,6 +1915,7 @@ export class Game implements IUpdatable {
     for (let i = 0; i < assignment.botPositions.length; i++) {
       const pos = assignment.botPositions[i]
       const bot = new TrainingBot(pos, Math.random() * Math.PI * 2, difficulty, names[i] || `BOT ${i + 1}`)
+      bot.team = assignment.botTeams[i] ?? null
       bot.visualModel = 'CsTerrorist'
       bot.addToWorld(this.physics)
       const renderer = new TrainingBotRenderer(bot)

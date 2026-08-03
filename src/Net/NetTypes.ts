@@ -1,23 +1,31 @@
 import type { TeamMode } from '../Core/MatchStats'
+import type { Team } from '../Core/Teams'
 
 export type NetRole = 'host' | 'client' | 'offline'
+
+export type NetHuman = { id: string; name: string; team?: Team }
 
 export type NetMsg =
   | { t: 'hello'; name: string; peerId: string }
   | {
       t: 'welcome'
       hostName: string
-      humans: Array<{ id: string; name: string }>
+      humans: NetHuman[]
       botTarget: number
       teamMode: TeamMode
       mapId?: 'pool_day' | 'de_dust2'
+      /** Host is running T vs CT */
+      teamPlay?: boolean
+      teamSize?: number
     }
   | {
       t: 'roster'
-      humans: Array<{ id: string; name: string }>
+      humans: NetHuman[]
       botTarget: number
       teamMode: TeamMode
       mapId?: 'pool_day' | 'de_dust2'
+      teamPlay?: boolean
+      teamSize?: number
     }
   | {
       t: 'player'
@@ -49,6 +57,7 @@ export type NetMsg =
         weapon: string
         moving: boolean
         shoot: boolean
+        team?: Team
       }>
     }
   | {

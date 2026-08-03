@@ -13,6 +13,7 @@ import {
 import { roomDirectory, RoomDirectory } from './RoomDirectory'
 import type { MatchLength, TeamMode } from '../Core/MatchStats'
 import type { MapId } from '../Core/MapCatalog'
+import { clampTeamSize, DEFAULT_TEAM_SIZE, otherTeam, type Team } from '../Core/Teams'
 
 export type MultiplayerStartConfig = {
   mode: 'host' | 'join'
@@ -25,9 +26,13 @@ export type MultiplayerStartConfig = {
   teamMode?: TeamMode
   /** Host-chosen map; clients adopt from welcome */
   mapId?: MapId
+  /** Host-chosen T vs CT deathmatch */
+  teamPlay?: boolean
+  playerTeam?: Team
+  teamSize?: number
 }
 
-type HumanRec = { id: string; name: string }
+type HumanRec = { id: string; name: string; team?: Team }
 
 /**
  * Friends multiplayer glue: PeerJS room + snapshot sync + bot fill replace.
@@ -47,6 +52,9 @@ export class MultiplayerMatch {
   /** Host's choice; clients adopt it from welcome/roster */
   private teamMode: TeamMode = 'ffa'
   private mapId: MapId = 'pool_day'
+  private teamPlay = false
+  private teamSize = DEFAULT_TEAM_SIZE
+  private localTeam: Team = 'CT'
 
   public get active(): boolean {
     return this.enabled && this.role !== 'offline'
@@ -74,6 +82,9 @@ export class MultiplayerMatch {
     this.fillBots = Math.max(0, Math.min(MP_FILL_BOTS, Math.round(config.botCount ?? MP_FILL_BOTS)))
     this.teamMode = config.teamMode ?? 'ffa'
     this.mapId = config.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
+    this.teamPlay = !!config.teamPlay && this.mapId === 'de_dust2'
+    this.teamSize = clampTeamSize(config.teamSize)
+    this.localTeam = config.playerTeam ?? 'CT'
     this.enabled = true
     this.humans.clear()
 
@@ -90,7 +101,11 @@ export class MultiplayerMatch {
       const code = await session.createRoom()
       this.role = 'host'
       this.roomCode = code
-      this.humans.set(session.localPeerId, { id: session.localPeerId, name: this.localName })
+      this.humans.set(session.localPeerId, {
+        id: session.localPeerId,
+        name: this.localName,
+        team: this.teamPlay ? this.localTeam : undefined,
+      })
       void roomDirectory.startHosting({
         code,
         host: this.localName,
@@ -186,7 +201,12 @@ export class MultiplayerMatch {
     switch (msg.t) {
       case 'hello': {
         if (!this.isHost) return
-        this.humans.set(fromId, { id: fromId, name: msg.name || 'Player' })
+        const known = this.humans.get(fromId)
+        this.humans.set(fromId, {
+          id: fromId,
+          name: msg.name || 'Player',
+          team: this.teamPlay ? (known?.team ?? this.balancedTeam()) : undefined,
+        })
         this.session.send(fromId, {
           t: 'welcome',
           hostName: this.localName,
@@ -194,6 +214,8 @@ export class MultiplayerMatch {
           botTarget: botTargetForHumans(this.humans.size, this.fillBots),
           teamMode: this.teamMode,
           mapId: this.mapId,
+          teamPlay: this.teamPlay,
+          teamSize: this.teamSize,
         })
         this.broadcastRoster()
         this.reconcileBotCount()
@@ -201,29 +223,43 @@ export class MultiplayerMatch {
         break
       }
       case 'welcome': {
+        const mine = msg.humans.find((h) => h.id === this.session!.localPeerId)
         this.humans.clear()
         for (const h of msg.humans) this.humans.set(h.id, h)
         this.humans.set(this.session.localPeerId, {
           id: this.session.localPeerId,
           name: this.localName,
+          team: mine?.team,
         })
         // The host owns the rule set; a joining client adopts it
         this.teamMode = msg.teamMode ?? 'ffa'
         this.mapId = msg.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
+        this.teamPlay = !!msg.teamPlay
+        this.teamSize = clampTeamSize(msg.teamSize)
+        if (mine?.team) this.localTeam = mine.team
         Game.getInstance().setTeamMode(this.teamMode)
-        void Game.getInstance().adoptMultiplayerMap(this.mapId)
+        void Game.getInstance()
+          .adoptMultiplayerMap(this.mapId)
+          .then(() => this.applyTeamState())
         break
       }
       case 'roster': {
         this.teamMode = msg.teamMode ?? this.teamMode
+        this.teamPlay = msg.teamPlay ?? this.teamPlay
+        this.teamSize = clampTeamSize(msg.teamSize ?? this.teamSize)
         if (msg.mapId === 'de_dust2' || msg.mapId === 'pool_day') {
           this.mapId = msg.mapId
-          void Game.getInstance().adoptMultiplayerMap(this.mapId)
+          void Game.getInstance()
+            .adoptMultiplayerMap(this.mapId)
+            .then(() => this.applyTeamState())
         }
         Game.getInstance().setTeamMode(this.teamMode)
         const keep = new Set(msg.humans.map((h) => h.id))
         this.humans.clear()
         for (const h of msg.humans) this.humans.set(h.id, h)
+        const own = this.humans.get(this.session.localPeerId)?.team
+        if (own) this.localTeam = own
+        this.applyTeamState()
         const game = Game.getInstance()
         for (const bot of [...game.trainingBots]) {
           if (bot.netPeerId && !keep.has(bot.netPeerId) && bot.netPeerId !== this.session.localPeerId) {
@@ -349,8 +385,35 @@ export class MultiplayerMatch {
       botTarget: botTargetForHumans(this.humans.size, this.fillBots),
       teamMode: this.teamMode,
       mapId: this.mapId,
+      teamPlay: this.teamPlay,
+      teamSize: this.teamSize,
     }
     this.session.broadcast(msg)
+  }
+
+  /** Side with fewer humans; ties go to the host's opponents so games start even. */
+  private balancedTeam(): Team {
+    let t = 0
+    let ct = 0
+    for (const human of this.humans.values()) {
+      if (human.team === 'T') t++
+      else if (human.team === 'CT') ct++
+    }
+    if (t === ct) return otherTeam(this.localTeam)
+    return t < ct ? 'T' : 'CT'
+  }
+
+  /** Push the current team assignment into the game (local side + puppets). */
+  private applyTeamState(): void {
+    if (!this.teamPlay) return
+    const game = Game.getInstance()
+    game.enableTeamPlay(this.localTeam, this.teamSize)
+    game.setLocalPlayerTeam(this.localTeam)
+    for (const bot of game.trainingBots) {
+      if (!bot.netPeerId) continue
+      const rec = this.humans.get(bot.netPeerId)
+      if (rec?.team) bot.team = rec.team
+    }
   }
 
   private sendLocalPlayer(): void {
@@ -399,13 +462,16 @@ export class MultiplayerMatch {
         weapon: b.weaponKey,
         moving: b.isMoving,
         shoot: b.shootFlash > 0.05,
+        team: b.team ?? undefined,
       }))
     this.session.broadcast({ t: 'bots', list })
   }
 
   private applyRemotePlayer(msg: Extract<NetMsg, { t: 'player' }>): void {
-    this.humans.set(msg.id, { id: msg.id, name: msg.name })
+    const known = this.humans.get(msg.id)
+    this.humans.set(msg.id, { id: msg.id, name: msg.name, team: known?.team })
     const bot = this.ensurePuppet(`player:${msg.id}`, msg.name, msg.id)
+    bot.team = known?.team ?? null
     bot.netTX = msg.x
     bot.netTY = msg.y
     bot.netTZ = msg.z
@@ -450,6 +516,7 @@ export class MultiplayerMatch {
       bot.isAlive = b.alive
       bot.weaponKey = b.weapon
       bot.isMoving = b.moving
+      bot.team = b.team ?? null
       if (b.shoot) bot.shootFlash = 0.12
       const idx = Game.getInstance().trainingBots.indexOf(bot)
       Game.getInstance().botRenderers[idx]?.setWeapon(TrainingBotRenderer.visualWeaponFor(b.weapon))
@@ -507,7 +574,11 @@ export class MultiplayerMatch {
     if (!this.isHost) return
     const game = Game.getInstance()
     if (!game.matchStarted) return
-    const desired = botTargetForHumans(this.humans.size, this.fillBots)
+    // Team play sizes the fill to the roster: both sides stay full as humans join
+    const desired =
+      this.teamPlay && this.fillBots > 0
+        ? Math.max(0, this.teamSize * 2 - this.humans.size)
+        : botTargetForHumans(this.humans.size, this.fillBots)
     game.reconcileAiBotCount(desired)
   }
 }

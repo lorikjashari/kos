@@ -62,6 +62,9 @@ async function main() {
             matchLength: config.matchLength,
             teamMode: config.teamMode,
             mapId,
+            teamPlay: config.teamPlay,
+            playerTeam: config.playerTeam,
+            teamSize: config.teamSize,
           })
           menu.setMultiplayerStatus(config.mode === 'host' ? `Room ${code}` : `Joined ${code}`)
         } catch (error) {

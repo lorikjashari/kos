@@ -10,6 +10,16 @@ export const BOT_NAME_POOL = [
   'BOT Diart',
   'BOT Albin',
   'BOT Lirak',
+  'BOT Rron',
+  'BOT Endrit',
+  'BOT Blerim',
+  'BOT Arber',
+  'BOT Fisnik',
+  'BOT Granit',
+  'BOT Leart',
+  'BOT Valon',
+  'BOT Kreshnik',
+  'BOT Dren',
 ] as const
 
 export function pickBotNames(count: number): string[] {
@@ -28,6 +38,8 @@ export type ScoreRow = {
   deaths: number
   assists: number
   isYou: boolean
+  /** Only set in team deathmatch */
+  team?: 'T' | 'CT'
 }
 
 /** 0 on either limit means "no limit on this axis". Both 0 is an endless match. */

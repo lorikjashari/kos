@@ -4,6 +4,7 @@ import { BodyPart, damageAtRange, damageForBodyPart } from './BodyPart'
 import { IUpdatable } from '../Interface/IUpdatable'
 import { Game } from '../Game'
 import type { Player } from './Player'
+import type { Team } from './Teams'
 
 /** World Y at or below this → fall through map / void death */
 const VOID_DEATH_Y = -30
@@ -64,6 +65,8 @@ export class TrainingBot implements IUpdatable {
   public readonly spawnPosition: Vector3D
   public difficulty: BotDifficulty
   public name = 'BOT'
+  /** Set only in team deathmatch; null means free-for-all */
+  public team: Team | null = null
   public isMoving = false
   public weaponKey = 'AK47'
   public lastShotDir = new Vector3D(0, 0, -1)
@@ -120,6 +123,8 @@ export class TrainingBot implements IUpdatable {
   private readonly groundSnapDown = 0.85
   private readonly groundSkin = 0.04
   private readonly minWalkableNy = 0.55
+  /** First frame after a spawn gets a taller ground probe so it can settle */
+  private needsGroundSettle = true
   /** Editor mannequin — no move / shoot AI */
   public aiFrozen = false
   /** When true (editor), yaw tracks the local player each frame */
@@ -208,7 +213,9 @@ export class TrainingBot implements IUpdatable {
   public respawn(): void {
     const game = Game.getInstance()
     // Frozen editor bots always return to their fixed spot
-    const pos = this.aiFrozen ? this.spawnPosition.clone() : game.pickRespawnPosition(this.position, true)
+    const pos = this.aiFrozen
+      ? this.spawnPosition.clone()
+      : game.pickRespawnPosition(this.position, true, this.team)
     this.health = 100
     this.isAlive = true
     this.deathAge = 0
@@ -219,6 +226,7 @@ export class TrainingBot implements IUpdatable {
     this.lastPos.copy(pos)
     this.velocityY = 0
     this.isOnGround = true
+    this.needsGroundSettle = true
     if (!this.aiFrozen) {
       this.yaw = Math.random() * Math.PI * 2
     }
@@ -436,7 +444,7 @@ export class TrainingBot implements IUpdatable {
     game: Game,
     player: Player
   ): { kind: 'bot' | 'player'; eye: Vector3D; pos: Vector3D; bot?: TrainingBot } | undefined {
-    if (this.lockedTargetName === '__player__' && !player.isDead) {
+    if (this.lockedTargetName === '__player__' && !player.isDead && !game.isFriendlyToLocalPlayer(this)) {
       return {
         kind: 'player',
         eye: player.position.clone().add(new Vector3D(0, player.eyeOffsetY, 0)),
@@ -445,6 +453,7 @@ export class TrainingBot implements IUpdatable {
     }
     for (const other of game.trainingBots) {
       if (other === this || !other.isAlive) continue
+      if (game.areBotsFriendly(this, other)) continue
       if (other.name === this.lockedTargetName) {
         return {
           kind: 'bot',
@@ -473,6 +482,7 @@ export class TrainingBot implements IUpdatable {
       // In co-op the AI is one side and every human the other, so bots stop
       // fighting each other and remote players become valid targets
       if (coop && !other.isNetworkPuppet) continue
+      if (game.areBotsFriendly(this, other)) continue
       const d = this.flatDist(this.position, other.position)
       const eye = other.position.clone().add(new Vector3D(0, other.eyeHeight, 0))
       let score = d
@@ -492,7 +502,7 @@ export class TrainingBot implements IUpdatable {
       })
     }
 
-    if (!player.isDead) {
+    if (!player.isDead && !game.isFriendlyToLocalPlayer(this)) {
       const d = this.flatDist(this.position, player.position)
       const eye = player.position.clone().add(new Vector3D(0, player.eyeOffsetY, 0))
       const playerBias = this.huntBias === 'player' ? 18 : 9
@@ -676,26 +686,30 @@ export class TrainingBot implements IUpdatable {
     if (!hit.hasHit || !hit.hitPosition) return true
     if (hit.hitPosition.distanceTo(origin) > distance - 0.08) return true
     // Walkable slope ahead — not a blocking wall
-    if (hit.hitNormal && hit.hitNormal.y >= this.minWalkableNy) return true
+    if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) return true
     // Stair / curb we can climb
     if (this.canStepAt(physics, from, flat, Math.min(distance, 1.35))) return true
     return false
   }
 
+  /**
+   * Nearest surface straight down. Steep hits are still reported — a bot that
+   * ignores them has nothing left to stand on and drops through the map.
+   */
   private probeGround(
     physics: Physics,
     x: number,
     z: number,
     fromY: number,
     downDist: number
-  ): { y: number; ny: number } | null {
+  ): { y: number; ny: number; walkable: boolean } | null {
     const from = new Vector3D(x, fromY, z)
     const to = new Vector3D(x, fromY - downDist, z)
     const hit = physics.raycast(from, to)
     if (!hit.hasHit || !hit.hitPosition) return null
-    const ny = hit.hitNormal?.y ?? 1
-    if (ny < this.minWalkableNy) return null
-    return { y: hit.hitPosition.y, ny }
+    // Imported map triangles can face either way; only the tilt matters here
+    const ny = Math.abs(hit.hitNormal?.y ?? 1)
+    return { y: hit.hitPosition.y, ny, walkable: ny >= this.minWalkableNy }
   }
 
   /** True if a short rise ahead is climbable (stairs / curbs / ramps). */
@@ -703,7 +717,7 @@ export class TrainingBot implements IUpdatable {
     const ax = from.x + dir.x * forward
     const az = from.z + dir.z * forward
     const ground = this.probeGround(physics, ax, az, from.y + this.maxStepUp + 0.4, this.maxStepUp + 1.2)
-    if (!ground) return false
+    if (!ground?.walkable) return false
     const stepH = ground.y - from.y
     return stepH >= 0.03 && stepH <= this.maxStepUp
   }
@@ -728,7 +742,7 @@ export class TrainingBot implements IUpdatable {
         this.position.y + this.maxStepUp + 0.35,
         this.maxStepUp + 1.0
       )
-      if (!ground) continue
+      if (!ground?.walkable) continue
       const stepH = ground.y - this.position.y
       if (stepH < 0.03 || stepH > this.maxStepUp) continue
       // Flat tread preferred; allow mild ramps
@@ -754,8 +768,16 @@ export class TrainingBot implements IUpdatable {
    * Bot position is feet/root (not capsule centre like the player).
    */
   private followTerrain(physics: Physics, dt: number): void {
-    const probeUp = 1.8
-    const fallProbe = this.isOnGround ? this.groundSnapDown + 0.15 : 80
+    // Start the probe just above the feet. Reaching higher grabs whatever is
+    // overhead — a door header, the lip of the ledge the bot is standing on —
+    // and reads it as "the floor is far above me", which dropped bots through
+    // solid ground. Climbing is tryStepUp's job, not this one's.
+    // A fresh spawn is the exception: authored spawn heights can sit slightly
+    // inside the floor, so the first frame gets one generous settle probe.
+    const settling = this.needsGroundSettle
+    this.needsGroundSettle = false
+    const probeUp = settling ? 4 : 0.6
+    const fallProbe = this.isOnGround && !settling ? this.groundSnapDown + 0.15 : 400
     const ground = this.probeGround(
       physics,
       this.position.x,
@@ -768,30 +790,27 @@ export class TrainingBot implements IUpdatable {
       const targetY = ground.y + this.groundSkin
       const dy = targetY - this.position.y
 
-      if (dy <= this.maxStepUp && dy >= -this.groundSnapDown) {
-        // On or near a walkable surface — stick to it (ramps / small drops)
+      if (dy >= -this.groundSnapDown || (settling && dy >= -4)) {
+        // On or just above a surface — stick to it (ramps / curbs / small drops)
         this.position.y = targetY
         this.velocityY = 0
         this.isOnGround = true
         return
       }
 
-      if (dy < -this.groundSnapDown) {
-        // Floor is below us — fall toward it
-        this.isOnGround = false
-        this.velocityY -= this.gravity * dt
-        this.position.y += this.velocityY * dt
-        if (this.position.y <= targetY) {
-          this.position.y = targetY
-          this.velocityY = 0
-          this.isOnGround = true
-        }
-        return
+      // Floor is further below — fall toward it and land exactly on top
+      this.isOnGround = false
+      this.velocityY -= this.gravity * dt
+      this.position.y += this.velocityY * dt
+      if (this.position.y <= targetY) {
+        this.position.y = targetY
+        this.velocityY = 0
+        this.isOnGround = true
       }
-
-      // Floor probe is far above (inside geometry) — drop out
+      return
     }
 
+    // Nothing below at all — void death picks them up after the fall
     this.isOnGround = false
     this.velocityY -= this.gravity * dt
     this.position.y += this.velocityY * dt

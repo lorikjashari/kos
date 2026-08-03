@@ -45,6 +45,9 @@ export class TrainingBotRenderer implements IUpdatable {
   /** Static GLB character (editor CS model) — procedural Idle/Walk/Run on its skeleton */
   private staticModel = false
   private wireframeOn = false
+  /** Faint teammate silhouette shells; null colour = no outline */
+  private outlineMeshes: THREE.Mesh[] = []
+  private outlineColor: number | null = null
   private hitZonesOnly = false
   private storedWire: Array<{ mesh: THREE.Mesh; value: boolean }> = []
   private axesHelper?: THREE.AxesHelper
@@ -1297,7 +1300,7 @@ export class TrainingBotRenderer implements IUpdatable {
       this.storedWire = []
       this.mesh.traverse((child) => {
         if (!(child instanceof THREE.Mesh) || !child.material) return
-        if (child.userData?.isGun) return
+        if (child.userData?.isGun || child.userData?.isTeamOutline) return
         if (String(child.name).startsWith('HitZone_')) return
         if (child.name === 'EditorAxes') return
         const mats = Array.isArray(child.material) ? child.material : [child.material]
@@ -1329,7 +1332,7 @@ export class TrainingBotRenderer implements IUpdatable {
     this.hitZonesOnly = on
     this.mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
-      if (child.userData?.isGun) return
+      if (child.userData?.isGun || child.userData?.isTeamOutline) return
       if (String(child.name).startsWith('HitZone_')) {
         child.visible = true
         // Show zones when isolating
@@ -1375,7 +1378,7 @@ export class TrainingBotRenderer implements IUpdatable {
     this.overlayOn = true
     this.mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh) || !child.material) return
-      if (child.userData?.isGun) return
+      if (child.userData?.isGun || child.userData?.isTeamOutline) return
       const part = (child.userData.bodyPart as BodyPart | undefined) ?? this.inferFromParent(child)
       this.storedMaterials.push({ mesh: child, original: child.material })
       child.material = new THREE.MeshBasicMaterial({
@@ -1424,7 +1427,7 @@ export class TrainingBotRenderer implements IUpdatable {
     const isOpaque = opacity >= 1
     this.appliedOpacity = opacity
     this.mesh.traverse((child) => {
-      if (!(child instanceof THREE.Mesh)) return
+      if (!(child instanceof THREE.Mesh) || child.userData?.isTeamOutline) return
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       for (const m of mats) {
         const mat = m as THREE.Material & { opacity?: number; transparent?: boolean }
@@ -1448,7 +1451,7 @@ export class TrainingBotRenderer implements IUpdatable {
     this.appliedOpacity = 1
     // Restore opaque mats after fade
     this.mesh.traverse((child) => {
-      if (!(child instanceof THREE.Mesh)) return
+      if (!(child instanceof THREE.Mesh) || child.userData?.isTeamOutline) return
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       for (const m of mats) {
         const mat = m as THREE.Material & { opacity?: number; transparent?: boolean }
@@ -1497,6 +1500,7 @@ export class TrainingBotRenderer implements IUpdatable {
 
     const want = TrainingBot.showHitboxes && this.bot.isAlive
     if (want !== this.overlayOn) this.setHitboxVisible(want)
+    this.syncTeamOutline()
 
     // Just died this frame — pick fall side, freeze animation base
     if (this.wasAlive && !this.bot.isAlive) {
@@ -1571,6 +1575,77 @@ export class TrainingBotRenderer implements IUpdatable {
     this.syncGunInHand()
   }
 
+  /**
+   * Faint team silhouette: a back-faced copy of each body mesh, pushed out along
+   * its bind-pose normals in the vertex shader so the shell still follows the
+   * skeleton. Cheap enough to keep on every teammate for the whole match.
+   */
+  private setTeamOutline(color: number | null): void {
+    if (this.outlineColor === color) return
+    this.outlineColor = color
+    for (const shell of this.outlineMeshes) {
+      shell.removeFromParent()
+      ;(shell.material as THREE.Material).dispose()
+    }
+    this.outlineMeshes = []
+    if (color === null) return
+
+    const sources: THREE.Mesh[] = []
+    this.mesh.traverse((child) => {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh || !mesh.geometry) return
+      if (child.userData?.isGun || child.userData?.isTeamOutline) return
+      if (mesh.name.startsWith('HitZone_')) return
+      sources.push(mesh)
+    })
+
+    for (const src of sources) {
+      const material = new THREE.MeshBasicMaterial({
+        color,
+        side: THREE.BackSide,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false,
+      })
+      material.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n\ttransformed += normal * 0.055;'
+        )
+      }
+
+      let shell: THREE.Mesh
+      const skinned = src as THREE.SkinnedMesh
+      if (skinned.isSkinnedMesh) {
+        const clone = new THREE.SkinnedMesh(src.geometry, material)
+        clone.bindMode = skinned.bindMode
+        clone.bind(skinned.skeleton, skinned.bindMatrix)
+        shell = clone
+      } else {
+        shell = new THREE.Mesh(src.geometry, material)
+      }
+      shell.userData.isTeamOutline = true
+      shell.name = 'TeamOutline'
+      shell.castShadow = false
+      shell.receiveShadow = false
+      shell.frustumCulled = src.frustumCulled
+      shell.renderOrder = -1
+      shell.position.copy(src.position)
+      shell.quaternion.copy(src.quaternion)
+      shell.scale.copy(src.scale)
+      src.parent?.add(shell)
+      this.outlineMeshes.push(shell)
+    }
+  }
+
+  private syncTeamOutline(): void {
+    const wanted = this.game.isFriendlyToLocalPlayer(this.bot) ? this.game.teamOutlineColor(this.bot) : null
+    this.setTeamOutline(wanted)
+    if (this.outlineMeshes.length === 0) return
+    const visible = this.bot.isAlive
+    for (const shell of this.outlineMeshes) shell.visible = visible
+  }
+
   public flashHit(): void {
     if (!this.mesh) return
     // Cheap full-mesh emissive pulse — no per-material timeout spam
@@ -1596,6 +1671,7 @@ export class TrainingBotRenderer implements IUpdatable {
     } catch {
       /* ignore */
     }
+    this.setTeamOutline(null)
     this.mesh.removeFromParent()
   }
 }

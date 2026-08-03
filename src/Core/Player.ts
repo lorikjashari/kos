@@ -856,7 +856,7 @@ export class Player extends Pawn implements IUpdatable {
       hitScanResult.bodyPart = meshHit.part
       hitScanResult.botIndex = meshHit.botIndex
       const bot = game.trainingBots[meshHit.botIndex]
-      const teammate = game.isCoopTeams() && !!bot?.netPeerId
+      const teammate = (game.isCoopTeams() && !!bot?.netPeerId) || (!!bot && game.isFriendlyToLocalPlayer(bot))
       if (teammate) {
         // Co-op: shots pass through humans rather than hurting them
         hitScanResult.hitBot = false
@@ -1004,7 +1004,7 @@ export class Player extends Pawn implements IUpdatable {
 
   public respawn(position?: Vector3D): void {
     const game = Game.getInstance()
-    const pos = position ?? game.pickRespawnPosition(this.position)
+    const pos = position ?? game.pickRespawnPosition(this.position, false, game.getLocalPlayerTeam())
     this.spawnPoint.copy(pos)
     this.setPosition(pos)
     this.position.copy(pos)
