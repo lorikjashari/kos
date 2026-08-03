@@ -30,10 +30,8 @@ export class SceneLighting implements IUpdatable {
     })
     this.renderer.toneMappingExposure = isTouchDevice() ? 0.92 : 0.72
     this.renderer.setClearColor(isTouchDevice() ? 0xcbdcec : 0xb8cfe4)
-    // Sun shadows only move because the light rig follows the camera, so phones
-    // can refresh them far less often and skip a full map re-render every 150ms
     this.shadowUpdater = new PeriodicUpdater(
-      isTouchDevice() ? 500 : 150,
+      150,
       () => {
         this.renderer.shadowMap.needsUpdate = true
       },

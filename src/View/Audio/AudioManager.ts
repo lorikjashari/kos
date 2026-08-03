@@ -312,21 +312,34 @@ export class AudioManager extends THREE.AudioListener {
     }
 
     this.warmPanners()
+    // Warm both graph shapes: bots play through a panner, the local player plays
+    // straight into master. Each buffer's first decode-to-output pass costs either
+    // way, so run every sound through both.
     for (const id of PRIORITY) {
       const buffer = this.buffers.get(id)
       if (!buffer) continue
-      try {
-        const src = ctx.createBufferSource()
-        src.buffer = buffer
-        const gain = ctx.createGain()
-        gain.gain.value = 0.0001
-        src.connect(gain)
-        gain.connect(this.takePanner(ctx, { x: 0, y: -50, z: 0 }))
-        src.start(0)
-        src.stop(ctx.currentTime + 0.015)
-      } catch {
-        /* ignore */
-      }
+      this.warmOneShot(ctx, buffer, { x: 0, y: -50, z: 0 })
+      this.warmOneShot(ctx, buffer)
+    }
+  }
+
+  private warmOneShot(
+    ctx: AudioContext,
+    buffer: AudioBuffer,
+    worldPos?: { x: number; y: number; z: number }
+  ): void {
+    try {
+      const src = ctx.createBufferSource()
+      src.buffer = buffer
+      const gain = ctx.createGain()
+      gain.gain.value = 0.0001
+      src.connect(gain)
+      if (worldPos) gain.connect(this.takePanner(ctx, worldPos))
+      else gain.connect(this.masterGain)
+      src.start(0)
+      src.stop(ctx.currentTime + 0.015)
+    } catch {
+      /* ignore */
     }
   }
 

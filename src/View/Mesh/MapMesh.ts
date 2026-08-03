@@ -90,12 +90,16 @@ export class MapMesh extends LoadableMesh {
         game.renderer.addToRenderer(faker)
         extras?.push(faker)
 
-        const bulb = new THREE.PointLight(0xffe9cc, 28, 55, 1.4)
-        bulb.position.copy(worldPos)
-        bulb.position.y = Math.max(worldPos.y - 1.5, 3.5)
-        bulb.castShadow = false
-        game.renderer.addToRenderer(bulb)
-        extras?.push(bulb)
+        // The cone mesh already reads as a light source; the bulb behind it is pure
+        // per-fragment cost that phones can't afford on top of the corridor rig
+        if (!mobile) {
+          const bulb = new THREE.PointLight(0xffe9cc, 28, 55, 1.4)
+          bulb.position.copy(worldPos)
+          bulb.position.y = Math.max(worldPos.y - 1.5, 3.5)
+          bulb.castShadow = false
+          game.renderer.addToRenderer(bulb)
+          extras?.push(bulb)
+        }
       } else if ((child as any).isMesh) {
         let mesh = child as THREE.Mesh
         if (!this.materialsPrepared) {
@@ -112,10 +116,12 @@ export class MapMesh extends LoadableMesh {
               // Pool Day is baked dark — lift albedo + emissive so interiors read.
               // Phones get a smaller lift: without shadows the emissive fill was
               // flattening the whole map into one flat tone.
-              const emissiveLift = mobile ? 0.24 : 0.45
+              // Mobile runs far fewer point lights now, so lean harder on the free
+              // self-illumination to keep walled-in corners readable
+              const emissiveLift = mobile ? 0.36 : 0.45
               if (mat.color) {
-                mat.color.multiplyScalar(mobile ? 1.18 : 1.35)
-                mat.color.offsetHSL(0, 0.02, mobile ? 0.015 : 0.04)
+                mat.color.multiplyScalar(mobile ? 1.28 : 1.35)
+                mat.color.offsetHSL(0, 0.02, mobile ? 0.03 : 0.04)
               }
               if ('metalness' in mat) mat.metalness = 0
               if ('roughness' in mat) mat.roughness = 0.92
@@ -143,7 +149,10 @@ export class MapMesh extends LoadableMesh {
             mat.needsUpdate = true
           }
         }
-        mesh.castShadow = true
+        // Pool Day's own shadowing is already baked into its textures, so on mobile
+        // the map only receives. That leaves characters alone in the shadow map,
+        // which makes the shadow pass cheap enough to refresh often.
+        mesh.castShadow = !(mobile && usePoolLights)
         mesh.receiveShadow = true
         mesh.frustumCulled = false
         // Ensure indexed geometry for Ammo trimesh (CS maps often lack indices)
@@ -178,7 +187,35 @@ export class MapMesh extends LoadableMesh {
     if (usePoolLights) this.addIndoorCorridorLights(game, extras)
   }
 
+  /**
+   * MeshStandardMaterial shades every light in the scene on every fragment — there
+   * is no light culling — so the desktop rig's 28 corridor lights cost 28 lots of
+   * per-pixel math on a phone, and get worse the more of the screen a bot covers.
+   * Mobile merges each cluster into one stronger, wider light.
+   */
+  private static readonly MOBILE_CORRIDOR_LIGHTS: Array<{ x: number; y: number; z: number; i: number; r: number }> = [
+    { x: 0, y: 5.4, z: 26, i: 42, r: 62 },
+    { x: 24, y: 4.8, z: 30, i: 38, r: 56 },
+    { x: -24, y: 4.8, z: 30, i: 38, r: 56 },
+    { x: 0, y: 4.6, z: 52, i: 34, r: 58 },
+    { x: 0, y: 4.6, z: 0, i: 30, r: 50 },
+    // The walled-off room in the far corner — was ten separate lights
+    { x: -45.8, y: 3.6, z: 51.6, i: 150, r: 52 },
+    { x: -45.8, y: 5.6, z: 51.6, i: 95, r: 48 },
+  ]
+
   private addIndoorCorridorLights(game: Game, extras?: THREE.Object3D[]): void {
+    if (isTouchDevice()) {
+      for (const spot of MapMesh.MOBILE_CORRIDOR_LIGHTS) {
+        const light = new THREE.PointLight(0xfff0dd, spot.i, spot.r, 1.1)
+        light.position.set(spot.x, spot.y, spot.z)
+        light.castShadow = false
+        game.renderer.addToRenderer(light)
+        extras?.push(light)
+      }
+      return
+    }
+
     const indoors: Array<{ x: number; y: number; z: number; i: number; r: number }> = [
       { x: 0, y: 5.5, z: 18, i: 22, r: 38 },
       { x: 14, y: 5.2, z: 28, i: 20, r: 36 },

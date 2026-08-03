@@ -143,7 +143,8 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
       this.renderingConfig.hasShadow = true
     } else if (profile === 'balanced') {
       this.renderingConfig.hasPostProcess = false
-      this.renderingConfig.hasParticle = true
+      // 2.5k alpha-blended sprites is pure fill rate for ambient dust nobody notices
+      this.renderingConfig.hasParticle = false
       this.renderingConfig.hasShadow = true
     } else {
       this.renderingConfig.hasPostProcess = true

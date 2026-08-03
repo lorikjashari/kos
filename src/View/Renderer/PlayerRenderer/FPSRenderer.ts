@@ -444,6 +444,8 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       if (mesh?.mesh) meshes.push(mesh.mesh)
     }
     this.game.renderer.viewmodelRenderer.warm(renderer, meshes)
+    // Build + lay out the AWP scope DOM now, not on the first right-click
+    this.ensureScopeOverlay().getBoundingClientRect()
     // Restore currently equipped gun under the camera
     if (this.fpsMesh?.mesh) {
       this.viewmodelCamera.add(this.fpsMesh.mesh)

@@ -5,6 +5,7 @@ import type { BodyPart } from '../../Core/BodyPart'
 import { Game } from '../../Game'
 import { ThirdPersonMesh } from '../Mesh/ThirdPersonMesh'
 import { IUpdatable } from '../../Interface/IUpdatable'
+import { isTouchDevice } from '../../UI/MobileDevice'
 
 interface StoredMaterial {
   mesh: THREE.Mesh
@@ -179,6 +180,27 @@ export class TrainingBotRenderer implements IUpdatable {
     this.syncGunInHand()
   }
 
+  /**
+   * The map is lifted with an emissive pass so its interiors read, but bots had no
+   * equivalent, so they sank into black in any corner the sun couldn't reach. Give
+   * them a matching floor of self-illumination from their own albedo.
+   */
+  private static applySkinLift(mat: THREE.MeshStandardMaterial): void {
+    if (!mat || !('emissive' in mat) || !mat.emissive) return
+    const lift = isTouchDevice() ? 0.3 : 0.18
+    if (mat.map) {
+      mat.emissiveMap = mat.map
+      mat.emissive.setRGB(1, 1, 1)
+      mat.emissiveIntensity = lift
+    } else {
+      mat.emissive.copy(mat.color ?? new THREE.Color(0xffffff))
+      mat.emissiveIntensity = lift * 0.7
+    }
+    if ('roughness' in mat) mat.roughness = Math.max(mat.roughness ?? 0.8, 0.7)
+    if ('metalness' in mat) mat.metalness = Math.min(mat.metalness ?? 0, 0.1)
+    mat.needsUpdate = true
+  }
+
   /** CS / Sketchfab character: normalize to player-scale height, feet on ground. */
   private buildStaticModel(meshKey: string): void {
     this.staticModel = true
@@ -207,6 +229,7 @@ export class TrainingBotRenderer implements IUpdatable {
         const mat = m as THREE.MeshStandardMaterial
         mat.side = THREE.DoubleSide
         if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace
+        TrainingBotRenderer.applySkinLift(mat)
       }
     })
 
@@ -376,6 +399,7 @@ export class TrainingBotRenderer implements IUpdatable {
           const mat = m as THREE.MeshStandardMaterial
           mat.side = THREE.DoubleSide
           if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace
+          TrainingBotRenderer.applySkinLift(mat)
         }
       })
       stage.add(model)

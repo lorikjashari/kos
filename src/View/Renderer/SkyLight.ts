@@ -48,13 +48,15 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
     const mobile = isTouchDevice()
     this.mobile = mobile
 
-    this.ambientLight = new THREE.AmbientLight(0xe4edf7, mobile ? 0.72 : 1.6)
+    // Ambient and hemisphere are free (no per-light loop), so with the point-light
+    // count cut they carry the enclosed corners instead
+    this.ambientLight = new THREE.AmbientLight(0xe4edf7, mobile ? 1.25 : 1.6)
     this.renderer.addToRenderer(this.ambientLight)
 
     this.hemiLight = new THREE.HemisphereLight(
-      mobile ? 0xcfe0f5 : 0xd0e4ff,
-      mobile ? 0xc4ab8a : 0xd0c4b0,
-      mobile ? 0.95 : 1.8
+      mobile ? 0xd3e3f7 : 0xd0e4ff,
+      mobile ? 0xcbb595 : 0xd0c4b0,
+      mobile ? 1.5 : 1.8
     )
     this.renderer.addToRenderer(this.hemiLight)
 
@@ -111,19 +113,25 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
 
   /** Soft warm point lights under covered pool areas */
   private addInteriorFillLights(): void {
-    const spots: Array<{ x: number; y: number; z: number; i: number; r: number }> = [
-      { x: 0, y: 6, z: 22, i: 26, r: 50 },
-      { x: 15, y: 5.5, z: 34, i: 22, r: 42 },
-      { x: -15, y: 5.5, z: 34, i: 22, r: 42 },
-      { x: 0, y: 5.5, z: 48, i: 20, r: 48 },
-      { x: 26, y: 5, z: 24, i: 24, r: 38 },
-      { x: -26, y: 5, z: 24, i: 24, r: 38 },
-      { x: 30, y: 4.8, z: 40, i: 22, r: 36 },
-      { x: -30, y: 4.8, z: 40, i: 22, r: 36 },
-    ]
-    const scale = this.mobile ? 0.7 : 1
+    // Every point light is per-fragment work for the whole scene, so mobile gets two
+    // wide ones instead of eight; the map rig covers the rest.
+    const spots: Array<{ x: number; y: number; z: number; i: number; r: number }> = this.mobile
+      ? [
+          { x: 0, y: 6, z: 28, i: 40, r: 70 },
+          { x: 0, y: 5.5, z: 50, i: 32, r: 62 },
+        ]
+      : [
+          { x: 0, y: 6, z: 22, i: 26, r: 50 },
+          { x: 15, y: 5.5, z: 34, i: 22, r: 42 },
+          { x: -15, y: 5.5, z: 34, i: 22, r: 42 },
+          { x: 0, y: 5.5, z: 48, i: 20, r: 48 },
+          { x: 26, y: 5, z: 24, i: 24, r: 38 },
+          { x: -26, y: 5, z: 24, i: 24, r: 38 },
+          { x: 30, y: 4.8, z: 40, i: 22, r: 36 },
+          { x: -30, y: 4.8, z: 40, i: 22, r: 36 },
+        ]
     for (const s of spots) {
-      const p = new THREE.PointLight(0xffe8cc, s.i * scale, s.r, 1.35)
+      const p = new THREE.PointLight(0xffe8cc, s.i, s.r, 1.35)
       p.position.set(s.x, s.y, s.z)
       p.castShadow = false
       this.renderer.addToRenderer(p)
@@ -201,8 +209,8 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
     this.directionalLight.color.setRGB(1, 0.94, 0.85)
     this.fillLight.intensity = mobile ? 0.3 : 0.55
     this.fillLight.color.setRGB(0.66, 0.78, 0.92)
-    this.hemiLight.intensity = mobile ? 0.95 : 1.8
-    this.ambientLight.intensity = mobile ? 0.72 : 1.6
+    this.hemiLight.intensity = mobile ? 1.5 : 1.8
+    this.ambientLight.intensity = mobile ? 1.25 : 1.6
 
     // Thinner, warmer haze on phones — the blue-grey wash was eating all contrast
     const fogColor = new THREE.Color(mobile ? 0xcbdcec : 0xb8cfe4)
@@ -252,11 +260,22 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
   }
 
   private lightUpdater: PeriodicUpdater
+  private readonly lastShadowAnchor = new THREE.Vector3(Infinity, Infinity, Infinity)
 
   private lightUpdate(): void {
-    this.directionalLight.shadow.needsUpdate = true
-    this.position.copy(this.renderer.camera.position)
     const pos = this.renderer.camera.position.clone()
+    this.position.copy(this.renderer.camera.position)
+
+    // Re-rendering the shadow map means redrawing the whole map. Snap the rig to a
+    // grid on mobile so it only happens when the player actually crosses a cell,
+    // not on every tick of a walk.
+    const grid = this.mobile ? 24 : 0
+    if (grid > 0) {
+      pos.set(Math.round(pos.x / grid) * grid, Math.round(pos.y / grid) * grid, Math.round(pos.z / grid) * grid)
+      if (pos.distanceToSquared(this.lastShadowAnchor) < 0.01) return
+      this.lastShadowAnchor.copy(pos)
+    }
+    this.directionalLight.shadow.needsUpdate = true
 
     const sunDir = this.sun.clone().normalize()
     const y = Math.max(sunDir.y, 0.15)
