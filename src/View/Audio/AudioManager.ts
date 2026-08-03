@@ -142,6 +142,54 @@ export class AudioManager extends THREE.AudioListener {
     return this.ctx
   }
 
+  /**
+   * HRTF panners are convolution nodes — building one per bot shot / footstep was
+   * costing real time on every spatial sound. Cycle a fixed ring instead.
+   */
+  private pannerPool: PannerNode[] = []
+  private pannerCursor = 0
+  private static readonly PANNER_POOL_SIZE = 24
+
+  private buildPanner(ctx: AudioContext): PannerNode {
+    const panner = ctx.createPanner()
+    panner.panningModel = 'HRTF'
+    panner.distanceModel = 'inverse'
+    panner.refDistance = 4
+    panner.maxDistance = 72
+    panner.rolloffFactor = 1.35
+    panner.coneInnerAngle = 360
+    panner.coneOuterAngle = 360
+    panner.coneOuterGain = 0
+    panner.connect(this.masterGain)
+    return panner
+  }
+
+  public warmPanners(): void {
+    const ctx = this.getCtx()
+    while (this.pannerPool.length < AudioManager.PANNER_POOL_SIZE) {
+      this.pannerPool.push(this.buildPanner(ctx))
+    }
+  }
+
+  private takePanner(ctx: AudioContext, worldPos: { x: number; y: number; z: number }): PannerNode {
+    if (this.pannerPool.length < AudioManager.PANNER_POOL_SIZE) this.warmPanners()
+    const panner = this.pannerPool[this.pannerCursor % this.pannerPool.length] ?? this.buildPanner(ctx)
+    this.pannerCursor++
+    if (typeof panner.positionX !== 'undefined') {
+      panner.positionX.value = worldPos.x
+      panner.positionY.value = worldPos.y
+      panner.positionZ.value = worldPos.z
+    } else {
+      // Safari / older WebKit
+      ;(panner as PannerNode & { setPosition: (x: number, y: number, z: number) => void }).setPosition(
+        worldPos.x,
+        worldPos.y,
+        worldPos.z
+      )
+    }
+    return panner
+  }
+
   /** Master SFX volume 0..1 (console: volume). */
   public setSfxVolume(v: number): void {
     this.masterVolume = Math.max(0, Math.min(1, v))
@@ -263,6 +311,7 @@ export class AudioManager extends THREE.AudioListener {
       ])
     }
 
+    this.warmPanners()
     for (const id of PRIORITY) {
       const buffer = this.buffers.get(id)
       if (!buffer) continue
@@ -272,19 +321,7 @@ export class AudioManager extends THREE.AudioListener {
         const gain = ctx.createGain()
         gain.gain.value = 0.0001
         src.connect(gain)
-
-        const panner = ctx.createPanner()
-        panner.panningModel = 'HRTF'
-        panner.distanceModel = 'inverse'
-        panner.refDistance = 4
-        panner.maxDistance = 72
-        if (typeof panner.positionX !== 'undefined') {
-          panner.positionX.value = 0
-          panner.positionY.value = -50
-          panner.positionZ.value = 0
-        }
-        gain.connect(panner)
-        panner.connect(this.masterGain)
+        gain.connect(this.takePanner(ctx, { x: 0, y: -50, z: 0 }))
         src.start(0)
         src.stop(ctx.currentTime + 0.015)
       } catch {
@@ -409,35 +446,13 @@ export class AudioManager extends THREE.AudioListener {
 
       if (worldPos) {
         // Headphones: HRTF stereo + distance falloff (far = quiet / silent)
-        const panner = ctx.createPanner()
-        panner.panningModel = 'HRTF'
-        panner.distanceModel = 'inverse'
-        panner.refDistance = 4
-        panner.maxDistance = 72
-        panner.rolloffFactor = 1.35
-        panner.coneInnerAngle = 360
-        panner.coneOuterAngle = 360
-        panner.coneOuterGain = 0
-        if (typeof panner.positionX !== 'undefined') {
-          panner.positionX.value = worldPos.x
-          panner.positionY.value = worldPos.y
-          panner.positionZ.value = worldPos.z
-        } else {
-          // Safari / older WebKit
-          ;(panner as PannerNode & { setPosition: (x: number, y: number, z: number) => void }).setPosition(
-            worldPos.x,
-            worldPos.y,
-            worldPos.z
-          )
-        }
+        const panner = this.takePanner(ctx, worldPos)
         src.connect(gain)
         gain.connect(panner)
-        panner.connect(this.masterGain)
         src.start(0)
         src.onended = () => {
           src.disconnect()
           gain.disconnect()
-          panner.disconnect()
         }
         return
       }

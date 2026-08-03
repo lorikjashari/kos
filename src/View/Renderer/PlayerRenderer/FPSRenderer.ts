@@ -473,17 +473,22 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
 
   /** Dedicated lights so hands/guns aren't crushed by world shadows */
   private createViewmodelLights(): void {
-    const key = new THREE.PointLight(0xfff2e6, 3.2, 3.5, 1.6)
-    key.position.set(0.12, 0.18, 0.32)
+    const key = new THREE.PointLight(0xfff2e6, 5.4, 4.5, 1.35)
+    key.position.set(0.14, 0.2, 0.36)
     key.castShadow = false
 
-    const fill = new THREE.PointLight(0xc8dcff, 1.6, 3, 1.7)
-    fill.position.set(-0.22, 0.06, 0.18)
+    const fill = new THREE.PointLight(0xc8dcff, 2.6, 4, 1.5)
+    fill.position.set(-0.24, 0.07, 0.2)
     fill.castShadow = false
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55)
+    // Rakes along the barrel so the top of the receiver reads instead of going flat black
+    const rim = new THREE.PointLight(0xffd9b0, 2.2, 3.2, 1.6)
+    rim.position.set(0.05, 0.3, -0.28)
+    rim.castShadow = false
 
-    this.viewmodelLights = [key, fill, ambient]
+    const ambient = new THREE.AmbientLight(0xffffff, 1.05)
+
+    this.viewmodelLights = [key, fill, rim, ambient]
   }
 
   public setMesh(mesh: LoadableMesh, playSwitchAnim = true): void {

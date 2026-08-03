@@ -362,7 +362,7 @@ export class TrainingBotRenderer implements IUpdatable {
     TrainingBotRenderer.prebakeGuns(game)
 
     const stage = new THREE.Group()
-    stage.position.set(0, -600, 0)
+    stage.position.set(0, -520, 0)
     const source = game.globalLoadingManager.loadableMeshs.get('CsTerrorist')
     if (source?.mesh) {
       const model = source.cloneMesh() as unknown as THREE.Object3D
@@ -392,6 +392,34 @@ export class TrainingBotRenderer implements IUpdatable {
     try {
       renderer.compile(scene, camera)
       renderer.render(scene, camera)
+
+      // The shadow-depth program is a separate compile, and it only happens while
+      // a shadow caster is actually in the scene
+      if (renderer.shadowMap.enabled) {
+        renderer.shadowMap.needsUpdate = true
+        renderer.render(scene, camera)
+      }
+
+      // Death fades flip `transparent`, which is part of the program cache key.
+      // Compile that variant now so the flip is a cache hit mid-match.
+      const flipped: Array<THREE.Material & { transparent: boolean }> = []
+      stage.traverse((child) => {
+        const mesh = child as THREE.Mesh
+        if (!mesh.isMesh || !mesh.material) return
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        for (const m of mats) {
+          if (m.transparent) continue
+          m.transparent = true
+          m.needsUpdate = true
+          flipped.push(m as THREE.Material & { transparent: boolean })
+        }
+      })
+      renderer.compile(scene, camera)
+      renderer.render(scene, camera)
+      for (const m of flipped) {
+        m.transparent = false
+        m.needsUpdate = true
+      }
     } finally {
       scene.remove(stage)
     }
@@ -1326,15 +1354,28 @@ export class TrainingBotRenderer implements IUpdatable {
     return 1 - Math.pow(1 - x, 3)
   }
 
+  /** Last opacity pushed to this bot's materials — avoids redundant per-frame writes. */
+  private appliedOpacity = 1
+
+  /**
+   * `transparent` is part of the shader program cache key, so flipping it forces a
+   * recompile. Opacity itself is only a uniform. Writing `needsUpdate` every frame
+   * of a death fade recompiled every material on every bot, every frame.
+   */
   private setMeshOpacity(opacity: number): void {
+    if (this.appliedOpacity === opacity) return
+    const wasOpaque = this.appliedOpacity >= 1
+    const isOpaque = opacity >= 1
+    this.appliedOpacity = opacity
     this.mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       for (const m of mats) {
         const mat = m as THREE.Material & { opacity?: number; transparent?: boolean }
-        if (mat) {
-          mat.transparent = true
-          mat.opacity = opacity
+        if (!mat) continue
+        mat.opacity = opacity
+        if (wasOpaque !== isOpaque) {
+          mat.transparent = !isOpaque
           mat.needsUpdate = true
         }
       }
@@ -1347,6 +1388,8 @@ export class TrainingBotRenderer implements IUpdatable {
       if (TrainingBot.showHitboxes) this.applyHitboxOverlay()
       return
     }
+    if (this.appliedOpacity >= 1) return
+    this.appliedOpacity = 1
     // Restore opaque mats after fade
     this.mesh.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return

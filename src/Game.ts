@@ -1445,8 +1445,17 @@ export class Game implements IUpdatable {
     this.graphicsWarmed = true
     try {
       const renderer = this.renderer
-      const camera = renderer.camera
       const fpsRenderer = this.currentPlayer?.renderer as FPSRenderer | undefined
+      /**
+       * Warm effects are staged far below the map so the player never sees them,
+       * which also means the real camera frustum-culls them and their textures are
+       * never uploaded. Render the staging area with a camera that can actually see
+       * it, otherwise the first bot / first hit still pays for the upload.
+       */
+      const camera = new THREE.PerspectiveCamera(110, 1, 0.1, 5000)
+      camera.position.set(0, -500, 250)
+      camera.lookAt(0, -600, 0)
+      camera.updateMatrixWorld(true)
 
       // Wait for muzzle texture so compile actually uploads it
       await renderer.muzzleFlashManager.whenReady()
@@ -1481,6 +1490,9 @@ export class Game implements IUpdatable {
 
       // Force a compile + one render of warm objects
       renderer.compile(renderer.scene, camera)
+      renderer.render(renderer.scene, camera)
+      // Second pass next frame: textures that streamed in during the first draw
+      await new Promise<void>((r) => requestAnimationFrame(() => r()))
       renderer.render(renderer.scene, camera)
       renderer.warmRenderPipeline()
     } catch (e) {

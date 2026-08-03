@@ -47,12 +47,19 @@ export class FPSMesh extends AnimatedLoadableMesh implements IUpdatable {
           const m = mat.clone() as THREE.MeshStandardMaterial
           const lum = m.color.r * 0.2126 + m.color.g * 0.7152 + m.color.b * 0.0722
 
-          // Only lift near-black glove parts
+          // Near-black glove parts get the strongest lift; dark gunmetal gets a
+          // gentler one so the receiver reads instead of silhouetting to black
           if (lum < 0.12) {
-            m.color.offsetHSL(0, 0, 0.08)
+            m.color.offsetHSL(0, 0, 0.1)
             if (m.emissive) {
-              m.emissive.setRGB(0.03, 0.03, 0.03)
-              m.emissiveIntensity = 0.12
+              m.emissive.setRGB(0.04, 0.04, 0.04)
+              m.emissiveIntensity = 0.16
+            }
+          } else if (lum < 0.3) {
+            m.color.offsetHSL(0, 0, 0.05)
+            if (m.emissive) {
+              m.emissive.setRGB(0.025, 0.025, 0.027)
+              m.emissiveIntensity = 0.1
             }
           } else if (m.emissive) {
             m.emissive.setRGB(0, 0, 0)
