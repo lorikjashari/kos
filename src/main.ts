@@ -6,8 +6,11 @@ import { PwaInstall } from './UI/PwaInstall'
 import { loadSettings } from './UI/SettingsStore'
 import { isTouchDevice, mountLandscapeHint } from './UI/MobileDevice'
 import { probeRefreshRate, supportsHighRefresh } from './UI/DisplayRefresh'
+import { installTouchGuard } from './Input/TouchGuard'
 
 async function main() {
+  if (isTouchDevice()) installTouchGuard(document)
+
   const pwa = new PwaInstall()
   await pwa.register()
 

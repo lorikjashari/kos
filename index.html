@@ -65,6 +65,10 @@
         touch-action: none;
         background: #0a1220;
         z-index: 0;
+        /* iOS treats a canvas like an image on long press without this */
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
       }
 
       #game-crosshair {

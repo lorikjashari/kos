@@ -645,6 +645,8 @@ export class MobileControls {
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
       }
       #kos-mobile-controls.is-edit .kos-mc-look {
         pointer-events: none;
