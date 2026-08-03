@@ -1,0 +1,14 @@
+{
+  "markers": [
+    {
+      "name": "Reload_Start",
+      "time": 0.7,
+      "frame": 21
+    },
+    {
+      "name": "Reload_End",
+      "time": 2.35,
+      "frame": 70
+    }
+  ]
+}

@@ -487,13 +487,19 @@ export class GameHUD {
 
   private bakeIcons(): void {
     const ak = this.iconRenderer.getIcon('AK47')
+    const awp = this.iconRenderer.getIcon('AWP')
     const usp = this.iconRenderer.getIcon('Usp')
     const knife = this.iconRenderer.getIcon('Knife')
-    void this.iconRenderer.getIcon('AWP')
     if (ak) this.weaponIconEl.src = ak
-    // Touch USP so first pistol equip never bakes mid-match
-    void usp
     if (knife) this.knifeIconEl.src = knife
+    // Prefill loadout picker images
+    this.loadoutEl?.querySelectorAll<HTMLImageElement>('[data-icon]').forEach((img) => {
+      const key = img.getAttribute('data-icon') || ''
+      const src =
+        key === 'AK47' ? ak : key === 'AWP' ? awp : key === 'Usp' ? usp : key === 'Knife' ? knife : null
+      if (src) img.src = src
+    })
+    void usp
     this.iconsReady = true
   }
 
@@ -504,7 +510,16 @@ export class GameHUD {
 
   private setWeaponIcon(weaponKey: string): void {
     const icon = this.iconRenderer.getIcon(weaponKey)
-    if (icon) this.weaponIconEl.src = icon
+    if (icon) {
+      this.weaponIconEl.src = icon
+      this.weaponIconEl.style.display = ''
+    }
+    const sidearm = weaponKey === 'Usp' || weaponKey === 'Knife'
+    this.weaponIconEl.classList.toggle('is-sidearm', sidearm)
+    // Small knife glyph stays knife; dim it when knife is the active weapon (big icon already shows it)
+    if (this.knifeIconEl) {
+      this.knifeIconEl.style.opacity = weaponKey === 'Knife' ? '0.35' : '0.9'
+    }
   }
 
   private ensureStyles(): void {
@@ -764,6 +779,19 @@ export class GameHUD {
         object-position: right center;
         filter: brightness(0) invert(1) drop-shadow(0 2px 4px rgba(0,0,0,0.5));
       }
+      .cs-weapon-icon.is-sidearm {
+        height: 58px;
+        max-width: 170px;
+      }
+      .cs-knife-icon {
+        height: 28px;
+        width: auto;
+        max-width: 56px;
+        object-fit: contain;
+        filter: brightness(0) saturate(100%) invert(72%) sepia(55%) saturate(500%) hue-rotate(5deg);
+        opacity: 0.9;
+        align-self: flex-end;
+      }
       .cs-ammo-row {
         display: flex;
         align-items: baseline;
@@ -787,15 +815,6 @@ export class GameHUD {
         font-size: 20px;
         font-weight: 700;
         opacity: 0.85;
-      }
-      .cs-knife-icon {
-        height: 20px;
-        width: auto;
-        max-width: 44px;
-        object-fit: contain;
-        filter: brightness(0) saturate(100%) invert(72%) sepia(55%) saturate(500%) hue-rotate(5deg);
-        opacity: 0.9;
-        align-self: flex-end;
       }
 
       .cs-hitmarker {

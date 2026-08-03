@@ -568,9 +568,17 @@ export class Game implements IUpdatable {
     await this.prepareCombat()
     // CS Source T model for the frozen editor dummy
     await this.globalLoadingManager.ensureMesh('CsTerrorist', 'models/cs_terrorist.glb')
-    // Editor-only AK preview — unused fps_mine_sketch pack (gameplay keeps galil AK47)
-    await this.globalLoadingManager.ensureFpsMesh('AkEditor', 'fps_mine_sketch.glb')
-
+    // Editor AK: same AKM as main game (already loaded as AK47). AkmRaw for third-person.
+    await this.globalLoadingManager.ensureMesh(
+      'AkmRaw',
+      'models/akm_assault_rifle_animated.glb'
+    )
+    await this.globalLoadingManager.ensureFpsMesh(
+      'AK47',
+      'models/akm_assault_rifle_animated.glb',
+      new Vector3D(0.2, -0.25, -0.16),
+      false
+    )
     this.teardownEditorTools()
     this.clearBots()
     this.stats.reset()
@@ -722,10 +730,29 @@ export class Game implements IUpdatable {
           this.setEditorTool(this.editorTool === 'select' ? 'translate' : this.editorTool)
         }
         this.botRenderers[0]?.previewAnim(clip)
+        // FPS look: drive viewmodel Idle/Move from the hand pack animations
+        if (this.editorFpsLook) {
+          const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+          const vm = fps?.fpsMesh
+          if (!vm) return
+          if (vm.key === 'AK47') {
+            if (clip === 'Idle') vm.holdPoseAt(0)
+            return
+          }
+          if (clip === 'Idle' && vm.animations.has('Idle')) {
+            vm.playAnimation('Idle', true, true, 1.0)
+          } else if (vm.animations.has('Move')) {
+            vm.playAnimation('Move', true, true, 1.25)
+          }
+        }
       },
       onSelectWeapon: (key) => {
         this.editorWeapon = key
         this.botRenderers[0]?.setWeapon(key)
+        if (this.editorFpsLook) {
+          const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+          fps?.equipEditorWeapon(key)
+        }
       },
       onSelectBone: (boneKey) => this.selectEditorBone(boneKey),
       onBoneRot: (x, y, z) => {
@@ -909,15 +936,12 @@ export class Game implements IUpdatable {
       this.transformControls.enabled = false
       this.transformControls.visible = false
     }
-    // Equip AWP on the player's hands for editor FPS look
-    const player = this.currentPlayer?.player
+    // Editor-only viewmodels (new AKM arms; USP/Knife reuse those arms)
     const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
-    if (player?.setWeapon('AWP')) {
-      fps?.equipWeaponMesh('AWP')
-      void this.audioManager.playSwitch('AWP')
-    } else {
-      fps?.equipWeaponMesh('AWP')
-    }
+    const key = this.editorWeapon === 'Knife' || this.editorWeapon === 'AK' || this.editorWeapon === 'Usp'
+      ? this.editorWeapon
+      : 'AK'
+    fps?.equipEditorWeapon(key)
     this.inputManager.gameplayEnabled = true
     setTimeout(() => this.inputManager.onLock(), 40)
     this.editorMenu?.refresh()

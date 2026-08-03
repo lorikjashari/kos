@@ -33,10 +33,16 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
   }
   public async load(): Promise<void> {
     await super.load()
+    await this.loadAnimationMarkers()
+  }
+
+  /** (Re)load Start/End markers from `<path>.json` — safe to call after HMR retunes. */
+  public async loadAnimationMarkers(): Promise<void> {
     try {
-      const fileName = this.path.split('.')[0]
+      const fileName = this.path.replace(/\.glb$/i, '')
       const json: any = await GlobalLoadingManager.loadJson(`${fileName}.json`)
       const markers: Array<AnimationMarker> = json.markers
+      this.animations.clear()
       for (let i = 0; i < markers.length; i++) {
         const marker: AnimationMarker = markers[i]
         const rawName = marker.name
@@ -44,7 +50,8 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
         const name = content[0]
         const state = content[1]
         if (this.animations.has(name)) {
-          const animationDelimiter: AnimationMarkerDelimiter | undefined = this.animations.get(name)
+          const animationDelimiter: AnimationMarkerDelimiter | undefined =
+            this.animations.get(name)
           animationDelimiter![state] = marker
         } else {
           const animationDelimiter: AnimationMarkerDelimiter = {
@@ -107,17 +114,59 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
     this.animTimeScale = timeScale
 
     const clips = this.mesh.animations;
-    this.lastAnimationDuration =
-      animationMarker!["End"]!.time - animationMarker!["Start"]!.time;
     const start = Math.abs(animationMarker!["Start"]!.time);
+    const end = animationMarker!["End"]!.time;
+    const clipSpan = Math.max(0.05, end - start);
+    // Wall-clock seconds the mixer should keep updating
+    this.lastAnimationDuration = clipSpan / Math.max(0.05, timeScale);
     this.mixer.time = 0;
-    this.mixer.timeScale = timeScale;
+    this.mixer.timeScale = 1;
     for (let i = 0; i < clips.length; i++) {
       const action = this.mixer.clipAction(clips[i]);
+      action.reset();
+      action.paused = false;
+      action.enabled = true;
       action.loop = THREE.LoopOnce;
-      action.time = start;
       action.clampWhenFinished = true;
+      action.timeScale = timeScale;
+      action.time = start;
       action.play();
+    }
+  }
+
+  /** Freeze the viewmodel at a clip time (no loop). Used for editor AK rest pose. */
+  public holdPoseAt(time = 0): void {
+    if (!this.mixer || !this.mesh?.animations?.length) return
+    this.mixer.stopAllAction()
+    this.currentAnimIsLoop = false
+    this.lastAnimationDuration = 0
+    this.currentAnim = undefined as unknown as AnimationMarkerDelimiter
+    this.mixer.time = 0
+    this.mixer.timeScale = 1
+    for (const clip of this.mesh.animations) {
+      const action = this.mixer.clipAction(clip)
+      action.reset()
+      action.enabled = true
+      action.loop = THREE.LoopOnce
+      action.clampWhenFinished = true
+      action.timeScale = 1
+      action.time = Math.max(0, Math.min(time, clip.duration))
+      action.play()
+      action.paused = true
+    }
+    this.mixer.update(0)
+  }
+
+  /** Keep the current pose (e.g. end of reload) without snapping to bind. */
+  public settlePose(): void {
+    if (!this.mixer) return
+    this.currentAnimIsLoop = false
+    this.lastAnimationDuration = 0
+    this.mixer.timeScale = 1
+    for (const clip of this.mesh.animations) {
+      const action = this.mixer.clipAction(clip)
+      action.paused = true
+      action.clampWhenFinished = true
     }
   }
 

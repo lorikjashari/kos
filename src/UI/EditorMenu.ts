@@ -126,10 +126,11 @@ export class EditorMenu {
 
         <section class="kos-ed-sec">
           <div class="kos-ed-label">Weapon</div>
-          <p class="kos-ed-hint" style="margin-bottom:8px">AK uses the editor preview model (fps_mine_sketch) — gameplay AK is unchanged.</p>
+          <p class="kos-ed-hint" style="margin-bottom:8px">Editor preview: AKM pack (arms + anims). USP / Knife = gameplay packs. Match guns unchanged.</p>
           <div class="kos-ed-row kos-ed-anims">
             <button type="button" data-weapon="Usp">USP</button>
             <button type="button" data-weapon="AK" class="is-on">AK</button>
+            <button type="button" data-weapon="Knife">Knife</button>
           </div>
         </section>
 

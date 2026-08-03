@@ -85,6 +85,13 @@ export class TrainingBotRenderer implements IUpdatable {
       rot: [0.05, Math.PI, Math.PI],
       seat: [0.2, 0.05, 0.5],
     },
+    Knife: {
+      mesh: 'Knife',
+      len: 0.55,
+      align: [-3.0434, -0.0173, 3.1104],
+      rot: [0.05, Math.PI, Math.PI],
+      seat: [0.2, 0.04, 0.18],
+    },
     AWP: {
       mesh: 'AwpRaw',
       len: 1.9,
@@ -101,10 +108,11 @@ export class TrainingBotRenderer implements IUpdatable {
     return 'Usp'
   }
 
-  /** Editor-only: AK uses `AkEditor` (fps_mine_sketch.glb). Match bots keep galil `AK47`. */
+  /** AK third-person uses baked `AkmRaw` when available. */
   private resolveGunMeshKey(gunKey: string, defaultMesh: string): string {
-    if (gunKey === 'AK' && this.game.editorActive) {
-      if (this.game.globalLoadingManager.loadableMeshs.has('AkEditor')) return 'AkEditor'
+    if (gunKey === 'AK') {
+      if (this.game.globalLoadingManager.loadableMeshs.has('AkmRaw')) return 'AkmRaw'
+      if (this.game.globalLoadingManager.loadableMeshs.has('AK47')) return 'AK47'
     }
     return defaultMesh
   }
@@ -327,8 +335,52 @@ export class TrainingBotRenderer implements IUpdatable {
       const full = source.cloneMesh() as unknown as THREE.Object3D
       full.updateMatrixWorld(true)
 
+      // New AKM pack: gun parts are static meshes (akm_*), arms are Object_67.
+      // Third-person dummy should only hold the rifle, not FPS arms.
+      if (meshKey === 'AkmRaw' || meshKey === 'AK47') {
+        const gunGroup = new THREE.Group()
+        const align = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(def.align[0], def.align[1], def.align[2], 'XYZ')
+        )
+        full.traverse((c) => {
+          const m = c as THREE.Mesh
+          if (!m.isMesh || !/^akm_/i.test(m.name)) return
+          m.updateWorldMatrix(true, false)
+          const cloned = m.clone(true)
+          cloned.geometry = m.geometry.clone()
+          const pos = cloned.geometry.attributes.position
+          const v = new THREE.Vector3()
+          for (let i = 0; i < pos.count; i++) {
+            v.fromBufferAttribute(pos, i)
+            v.applyMatrix4(m.matrixWorld)
+            v.applyQuaternion(align)
+            pos.setXYZ(i, v.x, v.y, v.z)
+          }
+          pos.needsUpdate = true
+          cloned.geometry.computeVertexNormals()
+          cloned.position.set(0, 0, 0)
+          cloned.rotation.set(0, 0, 0)
+          cloned.scale.set(1, 1, 1)
+          cloned.castShadow = false
+          cloned.receiveShadow = false
+          gunGroup.add(cloned)
+        })
+        if (gunGroup.children.length > 0) {
+          container.add(gunGroup)
+          container.updateMatrixWorld(true)
+          const box = new THREE.Box3().setFromObject(gunGroup)
+          const size = box.getSize(new THREE.Vector3())
+          const center = box.getCenter(new THREE.Vector3())
+          gunGroup.position.sub(center)
+          const longest = Math.max(size.x, size.y, size.z) || 1
+          container.scale.setScalar(def.len / longest)
+          gun = gunGroup
+        }
+      }
+
       // Prefer the FPS "Armature" subtree when present; otherwise bake whole tree.
       let bakeRoot: THREE.Object3D = full
+      if (!gun) {
       full.traverse((c) => {
         if (c.name === 'Armature') bakeRoot = c
       })
@@ -406,6 +458,7 @@ export class TrainingBotRenderer implements IUpdatable {
           gun = gunGroup
         }
       }
+      } // !gun — use classic FPS bake for USP / Knife / galil
     }
 
     if (!gun) {

@@ -71,9 +71,20 @@ export class InputManager implements IUpdatable {
   public applyKeybinds(binds: KeybindMap): void {
     this.codeToAction.clear()
     const merged = { ...DEFAULT_KEYBINDS, ...binds }
+    // Pass 1: movement / jump / actions (never let 1/2/3 steal Space)
+    const weapons = new Set<Key>([Key.One, Key.Two, Key.Three, Key.Four])
     for (const [action, code] of Object.entries(merged)) {
       if (!code) continue
-      this.codeToAction.set(code.toLowerCase(), action as Key)
+      const act = action as Key
+      if (weapons.has(act)) continue
+      this.codeToAction.set(code.toLowerCase(), act)
+    }
+    // Pass 2: weapons only on free codes (fall back to defaults if stolen)
+    for (const act of [Key.One, Key.Two, Key.Three, Key.Four]) {
+      const wanted = (merged[act] || DEFAULT_KEYBINDS[act]).toLowerCase()
+      const taken = this.codeToAction.has(wanted)
+      const code = taken ? DEFAULT_KEYBINDS[act].toLowerCase() : wanted
+      if (!this.codeToAction.has(code)) this.codeToAction.set(code, act)
     }
   }
 
@@ -273,27 +284,38 @@ export class InputManager implements IUpdatable {
 
     // 1 = match primary (AK or AWP), 2 = USP, 3 = knife
     const game = Game.getInstance()
+    const fps = playerRenderer as FPSRenderer | undefined
+    const equip = (viewKey: string, logicKey: string) => {
+      if (game.editorActive) {
+        const ed = viewKey === 'AK47' || viewKey === 'AK' ? 'AK' : viewKey === 'Knife' ? 'Knife' : 'Usp'
+        fps?.equipEditorWeapon(ed)
+        void game.audioManager.playSwitch(logicKey)
+        return
+      }
+      // Re-selecting the same slot still plays the switch / draw
+      const same = player.currentWeapon.key === logicKey
+      if (same || player.setWeapon(logicKey)) {
+        if (same) {
+          fps?.replayWeaponSwitch(logicKey)
+        } else {
+          fps?.equipWeaponMesh(logicKey)
+        }
+        void game.audioManager.playSwitch(logicKey)
+      }
+    }
+
     if (game.isAwaitingLoadout()) {
       if (this.keys.get(Key.One)?.justReleased) game.confirmMatchLoadout('AWP')
       else if (this.keys.get(Key.Two)?.justReleased) game.confirmMatchLoadout('AK47')
     } else if (this.keys.get(Key.One)?.justReleased) {
       const primary = player.primaryWeaponKey
-      if (player.setWeapon(primary)) {
-        ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh(primary)
-        void game.audioManager.playSwitch(primary)
-      }
+      equip(primary, primary)
     } else if (this.keys.get(Key.Two)?.justReleased) {
-      if (player.setWeapon('Usp')) {
-        ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('Usp')
-        void game.audioManager.playSwitch('Usp')
-      }
+      equip('Usp', 'Usp')
     }
 
     if (!game.isAwaitingLoadout() && this.keys.get(Key.Three)?.justReleased) {
-      if (player.setWeapon('Knife')) {
-        ;(playerRenderer as FPSRenderer | undefined)?.equipWeaponMesh('Knife')
-        void Game.getInstance().audioManager.playSwitch('Knife')
-      }
+      equip('Knife', 'Knife')
     }
 
     if (this.playerWrapper.cameraManager instanceof FPSCameraManager) {

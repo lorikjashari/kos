@@ -7,9 +7,17 @@ import { LoadableMesh } from './LoadableMesh'
 export class FPSMesh extends AnimatedLoadableMesh implements IUpdatable {
   private lights: THREE.Light[] = []
   public viewmodelOffset: Vector3D
-  constructor(path: string, key: string, viewmodelOffset = Vector3D.ZERO()) {
+  /** Mine-sketch packs need a -1 scale flip; Sketchfab AKM does not. */
+  private invertScale: boolean
+  constructor(
+    path: string,
+    key: string,
+    viewmodelOffset = Vector3D.ZERO(),
+    invertScale = true
+  ) {
     super(path, key)
     this.viewmodelOffset = viewmodelOffset
+    this.invertScale = invertScale
   }
   update(dt: number): void {
     super.update(dt)
@@ -22,7 +30,7 @@ export class FPSMesh extends AnimatedLoadableMesh implements IUpdatable {
     // Already prepared (pooled / re-equipped) — skip expensive material clone pass
     if (this.meshPrepared) return
 
-    this.mesh.scale.multiplyScalar(-1)
+    if (this.invertScale) this.mesh.scale.multiplyScalar(-1)
     this.meshPrepared = true
     this.mesh.traverse((child) => {
       child.castShadow = false
@@ -73,7 +81,7 @@ export class FPSMesh extends AnimatedLoadableMesh implements IUpdatable {
   }
 
   public clone(): FPSMesh {
-    const clone = new FPSMesh(this.path, this.key, this.viewmodelOffset)
+    const clone = new FPSMesh(this.path, this.key, this.viewmodelOffset, this.invertScale)
     clone.setMesh(this.cloneMesh())
     clone.setAnimations(this.animations)
     return clone

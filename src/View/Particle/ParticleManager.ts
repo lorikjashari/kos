@@ -40,6 +40,7 @@ export class ParticleManager extends ParticleSystem implements IUpdatable {
       const fpsRenderer = game.currentPlayer.renderer as FPSRenderer;
       const fpsMesh = fpsRenderer.fpsMesh;
       p.target = this.targetPool.get(bulletMesh);
+      // Local +X; mesh scale.x flips with left-hand so eject side follows the gun
       p.target.position.set(1, -1, -2);
       p.target.scale.set(0.04, 0.04, 0.04);
       // TODO: fix heap size memory

@@ -67,9 +67,25 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     // Back-compat alias used by older call sites
     this.loadableMeshs.set('Map', mapmesh)
 
-    const ak = new FPSMesh('fps_mine_sketch_galil.glb', 'AK47')
+    // Galil pack kept for AWP hands / armature seat
+    const akHands = new FPSMesh('fps_mine_sketch_galil.glb', 'AK47Hands')
+    await akHands.load()
+    akHands.register(this.loadableMeshs)
+
+    // Main AK: Sketchfab AKM (own arms + Scene reload)
+    const ak = new FPSMesh(
+      'models/akm_assault_rifle_animated.glb',
+      'AK47',
+      new Vector3D(0.2, -0.25, -0.16),
+      false
+    )
     await ak.load()
     ak.register(this.loadableMeshs)
+
+    // Same GLB for third-person bake — clone in memory, don't reload 33MB
+    const akmRaw = new LoadableMesh('models/akm_assault_rifle_animated.glb', 'AkmRaw')
+    akmRaw.setMesh(ak.cloneMesh())
+    akmRaw.register(this.loadableMeshs)
 
     const usp = new FPSMesh('fps_mine_sketch_compressed.glb', 'Usp', new Vector3D(-0.09, 0.26, 0.35))
     await usp.load()
@@ -88,15 +104,15 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     await csT.load()
     csT.register(this.loadableMeshs)
 
-    // CS2 AWP mesh — composed with AK hands into an FPS viewmodel
+    // CS2 AWP mesh — composed with Galil hands into an FPS viewmodel
     const awpRaw = new LoadableMesh('models/awp.glb', 'AwpRaw')
     await awpRaw.load()
     awpRaw.register(this.loadableMeshs)
-    this.registerAwpViewmodel(ak)
+    this.registerAwpViewmodel(akHands)
   }
 
   /**
-   * FPS AWP base: AK hands + animations. Keep the Armature node (seat for the
+   * FPS AWP base: Galil hands + animations. Keep the Armature node (seat for the
    * AWP prop) but hide the Galil gun meshes.
    */
   private registerAwpViewmodel(akSource: FPSMesh): void {
@@ -115,6 +131,67 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     })
 
     awpFps.register(this.loadableMeshs)
+  }
+
+  /** Bake AKM rifle meshes (no Sketchfab arms) for third-person / HUD icons. */
+  public createAkmViewProp(): THREE.Group | undefined {
+    const akmRaw = this.loadableMeshs.get('AkmRaw')
+    if (!akmRaw?.mesh) return undefined
+    const full = akmRaw.cloneMesh() as unknown as THREE.Object3D
+    full.updateMatrixWorld(true)
+
+    const group = new THREE.Group()
+    const fallbackMat = new THREE.MeshBasicMaterial({
+      color: 0x2c3238,
+      side: THREE.DoubleSide,
+    })
+
+    full.traverse((c) => {
+      const m = c as THREE.Mesh
+      if (!m.isMesh || !m.name || !/^akm_/i.test(m.name)) return
+      // Prefer leaf meshes with geometry
+      if (!m.geometry) return
+      m.updateWorldMatrix(true, false)
+      const geo = m.geometry.clone()
+      geo.applyMatrix4(m.matrixWorld)
+      geo.computeVertexNormals()
+
+      let mat: THREE.Material | THREE.Material[] = fallbackMat
+      if (m.material) {
+        const srcMats = Array.isArray(m.material) ? m.material : [m.material]
+        const hasMap = srcMats.some((x) => !!(x as THREE.MeshStandardMaterial).map)
+        if (hasMap) {
+          const mapped = srcMats.map((x) => {
+            const src = x as THREE.MeshStandardMaterial
+            const basic = new THREE.MeshBasicMaterial({
+              map: src.map,
+              color: 0xffffff,
+              side: THREE.DoubleSide,
+            })
+            if (basic.map) basic.map.colorSpace = THREE.SRGBColorSpace
+            return basic
+          })
+          mat = mapped.length === 1 ? mapped[0] : mapped
+        } else {
+          mat = Array.isArray(m.material) ? m.material.map((x) => x.clone()) : m.material.clone()
+        }
+      }
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.name = m.name
+      mesh.castShadow = false
+      mesh.receiveShadow = false
+      mesh.frustumCulled = false
+      group.add(mesh)
+    })
+
+    if (group.children.length === 0) return undefined
+    group.updateMatrixWorld(true)
+    const box = new THREE.Box3().setFromObject(group)
+    const center = box.getCenter(new THREE.Vector3())
+    for (const child of group.children) {
+      child.position.sub(center)
+    }
+    return group
   }
 
   /** Bake a fresh AWP prop for attaching onto the FPS Armature seat. */
@@ -241,10 +318,21 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
   }
 
   /** Load an FPS pack (Armature + markers) once — used for editor-only weapon previews. */
-  public async ensureFpsMesh(meshKey: string, glbPath: string): Promise<FPSMesh> {
+  public async ensureFpsMesh(
+    meshKey: string,
+    glbPath: string,
+    viewmodelOffset = Vector3D.ZERO(),
+    invertScale = true
+  ): Promise<FPSMesh> {
     const existing = this.loadableMeshs.get(meshKey)
-    if (existing instanceof FPSMesh) return existing
-    const mesh = new FPSMesh(glbPath, meshKey)
+    if (existing instanceof FPSMesh) {
+      // Keep seat in sync when callers retune offset (HMR / re-enter editor).
+      // Mutate in place — clones share this Vector3D reference.
+      existing.viewmodelOffset.copy(viewmodelOffset)
+      await existing.loadAnimationMarkers()
+      return existing
+    }
+    const mesh = new FPSMesh(glbPath, meshKey, viewmodelOffset, invertScale)
     await mesh.load()
     mesh.register(this.loadableMeshs)
     return mesh

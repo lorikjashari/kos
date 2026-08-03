@@ -62,6 +62,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     super.handleShoot(hitscanResult)
     const key = this.player.currentWeapon.key
     const isMelee = this.player.currentWeapon.fireMode === 'melee'
+    const akm = this.isAkmFps()
     if (key === 'AWP') {
       this.fpsMesh.playAnimation('Shoot', false, true, 1.05)
       this.recoilEffect = 0.24
@@ -70,12 +71,22 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.028
       this.weaponBobbingAcc.z += 0.012
     } else if (key === 'AK47') {
-      this.fpsMesh.playAnimation('Shoot', false, true, 1.85)
-      this.recoilEffect = 0.13
-      this.recoilRecover = 3.4
-      this.weaponBobbingAcc.x += 0.016
-      this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.012
-      this.weaponBobbingAcc.z += 0.008
+      if (!akm) this.fpsMesh.playAnimation('Shoot', false, true, 1.85)
+      if (akm) {
+        // Soft punch that eases back — no pose snap
+        this.akShootKick = 1
+        this.recoilEffect = Math.min(0.11, this.recoilEffect + 0.05)
+        this.recoilRecover = 1.85
+        this.weaponBobbingAcc.x += 0.022
+        this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.01
+        this.weaponBobbingAcc.z += 0.004
+      } else {
+        this.recoilEffect = 0.13
+        this.recoilRecover = 3.4
+        this.weaponBobbingAcc.x += 0.016
+        this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.012
+        this.weaponBobbingAcc.z += 0.008
+      }
     } else {
       this.fpsMesh.playAnimation('Shoot', false, true, 1.55)
       this.recoilEffect = isMelee ? 0.06 : 0.11
@@ -94,6 +105,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (scopedAwp && rezoomLevel > 0) {
       this.beginScopedBoltCycle(rezoomLevel as 1 | 2)
     }
+    if (akm) return
     const shootScale = key === 'AWP' ? 1.05 : key === 'AK47' ? 1.85 : 1.55
     this.scheduleIdleReturn('Shoot', shootScale)
   }
@@ -101,21 +113,36 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   public handleReload(): void {
     this.clearScope(false)
     const meshKey = this.fpsMesh?.key
-    const scale = this.player.currentWeapon.key === 'AWP' ? 1.35 : 1.55
+    const akm = this.isAkmFps()
+    const reloadTime = Math.max(0.4, this.player.currentWeapon.reloadTime || 2.4)
+    const rel = this.fpsMesh.animations.get('Reload')
+    let scale = this.player.currentWeapon.key === 'AWP' ? 1.35 : 1.55
+    let durSec = 0.2
+    if (akm && rel?.Start && rel?.End) {
+      // Play full mag clip (~bit faster than realtime) — don't cut early
+      const clipLen = Math.max(0.2, rel.End.time - Math.abs(rel.Start.time))
+      scale = 1.2
+      durSec = clipLen / scale
+    } else if (rel?.Start && rel?.End) {
+      durSec = Math.max(0.2, (rel.End.time - Math.abs(rel.Start.time)) / scale)
+    }
     this.fpsMesh.playAnimation('Reload', false, true, scale)
-    this.locomotionBusyUntil = performance.now() + 3200
+    this.locomotionBusyUntil = performance.now() + Math.max(reloadTime, durSec) * 1000 + 80
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
     }
-    const rel = this.fpsMesh.animations.get('Reload')
-    if (rel?.Start && rel?.End && this.fpsMesh.animations.has('Idle')) {
-      const durSec = Math.max(0.2, (rel.End.time - Math.abs(rel.Start.time)) / scale)
-      this.locomotionBusyUntil = performance.now() + durSec * 1000 + 80
+    if (rel?.Start && rel?.End) {
       window.setTimeout(() => {
-        if (this.fpsMesh?.key === meshKey && this.fpsMesh.animations.has('Idle')) {
+        if (this.fpsMesh?.key !== meshKey) return
+        if (akm) {
+          // Back to ready hold after full clip (don't freeze on reload end frame)
+          this.fpsMesh.holdPoseAt(0)
+          return
+        }
+        if (this.fpsMesh.animations.has('Idle')) {
           this.fpsMesh.playAnimation('Idle', true, true, 1.0)
         }
-      }, durSec * 1000 + 40)
+      }, durSec * 1000 + 60)
     }
   }
 
@@ -124,6 +151,11 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.switchVelocity = 0.05
     const meshKey = this.fpsMesh?.key
     const key = this.fpsMesh?.key
+    if (this.isAkmFps()) {
+      this.fpsMesh.holdPoseAt(0)
+      this.startAkDrawUp()
+      return
+    }
     const scale = key === 'AWP' ? 1.25 : key === 'AK47' ? 1.45 : 1.5
     this.fpsMesh.playAnimation('Switch', false, true, scale)
     this.weaponBobbingAcc.x += 0.02
@@ -143,10 +175,15 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     }
   }
 
+  /** Raise editor AK from below into the ready hold. */
+  private startAkDrawUp(): void {
+    this.akDrawT = FPSRenderer.AK_DRAW_DUR
+  }
+
   private scheduleIdleReturn(fromAnim: string, timeScale: number): void {
     const meshKey = this.fpsMesh?.key
     const clip = this.fpsMesh.animations.get(fromAnim)
-    if (!clip?.Start || !clip?.End || !this.fpsMesh.animations.has('Idle')) return
+    if (!clip?.Start || !clip?.End) return
     const durSec = Math.max(0.12, (clip.End.time - Math.abs(clip.Start.time)) / timeScale)
     this.locomotionBusyUntil = Math.max(this.locomotionBusyUntil, performance.now() + durSec * 1000)
     window.setTimeout(() => {
@@ -154,11 +191,18 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       if (this.scopeLevel > 0) return
       const cur = this.fpsMesh.getCurrentAnimName()
       if (cur === 'Reload' || cur === 'Switch') return
+      if (this.isAkmFps()) {
+        this.fpsMesh.holdPoseAt(0)
+        return
+      }
+      if (!this.fpsMesh.animations.has('Idle')) return
       this.fpsMesh.playAnimation('Idle', true, true, 1.0)
     }, durSec * 1000 + 30)
   }
 
   private updateLocomotionAnim(): void {
+    // AKM: frozen hold — only Reload plays from the Scene clip
+    if (this.isAkmFps()) return
     if (!this.fpsMesh?.animations.has('Move')) return
     if (this.scopeLevel > 0) return
     if (performance.now() < this.locomotionBusyUntil) return
@@ -179,6 +223,15 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   private recoilRecover = 2.5
   private idleSwayTime = 0
   private locomotionBusyUntil = 0
+  /** AKM: seconds left on draw-up from below */
+  private akDrawT = 0
+  private static readonly AK_DRAW_DUR = 0.42
+  /** AKM: 1→0 shoot kick envelope */
+  private akShootKick = 0
+  /** Sketchfab AKM viewmodel (main AK47 + editor alias). */
+  private isAkmFps(): boolean {
+    return this.fpsMesh?.key === 'AK47'
+  }
   /** 0 hipfire, 1 first zoom, 2 second zoom — AWP only */
   private scopeLevel = 0
   private pendingRezoomLevel = 0
@@ -220,6 +273,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.initParticleEmitter()
     this.equipWeaponMesh('AK47', false)
     player.setWeapon('AK47')
+    this.fpsMesh?.holdPoseAt(0)
     this.setFov(this.baseFov)
     if (this.showDebug) {
       const debugUI: DebugUI = this.game.renderer.debugUI
@@ -262,13 +316,17 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     const mesh = source.clone() as FPSMesh
     mesh.init()
     if (key === 'AWP') this.attachAwpProp(mesh)
-    for (const animName of ['Shoot', 'Reload', 'Switch']) {
-      if (mesh.animations.has(animName)) {
-        mesh.playAnimation(animName)
+    if (key === 'AK47') {
+      mesh.holdPoseAt(0)
+    } else {
+      for (const animName of ['Shoot', 'Reload', 'Switch']) {
+        if (mesh.animations.has(animName)) {
+          mesh.playAnimation(animName)
+        }
       }
+      mesh.mixer?.stopAllAction()
+      mesh.mixer?.setTime(0)
     }
-    mesh.mixer?.stopAllAction()
-    mesh.mixer?.setTime(0)
     this.weaponCache.set(key, mesh)
     return mesh
   }
@@ -312,6 +370,46 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       })
     }
     if (seat) seat.attach(prop)
+  }
+
+  /**
+   * Editor FPS viewmodels — AK uses the same AKM pack as the main game.
+   */
+  public equipEditorWeapon(key: string): boolean {
+    const normalized = key === 'AK' || key === 'AK47' ? 'AK' : key === 'Knife' ? 'Knife' : 'Usp'
+    if (normalized === 'AK') {
+      const already = this.isAkmFps()
+      if (!already) {
+        const ok = this.equipWeaponMesh('AK47', false)
+        if (!ok) return false
+      }
+      this.player.setWeapon('AK47')
+      this.fpsMesh?.holdPoseAt(0)
+      this.startAkDrawUp()
+      return true
+    }
+
+    const packKey = normalized === 'Knife' ? 'Knife' : 'Usp'
+    const already = this.fpsMesh?.key === packKey
+    if (!already) {
+      const ok = this.equipWeaponMesh(packKey, true)
+      if (!ok) return false
+      this.player.setWeapon(packKey)
+      return true
+    }
+    this.player.setWeapon(packKey)
+    this.handleWeaponSwitch()
+    return true
+  }
+
+  /** Same-slot re-press: play switch/draw without rebuilding the mesh. */
+  public replayWeaponSwitch(logicKey: string): void {
+    if (this.isAkmFps() || logicKey === 'AK47') {
+      this.fpsMesh?.holdPoseAt(0)
+      this.startAkDrawUp()
+      return
+    }
+    this.handleWeaponSwitch()
   }
 
   /**
@@ -398,12 +496,17 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.applyHandSide()
     this.show()
     if (playSwitchAnim) this.handleWeaponSwitch()
+    else if (this.isAkmFps()) this.fpsMesh.holdPoseAt(0)
   }
 
   /** Flip viewmodel between right / left hand */
   public toggleHands(): void {
     this.handSide = this.handSide === 1 ? -1 : 1
     this.applyHandSide()
+  }
+
+  public getHandSide(): 1 | -1 {
+    return this.handSide
   }
 
   private applyHandSide(): void {
@@ -414,6 +517,18 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     const bz = this.baseViewScale.z
     this.fpsMesh.mesh.scale.set(this.handSide === 1 ? bx : -bx, by, bz)
     this.fpsMesh.mesh.visible = true
+  }
+
+  /** Muzzle flash follows the active hand (flips with H / SwitchHands). */
+  protected getMuzzleOrigin(): Vector3D {
+    const eye = this.player.position.clone().add(new Vector3D(0, this.player.eyeOffsetY, 0))
+    const direction = this.player.lookingDirection.clone().normalize()
+    // cross(up, look) points screen-left when looking down -Z; negate so +handSide = gun side
+    const side = new Vector3D().crossVectors(new Vector3D(0, 1, 0), direction).normalize()
+    return eye
+      .add(direction.clone().multiplyScalar(0.9))
+      .add(side.multiplyScalar(-0.22 * this.handSide))
+      .add(new Vector3D(0, -0.12, 0))
   }
 
   private initViewmodelPosition(): void {
@@ -460,14 +575,37 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.weaponBobbingAcc.y = lerp(this.weaponBobbingAcc.y, 0, bobbingLerpAmount)
     this.weaponBobbingAcc.z = lerp(this.weaponBobbingAcc.z, 0, bobbingLerpAmount)
 
-    this.fpsMesh.mesh.rotation.x = -this.weaponBobbingAcc.x + this.weaponRotation.x
+    // Editor AK draw-up from below → ready
+    let drawY = 0
+    let drawPitch = 0
+    if (this.akDrawT > 0) {
+      this.akDrawT = Math.max(0, this.akDrawT - dt)
+      const u = 1 - this.akDrawT / FPSRenderer.AK_DRAW_DUR
+      const e = 1 - Math.pow(1 - u, 3)
+      drawY = -0.58 * (1 - e)
+      drawPitch = 0.42 * (1 - e)
+    }
+
+    // Editor AK shoot kick — ease back (linear decay feels less "snap")
+    let kickPitch = 0
+    let kickZ = 0
+    if (this.akShootKick > 0) {
+      this.akShootKick = Math.max(0, this.akShootKick - dt * 2.4)
+      const k = this.akShootKick
+      kickPitch = 0.036 * k
+      kickZ = 0.006 * k
+    }
+
+    // Jump/fall tip — per-frame offset only (never accumulate into bobbingAcc)
+    const jumpPitch = Math.max(
+      -Math.PI / 128,
+      Math.min(Math.PI / 90, this.player.velocity.y / 3200)
+    )
+
+    this.fpsMesh.mesh.rotation.x =
+      -this.weaponBobbingAcc.x + this.weaponRotation.x + drawPitch + kickPitch + jumpPitch
     this.fpsMesh.mesh.rotation.y = -this.weaponBobbingAcc.y + this.weaponRotation.y
     this.fpsMesh.mesh.rotation.z = -this.weaponBobbingAcc.z + this.weaponRotation.z
-
-    let jumpBobbing = this.player.velocity.y / 2500
-    jumpBobbing = Math.max(-Math.PI / 128, jumpBobbing)
-
-    this.weaponBobbingAcc.x += jumpBobbing
 
     const spd = Math.hypot(this.player.velocity.x, this.player.velocity.z)
     const moveAmp = Math.min(1, spd / 8)
@@ -476,6 +614,10 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       Math.sin(this.idleSwayTime * 1.15) * 0.0028 + Math.sin(this.idleSwayTime * 2.4) * 0.0009
     const idleSwayY =
       Math.cos(this.idleSwayTime * 0.85) * 0.0021 + Math.cos(this.idleSwayTime * 1.9) * 0.0007
+    // Slight dip while airborne, recover on ground — not the weapon draw-up
+    const airY = this.player.isOnGround
+      ? 0
+      : Math.min(0.04, Math.max(-0.06, -this.player.velocity.y * 0.004))
     this.fpsMesh.mesh.position.x =
       (this.weaponOffset.x + this.fpsMesh.viewmodelOffset.x + idleSwayX) * this.handSide
     this.fpsMesh.mesh.position.y =
@@ -483,9 +625,11 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       this.fpsMesh.viewmodelOffset.y +
       bobbingAmount +
       Math.sin(this.moveEffect.y) / 50 +
-      idleSwayY
+      idleSwayY +
+      drawY +
+      airY
     this.fpsMesh.mesh.position.z =
-      this.weaponOffset.z + this.fpsMesh.viewmodelOffset.z + this.recoilEffect
+      this.weaponOffset.z + this.fpsMesh.viewmodelOffset.z + this.recoilEffect + kickZ
 
     if (this.recoilEffect > 0) {
       this.recoilEffect = Math.max(0, this.recoilEffect - dt * this.recoilRecover)
