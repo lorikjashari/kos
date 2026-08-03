@@ -107,6 +107,16 @@ export class TrainingBot implements IUpdatable {
   private readonly stepProbe = 0.95
   private repathTimer = 0
   private huntBias = Math.random() < 0.6 ? 'player' : 'any'
+  /** Vertical velocity while airborne (bot feet are kinematic — no rigid body) */
+  private velocityY = 0
+  private isOnGround = true
+  private readonly gravity = 28
+  /** Max curb / stair rise bots can climb (matches player tryStepUp) */
+  private readonly maxStepUp = 2.0
+  /** How far below feet still counts as grounded for ramp/stair follow */
+  private readonly groundSnapDown = 0.85
+  private readonly groundSkin = 0.04
+  private readonly minWalkableNy = 0.55
   /** Editor mannequin — no move / shoot AI */
   public aiFrozen = false
   /** When true (editor), yaw tracks the local player each frame */
@@ -204,6 +214,8 @@ export class TrainingBot implements IUpdatable {
     this.spawnPosition.copy(pos)
     this.position.copy(pos)
     this.lastPos.copy(pos)
+    this.velocityY = 0
+    this.isOnGround = true
     if (!this.aiFrozen) {
       this.yaw = Math.random() * Math.PI * 2
     }
@@ -267,11 +279,13 @@ export class TrainingBot implements IUpdatable {
     if (!player) {
       this.isMoving = false
       this.idlePatrol(dt, physics)
+      this.followTerrain(physics, dt)
       return
     }
 
     // Keep fighting even if the player is dead (bot free-for-all)
     this.combatThink(dt, player, physics)
+    this.followTerrain(physics, dt)
     if (this.shootFlash > 0) this.shootFlash = Math.max(0, this.shootFlash - dt)
   }
 
@@ -282,7 +296,7 @@ export class TrainingBot implements IUpdatable {
     const r = this.homeRadius * (0.45 + 0.35 * Math.abs(Math.sin(this.patrolAngle * 0.37)))
     const target = new Vector3D(
       this.spawnPosition.x + Math.cos(this.patrolAngle) * r,
-      this.spawnPosition.y,
+      this.position.y,
       this.spawnPosition.z + Math.sin(this.patrolAngle) * r
     )
     this.navigateToward(target, tune.moveSpeed * 0.7, dt, physics)
@@ -329,7 +343,6 @@ export class TrainingBot implements IUpdatable {
     const targetPos = threat.eye
     const moveGoalBase = threat.pos
     this.lastKnownTarget = moveGoalBase.clone()
-    this.lastKnownTarget.y = this.spawnPosition.y
 
     const toTarget = targetPos.clone().sub(myEye)
     const dist = toTarget.length()
@@ -353,7 +366,6 @@ export class TrainingBot implements IUpdatable {
 
     const ideal = 8
     let goal = moveGoalBase.clone()
-    goal.y = this.spawnPosition.y
 
     if (hasLos && dist < 3.2) {
       // Stick and dump — tiny circle so they don't freeze
@@ -365,7 +377,6 @@ export class TrainingBot implements IUpdatable {
       } else {
         goal = this.position.clone()
       }
-      goal.y = this.spawnPosition.y
     } else if (hasLos && dist > ideal - 2 && dist < ideal + 4) {
       if (this.strafeTimer <= 0) {
         this.strafeSign *= Math.random() < tune.strafeChance ? -1 : 1
@@ -374,11 +385,9 @@ export class TrainingBot implements IUpdatable {
       const forward = toTarget.clone().setY(0).normalize()
       const side = new Vector3D(-forward.z, 0, forward.x).multiplyScalar(this.strafeSign * 3.2)
       goal = this.position.clone().add(side).add(forward.multiplyScalar(2.0))
-      goal.y = this.spawnPosition.y
     } else {
       // Sprint to them — predict slightly toward their position
       goal = moveGoalBase.clone()
-      goal.y = this.spawnPosition.y
     }
 
     // Faster when hunting / no LOS; still quick in gunfights
@@ -569,7 +578,6 @@ export class TrainingBot implements IUpdatable {
       for (const stepLen of stepLens) {
         if (!this.isDirClear(physics, dir, Math.min(stepLen, this.probeDist * 1.6))) continue
         const step = this.position.clone().add(dir.clone().multiplyScalar(stepLen))
-        step.y = this.spawnPosition.y
         const remain = this.flatDist(step, goal)
         const openBonus = this.canWalkToward(physics, goal, step) ? -10 : 0
         const score = remain + Math.abs(a) * 0.4 + openBonus
@@ -621,10 +629,11 @@ export class TrainingBot implements IUpdatable {
   }
 
   private stepAlong(dir: Vector3D, speed: number, dt: number): void {
+    const physics = Game.getInstance().getPhysics()
     const step = Math.min(speed * dt, this.stepProbe * 0.9)
+    this.tryStepUp(physics, dir)
     this.position.x += dir.x * step
     this.position.z += dir.z * step
-    this.position.y = this.spawnPosition.y
     this.isMoving = true
   }
 
@@ -637,14 +646,140 @@ export class TrainingBot implements IUpdatable {
   }
 
   private isDirClear(physics: Physics, dir: Vector3D, distance: number, from = this.position): boolean {
-    const origin = from.clone().add(new Vector3D(0, 0.9, 0))
+    const origin = from.clone().add(new Vector3D(0, 1.05, 0))
     const flat = dir.clone().setY(0)
     if (flat.lengthSq() < 1e-8) return true
     flat.normalize()
-    const end = origin.clone().add(flat.multiplyScalar(distance))
+    const end = origin.clone().add(flat.clone().multiplyScalar(distance))
     const hit = physics.raycast(origin, end)
     if (!hit.hasHit || !hit.hitPosition) return true
-    return hit.hitPosition.distanceTo(origin) > distance - 0.08
+    if (hit.hitPosition.distanceTo(origin) > distance - 0.08) return true
+    // Walkable slope ahead — not a blocking wall
+    if (hit.hitNormal && hit.hitNormal.y >= this.minWalkableNy) return true
+    // Stair / curb we can climb
+    if (this.canStepAt(physics, from, flat, Math.min(distance, 1.35))) return true
+    return false
+  }
+
+  private probeGround(
+    physics: Physics,
+    x: number,
+    z: number,
+    fromY: number,
+    downDist: number
+  ): { y: number; ny: number } | null {
+    const from = new Vector3D(x, fromY, z)
+    const to = new Vector3D(x, fromY - downDist, z)
+    const hit = physics.raycast(from, to)
+    if (!hit.hasHit || !hit.hitPosition) return null
+    const ny = hit.hitNormal?.y ?? 1
+    if (ny < this.minWalkableNy) return null
+    return { y: hit.hitPosition.y, ny }
+  }
+
+  /** True if a short rise ahead is climbable (stairs / curbs / ramps). */
+  private canStepAt(physics: Physics, from: Vector3D, dir: Vector3D, forward: number): boolean {
+    const ax = from.x + dir.x * forward
+    const az = from.z + dir.z * forward
+    const ground = this.probeGround(physics, ax, az, from.y + this.maxStepUp + 0.4, this.maxStepUp + 1.2)
+    if (!ground) return false
+    const stepH = ground.y - from.y
+    return stepH >= 0.03 && stepH <= this.maxStepUp
+  }
+
+  /**
+   * Climb a stair riser / curb in the move direction (same idea as player tryStepUp).
+   */
+  private tryStepUp(physics: Physics, dir: Vector3D): boolean {
+    if (!this.isOnGround) return false
+    const flat = dir.clone().setY(0)
+    if (flat.lengthSq() < 1e-6) return false
+    flat.normalize()
+
+    const distances = [0.35, 0.55, 0.8, 1.05, 1.35]
+    for (const forward of distances) {
+      const ax = this.position.x + flat.x * forward
+      const az = this.position.z + flat.z * forward
+      const ground = this.probeGround(
+        physics,
+        ax,
+        az,
+        this.position.y + this.maxStepUp + 0.35,
+        this.maxStepUp + 1.0
+      )
+      if (!ground) continue
+      const stepH = ground.y - this.position.y
+      if (stepH < 0.03 || stepH > this.maxStepUp) continue
+      // Flat tread preferred; allow mild ramps
+      if (ground.ny < 0.65) continue
+
+      // Blocked overhead?
+      const head = physics.raycast(
+        new Vector3D(ax, this.position.y + 1.4, az),
+        new Vector3D(ax, this.position.y + 1.4 + stepH + 0.2, az)
+      )
+      if (head.hasHit) continue
+
+      this.position.y = ground.y + this.groundSkin
+      this.velocityY = 0
+      this.isOnGround = true
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Snap to walkable ground under the feet, or fall with gravity when airborne.
+   * Bot position is feet/root (not capsule centre like the player).
+   */
+  private followTerrain(physics: Physics, dt: number): void {
+    const probeUp = 1.8
+    const fallProbe = this.isOnGround ? this.groundSnapDown + 0.15 : 80
+    const ground = this.probeGround(
+      physics,
+      this.position.x,
+      this.position.z,
+      this.position.y + probeUp,
+      probeUp + fallProbe
+    )
+
+    if (ground) {
+      const targetY = ground.y + this.groundSkin
+      const dy = targetY - this.position.y
+
+      if (dy <= this.maxStepUp && dy >= -this.groundSnapDown) {
+        // On or near a walkable surface — stick to it (ramps / small drops)
+        this.position.y = targetY
+        this.velocityY = 0
+        this.isOnGround = true
+        return
+      }
+
+      if (dy < -this.groundSnapDown) {
+        // Floor is below us — fall toward it
+        this.isOnGround = false
+        this.velocityY -= this.gravity * dt
+        this.position.y += this.velocityY * dt
+        if (this.position.y <= targetY) {
+          this.position.y = targetY
+          this.velocityY = 0
+          this.isOnGround = true
+        }
+        return
+      }
+
+      // Floor probe is far above (inside geometry) — drop out
+    }
+
+    this.isOnGround = false
+    this.velocityY -= this.gravity * dt
+    this.position.y += this.velocityY * dt
+    // Soft kill-floor so a bot that falls off the map eventually respawns via death logic elsewhere
+    if (this.position.y < -80) {
+      this.position.y = this.spawnPosition.y
+      this.velocityY = 0
+      this.isOnGround = true
+    }
   }
 
   private flatDist(a: Vector3D, b: Vector3D): number {
