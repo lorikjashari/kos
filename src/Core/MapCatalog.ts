@@ -77,6 +77,8 @@ export const MAP_CATALOG: Record<MapId, MapDefinition> = {
       { x: 55.8, y: 14.7, z: 51.1 },
       { x: 40.9, y: 14.7, z: 128.2 },
       { x: -52.7, y: 23.1, z: 101.4 },
+      { x: 113.4, y: 2.0, z: 62.1 },
+      { x: -11.7, y: 14.7, z: 112.9 },
     ],
   },
 }
