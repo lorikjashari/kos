@@ -9,6 +9,7 @@ interface Splash {
   life: number
   maxLife: number
   startScale: number
+  isMist: boolean
 }
 
 interface AttachedDecal {
@@ -64,6 +65,10 @@ export class BloodManager implements IUpdatable {
   private readonly _tmpMat3 = new THREE.Matrix3()
   private readonly _localN = new THREE.Vector3()
   private readonly _localP = new THREE.Vector3()
+  /** A single hit used to allocate 10-18 meshes; pooling keeps hits allocation-free. */
+  private dropPool: THREE.Mesh[] = []
+  private mistPool: THREE.Mesh[] = []
+  private decalPool: THREE.Mesh[] = []
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -95,12 +100,33 @@ export class BloodManager implements IUpdatable {
     })
   }
 
+  private acquireDrop(): THREE.Mesh {
+    return this.dropPool.pop() ?? new THREE.Mesh(this.particleGeo, this.particleMat)
+  }
+
+  private acquireMist(): THREE.Mesh {
+    return this.mistPool.pop() ?? new THREE.Mesh(this.geometry, this.mistMat)
+  }
+
+  private acquireDecal(): THREE.Mesh {
+    return this.decalPool.pop() ?? new THREE.Mesh(this.geometry, this.material)
+  }
+
+  private releaseDecal(mesh: THREE.Mesh): void {
+    if (this.decalPool.length < 96) this.decalPool.push(mesh)
+  }
+
   /** Compile materials + allocate first meshes off-screen so first hit never hitchs */
   public warm(renderer?: THREE.WebGLRenderer, camera?: THREE.Camera): void {
     const off = new Vector3D(0, -800, 0)
     const dummy = new THREE.Object3D()
     dummy.position.set(0, -800, 0)
     this.scene.add(dummy)
+
+    // Enough for several simultaneous headshots without touching the allocator
+    while (this.dropPool.length < 96) this.dropPool.push(new THREE.Mesh(this.particleGeo, this.particleMat))
+    while (this.mistPool.length < 32) this.mistPool.push(new THREE.Mesh(this.geometry, this.mistMat))
+    while (this.decalPool.length < 72) this.decalPool.push(new THREE.Mesh(this.geometry, this.material))
 
     // Cover every body part + attachTo path used on real bot hits
     this.spawn(off, new Vector3D(0, 1, 0), 'body', dummy)
@@ -117,10 +143,13 @@ export class BloodManager implements IUpdatable {
     // Drain warm particles / decals immediately
     for (const p of this.particles) {
       this.scene.remove(p.mesh)
+      if (p.isMist) this.mistPool.push(p.mesh)
+      else this.dropPool.push(p.mesh)
     }
     this.particles.length = 0
     for (const a of this.attached) {
       a.parent.remove(a.mesh)
+      this.releaseDecal(a.mesh)
     }
     this.attached.length = 0
     this.scene.remove(dummy)
@@ -142,7 +171,7 @@ export class BloodManager implements IUpdatable {
     const mistCount = part === 'head' ? 4 : 3
 
     // --- Splat that sticks to the bot ---
-    const decal = new THREE.Mesh(this.geometry, this.material)
+    const decal = this.acquireDecal()
     decal.scale.setScalar(radius / 0.18)
 
     if (attachTo) {
@@ -157,7 +186,10 @@ export class BloodManager implements IUpdatable {
       this.attached.push({ mesh: decal, parent: attachTo })
       if (this.attached.length > this.maxAttached) {
         const old = this.attached.shift()
-        if (old) old.parent.remove(old.mesh)
+        if (old) {
+          old.parent.remove(old.mesh)
+          this.releaseDecal(old.mesh)
+        }
       }
     } else {
       const offset = position.clone().add(n.clone().multiplyScalar(0.04))
@@ -169,7 +201,7 @@ export class BloodManager implements IUpdatable {
 
     // --- Flying droplet splash (world space) ---
     for (let i = 0; i < dropCount; i++) {
-      const mesh = new THREE.Mesh(this.particleGeo, this.particleMat)
+      const mesh = this.acquireDrop()
       mesh.position.copy(position)
       const startScale = 0.55 + Math.random() * 1.4
       mesh.scale.setScalar(startScale)
@@ -187,12 +219,13 @@ export class BloodManager implements IUpdatable {
         life: 0,
         maxLife: 0.4 + Math.random() * 0.45,
         startScale,
+        isMist: false,
       })
     }
 
     // --- Expanding mist discs (looks like a blood puff) ---
     for (let i = 0; i < mistCount; i++) {
-      const mist = new THREE.Mesh(this.geometry, this.mistMat)
+      const mist = this.acquireMist()
       mist.position.copy(position).add(n.clone().multiplyScalar(0.05 + Math.random() * 0.08))
       mist.quaternion.setFromUnitVectors(
         new THREE.Vector3(0, 0, 1),
@@ -210,6 +243,7 @@ export class BloodManager implements IUpdatable {
         life: 0,
         maxLife: 0.28 + Math.random() * 0.22,
         startScale,
+        isMist: true,
       })
     }
   }
@@ -219,6 +253,7 @@ export class BloodManager implements IUpdatable {
     for (let i = this.attached.length - 1; i >= 0; i--) {
       if (this.attached[i].parent !== parent) continue
       parent.remove(this.attached[i].mesh)
+      this.releaseDecal(this.attached[i].mesh)
       this.attached.splice(i, 1)
     }
   }
@@ -232,14 +267,18 @@ export class BloodManager implements IUpdatable {
 
       const t = Math.min(1, p.life / p.maxLife)
       // Drops shrink; mist expands then fades via scale blowout
-      const isMist = p.mesh.geometry === this.geometry
-      const scale = isMist
+      const scale = p.isMist
         ? p.startScale * (1 + t * 2.4)
         : Math.max(0.01, p.startScale * (1 - t * 0.85))
       p.mesh.scale.setScalar(scale)
 
       if (p.life >= p.maxLife) {
         this.scene.remove(p.mesh)
+        if (p.isMist) {
+          if (this.mistPool.length < 64) this.mistPool.push(p.mesh)
+        } else if (this.dropPool.length < 160) {
+          this.dropPool.push(p.mesh)
+        }
         this.particles.splice(i, 1)
       }
     }

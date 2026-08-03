@@ -81,7 +81,10 @@ async function main() {
         game.applyGraphicsQuality(settings.graphicsQuality || 'high')
       }
       game.getMobileControls()?.applySettings(settings.mobile)
-      if (isTouchDevice()) game.applyMobilePerfProfile(settings.mobile.perfProfile)
+      if (isTouchDevice()) {
+        game.applyMobileResMode(settings.mobile.resMode)
+        game.applyMobilePerfProfile(settings.mobile.perfProfile)
+      }
     },
   })
 
@@ -118,11 +121,17 @@ async function main() {
     menu.setLoadingProgress('Preparing world…', 90)
     game.onLoad()
     if (isTouchDevice()) {
+      game.applyMobileResMode(settings.mobile.resMode)
       game.applyMobilePerfProfile(settings.mobile.perfProfile)
     } else {
       game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)
     }
     game.startUpdateLoop()
+
+    // Compile every shader and pre-allocate every effect while the loading bar is
+    // still up. Doing this lazily is what made the first 20-30s of a match hitch.
+    menu.setLoadingProgress('Compiling shaders…', 94)
+    await game.warmGraphics()
 
     menu.setLoadingProgress('Finishing setup…', 96)
     // Never block boot on audio unlock — iOS often has no gesture yet

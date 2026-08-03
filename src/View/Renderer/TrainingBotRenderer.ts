@@ -109,13 +109,19 @@ export class TrainingBotRenderer implements IUpdatable {
   }
 
   /** AK third-person uses baked `AkmRaw` when available. */
-  private resolveGunMeshKey(gunKey: string, defaultMesh: string): string {
+  private static resolveGunMeshKey(game: Game, gunKey: string, defaultMesh: string): string {
     if (gunKey === 'AK') {
-      if (this.game.globalLoadingManager.loadableMeshs.has('AkmRaw')) return 'AkmRaw'
-      if (this.game.globalLoadingManager.loadableMeshs.has('AK47')) return 'AK47'
+      if (game.globalLoadingManager.loadableMeshs.has('AkmRaw')) return 'AkmRaw'
+      if (game.globalLoadingManager.loadableMeshs.has('AK47')) return 'AK47'
     }
     return defaultMesh
   }
+
+  /**
+   * Baking a gun prop walks every vertex through bone + world transforms, which
+   * is far too slow to redo per bot mid-match. Bake once, then hand out clones.
+   */
+  private static readonly gunPrototypes = new Map<string, THREE.Group | null>()
 
   /** Third-person weapon prop seated in the CS terrorist's right hand */
   private csGun?: THREE.Group
@@ -321,6 +327,79 @@ export class TrainingBotRenderer implements IUpdatable {
   private buildCsGun(key: string): THREE.Group | undefined {
     const existing = this.csGuns[key]
     if (existing) return existing
+    const prototype = TrainingBotRenderer.buildGunPrototype(this.game, key)
+    if (!prototype) return undefined
+
+    const container = prototype.clone(true) as THREE.Group
+    container.visible = false
+    // Death fade writes opacity on every material it walks, so guns need their own
+    container.traverse((child) => {
+      child.userData.isGun = true
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh || !mesh.material) return
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map((m) => m.clone())
+        : mesh.material.clone()
+    })
+    container.userData.isGun = true
+    this.mesh.add(container)
+    this.csGuns[key] = container
+    return container
+  }
+
+  /** Warm every third-person gun bake so bot spawns never stall the frame. */
+  public static prebakeGuns(game: Game): void {
+    for (const key of Object.keys(TrainingBotRenderer.GUN_DEFS)) {
+      TrainingBotRenderer.buildGunPrototype(game, key)
+    }
+  }
+
+  /**
+   * Bake the gun props and compile the bot skin + weapon shaders off-screen so
+   * the first bots to spawn only pay for a skeleton clone.
+   */
+  public static prewarm(game: Game, renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
+    TrainingBotRenderer.prebakeGuns(game)
+
+    const stage = new THREE.Group()
+    stage.position.set(0, -600, 0)
+    const source = game.globalLoadingManager.loadableMeshs.get('CsTerrorist')
+    if (source?.mesh) {
+      const model = source.cloneMesh() as unknown as THREE.Object3D
+      model.traverse((child) => {
+        const mesh = child as THREE.Mesh
+        if (!mesh.isMesh || !mesh.material) return
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+        for (const m of mats) {
+          const mat = m as THREE.MeshStandardMaterial
+          mat.side = THREE.DoubleSide
+          if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace
+        }
+      })
+      stage.add(model)
+    }
+    for (const key of Object.keys(TrainingBotRenderer.GUN_DEFS)) {
+      const prototype = TrainingBotRenderer.gunPrototypes.get(key)
+      if (!prototype) continue
+      const clone = prototype.clone(true)
+      clone.visible = true
+      stage.add(clone)
+    }
+
+    scene.add(stage)
+    try {
+      renderer.compile(scene, camera)
+      renderer.render(scene, camera)
+    } finally {
+      scene.remove(stage)
+    }
+  }
+
+  private static buildGunPrototype(game: Game, key: string): THREE.Group | undefined {
+    const cached = TrainingBotRenderer.gunPrototypes.get(key)
+    if (cached !== undefined) return cached ?? undefined
     const def = TrainingBotRenderer.GUN_DEFS[key]
     if (!def) return undefined
 
@@ -329,8 +408,8 @@ export class TrainingBotRenderer implements IUpdatable {
     container.visible = false
 
     let gun: THREE.Object3D | undefined
-    const meshKey = this.resolveGunMeshKey(key, def.mesh)
-    const source = this.game.globalLoadingManager.loadableMeshs.get(meshKey)
+    const meshKey = TrainingBotRenderer.resolveGunMeshKey(game, key, def.mesh)
+    const source = game.globalLoadingManager.loadableMeshs.get(meshKey)
     if (source?.mesh) {
       const full = source.cloneMesh() as unknown as THREE.Object3D
       full.updateMatrixWorld(true)
@@ -485,8 +564,8 @@ export class TrainingBotRenderer implements IUpdatable {
     container.traverse((c) => {
       c.userData.isGun = true
     })
-    this.mesh.add(container)
-    this.csGuns[key] = container
+    // Only cache a real bake — a fallback box built before the GLB landed would stick
+    if (source?.mesh) TrainingBotRenderer.gunPrototypes.set(key, container)
     return container
   }
 

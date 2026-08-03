@@ -416,6 +416,23 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     el.innerText = this.fps + ' FPS'
   }
 
+  /**
+   * Compile the passes and force the first shadow-map pass while we are still on
+   * the loading screen — both are heavy one-off costs on the first rendered frame.
+   */
+  public warmRenderPipeline(): void {
+    if (!this.camera) return
+    if (this.renderingConfig.hasShadow) {
+      this.shadowMap.needsUpdate = true
+      this.render(this.scene, this.camera)
+    }
+    if (this.renderingConfig.hasPostProcess) {
+      if (!this.composer) this.addPostProcess()
+      this.composer.render()
+    }
+    this.viewmodelRenderer.render(this, 0)
+  }
+
   public update(dt: number = 1 / 60): void {
     if (!this.camera) {
       throw new Error('No camera to render to!')

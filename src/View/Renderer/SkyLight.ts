@@ -100,7 +100,7 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
     this.addInteriorFillLights()
 
     this.lightUpdater = new PeriodicUpdater(
-      200,
+      mobile ? 500 : 200,
       () => {
         this.lightUpdate()
       },

@@ -83,6 +83,8 @@ export class Game implements IUpdatable {
   private pendingBotSpawns: Array<{ pos: Vector3D; yaw: number; difficulty: BotDifficulty; name: string }> = []
   private botSpawnAcc = 0
   private effectsWarmed = false
+  private graphicsWarmed = false
+  private audioWarmed = false
   private combatLive = false
   /** Waiting for AWP+USP / AK+USP pick before lockdown */
   private awaitingLoadout = false
@@ -1045,7 +1047,9 @@ export class Game implements IUpdatable {
       name: this.nameQueue[i] || `BOT ${i + 1}`,
     }))
     this.botSpawnAcc = 0
-    this.flushPendingBots(Math.max(2, config.botCount))
+    // Two up front, the rest trickle in during the loadout pick / lockdown so a
+    // 9-bot match doesn't clone nine skeletons in a single frame
+    this.flushPendingBots(2)
 
     this.mobileControls?.setActive(false)
     this.inputManager.setMobileMode(false)
@@ -1056,7 +1060,7 @@ export class Game implements IUpdatable {
     this.renderer.hud?.showLoadoutPicker((primary) => this.confirmMatchLoadout(primary))
 
     this.inputManager.unlock()
-    void this.warmCombatSystems()
+    void this.warmAudio()
   }
 
   public async startMultiplayerMatch(config: MultiplayerStartConfig): Promise<string> {
@@ -1229,6 +1233,19 @@ export class Game implements IUpdatable {
     this.activeMapId = mapId
     this.mapName = mapId
     this.applyMapMoveSpeed(mapId)
+    this.warmMapRender()
+  }
+
+  /** A freshly swapped map brings its own materials and shadow pass — compile now. */
+  private warmMapRender(): void {
+    const renderer = this.renderer
+    if (!renderer?.camera) return
+    try {
+      renderer.compile(renderer.scene, renderer.camera)
+      renderer.warmRenderPipeline()
+    } catch (e) {
+      console.warn('[warm:map]', e)
+    }
   }
 
   private applyMapMoveSpeed(mapId: MapId): void {
@@ -1414,22 +1431,19 @@ export class Game implements IUpdatable {
   }
 
   public async prepareCombat(): Promise<void> {
-    if (isTouchDevice()) {
-      await Promise.race([
-        this.audioManager.unlock(),
-        new Promise<void>((r) => setTimeout(r, 500)),
-      ])
-      this.effectsWarmed = true
-      return
-    }
-    await this.warmCombatSystems()
+    await this.warmGraphics()
+    await this.warmAudio()
   }
 
-  private async warmCombatSystems(): Promise<void> {
+  /**
+   * Everything a first shot / first hit / first bot would otherwise compile or
+   * allocate mid-match. Safe to run from the loading screen — no audio, no user
+   * gesture needed — and idempotent, so match start is free once it has run.
+   */
+  public async warmGraphics(): Promise<void> {
+    if (this.graphicsWarmed) return
+    this.graphicsWarmed = true
     try {
-      await this.audioManager.unlock()
-      await this.audioManager.warmPlayback()
-
       const renderer = this.renderer
       const camera = renderer.camera
       const fpsRenderer = this.currentPlayer?.renderer as FPSRenderer | undefined
@@ -1451,6 +1465,10 @@ export class Game implements IUpdatable {
       renderer.bulletHoleManager.warm(renderer, camera)
       renderer.hud?.warmWeaponIcons()
 
+      // Bake the third-person gun props and compile the bot skin once, so the
+      // bots that spawn at match start only pay for a skeleton clone
+      TrainingBotRenderer.prewarm(this, renderer, renderer.scene, camera)
+
       // Live off-screen spawn once so first real shot/hit uses hot paths
       const off = new Vector3D(0, -500, 0)
       const dir = new Vector3D(0, 0, -1)
@@ -1464,10 +1482,23 @@ export class Game implements IUpdatable {
       // Force a compile + one render of warm objects
       renderer.compile(renderer.scene, camera)
       renderer.render(renderer.scene, camera)
-
-      this.effectsWarmed = true
+      renderer.warmRenderPipeline()
     } catch (e) {
-      console.warn('[warm]', e)
+      console.warn('[warm:graphics]', e)
+    }
+  }
+
+  /** Needs a user gesture, so this only runs once the player starts a match. */
+  public async warmAudio(): Promise<void> {
+    try {
+      await Promise.race([this.audioManager.unlock(), new Promise<void>((r) => setTimeout(r, 800))])
+      if (!this.audioWarmed) {
+        this.audioWarmed = true
+        await this.audioManager.warmPlayback()
+      }
+    } catch (e) {
+      console.warn('[warm:audio]', e)
+    } finally {
       this.effectsWarmed = true
     }
   }
