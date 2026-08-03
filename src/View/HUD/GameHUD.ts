@@ -21,6 +21,7 @@ export class GameHUD {
   private knifeIconEl!: HTMLImageElement
   private healthText!: HTMLElement
   private healthFill!: HTMLElement
+  private ammoFill!: HTMLElement
   private iconRenderer = new WeaponIconRenderer()
   private lastAmmo = -1
   private lastWeapon = ''
@@ -72,13 +73,18 @@ export class GameHUD {
       </div>
 
       <div class="cs-bottom-right">
-        <img id="hud-weapon-icon" class="cs-weapon-icon" alt="" draggable="false" />
-        <div class="cs-ammo-row">
-          <span class="cs-ammo-mag" id="hud-ammo">30</span>
-          <span class="cs-ammo-sep">/</span>
-          <span class="cs-ammo-reserve" id="hud-reserve">90</span>
+        <div class="cs-weapon-row">
+          <img id="hud-knife-icon" class="cs-knife-icon" alt="" draggable="false" />
+          <img id="hud-weapon-icon" class="cs-weapon-icon" alt="" draggable="false" />
         </div>
-        <img id="hud-knife-icon" class="cs-knife-icon" alt="" draggable="false" />
+        <div class="cs-ammo-main">
+          <div class="cs-ammo-row">
+            <span class="cs-ammo-mag" id="hud-ammo">30</span>
+            <span class="cs-ammo-sep">/</span>
+            <span class="cs-ammo-reserve" id="hud-reserve">90</span>
+          </div>
+          <div class="cs-ammo-bar"><div class="cs-ammo-fill" id="hud-ammo-fill"></div></div>
+        </div>
       </div>
 
       <div class="cs-killfeed" id="hud-killfeed" aria-live="polite"></div>
@@ -212,6 +218,7 @@ export class GameHUD {
     this.knifeIconEl = document.getElementById('hud-knife-icon') as HTMLImageElement
     this.healthText = document.getElementById('hud-hp')!
     this.healthFill = document.getElementById('hud-hp-fill')!
+    this.ammoFill = document.getElementById('hud-ammo-fill')!
     this.hitmarkerEl = document.getElementById('hud-hitmarker')!
     this.damageFlashEl = document.getElementById('hud-damage-flash')!
     this.deathEl = document.getElementById('hud-death')!
@@ -710,69 +717,100 @@ export class GameHUD {
         }
       }
 
-      .cs-bottom-left {
+      /*
+       * Health and ammo are mirror images of each other: number + 3px bar, same
+       * baseline, same bottom inset. The shared vars keep the two sides locked
+       * together when the HUD shrinks for touch.
+       */
+      #game-hud {
+        --hud-num: 34px;
+        --hud-sub: 19px;
+        --hud-bar-w: 78px;
+        --hud-bar-h: 3px;
+        --hud-bar-gap: 4px;
+        --hud-icon: 22px;
+        --hud-gun: 44px;
+        --hud-inset: 16px;
+        --hud-lift: 0px;
+      }
+      .cs-bottom-left,
+      .cs-bottom-right {
         position: absolute;
-        left: max(16px, env(safe-area-inset-left));
-        bottom: max(16px, env(safe-area-inset-bottom));
+        bottom: calc(max(var(--hud-inset), env(safe-area-inset-bottom)) + var(--hud-lift));
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
         pointer-events: none;
+      }
+      .cs-bottom-left {
+        left: max(var(--hud-inset), env(safe-area-inset-left));
+        align-items: flex-start;
+      }
+      .cs-bottom-right {
+        right: max(var(--hud-inset), env(safe-area-inset-right));
+        align-items: flex-end;
       }
       .cs-vital {
         display: flex;
-        align-items: center;
+        align-items: flex-end;
         gap: 8px;
       }
       .cs-vital-icon {
-        width: 22px;
-        height: 22px;
+        width: var(--hud-icon);
+        height: var(--hud-icon);
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 22px;
+        font-size: var(--hud-icon);
         font-weight: 800;
         line-height: 1;
         color: #fff;
         flex-shrink: 0;
+        margin-bottom: calc(var(--hud-bar-h) + var(--hud-bar-gap));
       }
-      .cs-vital-main {
+      .cs-vital-main,
+      .cs-ammo-main {
         display: flex;
         flex-direction: column;
-        gap: 3px;
-        min-width: 72px;
+        gap: var(--hud-bar-gap);
       }
-      .cs-vital-num {
-        font-size: 32px;
+      .cs-ammo-main { align-items: flex-end; }
+      .cs-vital-num,
+      .cs-ammo-mag {
+        font-size: var(--hud-num);
         font-weight: 800;
         line-height: 1;
         font-variant-numeric: tabular-nums;
         letter-spacing: -0.02em;
       }
-      .cs-vital-bar {
-        height: 3px;
-        width: 78px;
+      .cs-vital-bar,
+      .cs-ammo-bar {
+        height: var(--hud-bar-h);
+        width: var(--hud-bar-w);
         background: rgba(255,255,255,0.18);
         overflow: hidden;
       }
-      .cs-vital-fill {
+      .cs-vital-fill,
+      .cs-ammo-fill {
         height: 100%;
         width: 100%;
-        transform-origin: left center;
         background: #fff;
         transition: transform 120ms linear;
       }
+      .cs-vital-fill { transform-origin: left center; }
+      .cs-ammo-fill { transform-origin: right center; }
       .cs-vital-fill.is-low { background: #ff4d4d; }
+      .cs-ammo-fill.is-low { background: #ff5555; }
 
-      .cs-bottom-right {
-        position: absolute;
-        right: max(16px, env(safe-area-inset-right));
-        bottom: max(16px, env(safe-area-inset-bottom));
+      .cs-weapon-row {
         display: flex;
-        flex-direction: column;
         align-items: flex-end;
-        gap: 4px;
-        pointer-events: none;
+        justify-content: flex-end;
+        gap: 8px;
+        min-height: var(--hud-gun);
       }
       .cs-weapon-icon {
-        height: 44px;
+        height: var(--hud-gun);
         width: auto;
         max-width: 150px;
         object-fit: contain;
@@ -780,17 +818,16 @@ export class GameHUD {
         filter: brightness(0) invert(1) drop-shadow(0 2px 4px rgba(0,0,0,0.5));
       }
       .cs-weapon-icon.is-sidearm {
-        height: 58px;
+        height: calc(var(--hud-gun) * 1.3);
         max-width: 170px;
       }
       .cs-knife-icon {
-        height: 28px;
+        height: calc(var(--hud-gun) * 0.6);
         width: auto;
         max-width: 56px;
         object-fit: contain;
         filter: brightness(0) saturate(100%) invert(72%) sepia(55%) saturate(500%) hue-rotate(5deg);
         opacity: 0.9;
-        align-self: flex-end;
       }
       .cs-ammo-row {
         display: flex;
@@ -798,21 +835,15 @@ export class GameHUD {
         gap: 2px;
         font-variant-numeric: tabular-nums;
       }
-      .cs-ammo-mag {
-        font-size: 40px;
-        font-weight: 800;
-        line-height: 1;
-        letter-spacing: -0.03em;
-      }
       .cs-ammo-mag.is-low { color: #ff5555; text-shadow: 0 0 12px rgba(255,60,60,0.45); }
       .cs-ammo-sep {
-        font-size: 20px;
+        font-size: var(--hud-sub);
         opacity: 0.55;
         margin: 0 3px;
         font-weight: 600;
       }
       .cs-ammo-reserve {
-        font-size: 20px;
+        font-size: var(--hud-sub);
         font-weight: 700;
         opacity: 0.85;
       }
@@ -1228,26 +1259,30 @@ export class GameHUD {
         .cs-sb-col { font-size: clamp(11px, 1.4vh, 13px); }
       }
       @media (max-width: 520px) {
-        .cs-vital-num { font-size: 26px; }
-        .cs-ammo-mag { font-size: 32px; }
         .cs-sb-panel { width: min(96vw, 560px); }
         .cs-sb-head, .cs-sb-row { grid-template-columns: 22px 1fr 34px 34px 34px; }
       }
 
       #game-hud:not(.is-touch) [data-touch-only] { display: none !important; }
-      #game-hud.is-touch .cs-bottom-left,
-      #game-hud.is-touch .cs-bottom-right {
-        bottom: calc(env(safe-area-inset-bottom) + 72px);
-        transform: scale(0.88);
-        transform-origin: bottom left;
-      }
-      #game-hud.is-touch .cs-bottom-right {
-        transform-origin: bottom right;
+      /* Touch: scale the type down for real instead of transform-scaling a blurry copy */
+      #game-hud.is-touch {
+        --hud-num: 27px;
+        --hud-sub: 15px;
+        --hud-bar-w: 62px;
+        --hud-icon: 18px;
+        --hud-gun: 34px;
+        --hud-inset: 12px;
+        --hud-lift: 66px;
       }
       @media (pointer: coarse) and (orientation: portrait) {
-        #game-hud.is-touch .cs-bottom-left,
-        #game-hud.is-touch .cs-bottom-right {
-          bottom: calc(env(safe-area-inset-bottom) + 88px);
+        #game-hud.is-touch { --hud-lift: 84px; }
+      }
+      @media (pointer: coarse) and (max-height: 400px) {
+        #game-hud.is-touch {
+          --hud-num: 23px;
+          --hud-sub: 13px;
+          --hud-gun: 28px;
+          --hud-lift: 54px;
         }
       }
 
@@ -1452,6 +1487,10 @@ export class GameHUD {
       this.ammoMagEl.textContent = isMelee ? '—' : String(player.ammoInMag)
       this.ammoReserveEl.textContent = isMelee ? '—' : String(this.reserveFor(player))
       this.ammoMagEl.classList.toggle('is-low', !isMelee && player.ammoInMag <= 5)
+      const magFraction =
+        isMelee || !weapon.magazineSize ? 1 : Math.max(0, Math.min(1, player.ammoInMag / weapon.magazineSize))
+      this.ammoFill.style.transform = `scaleX(${magFraction})`
+      this.ammoFill.classList.toggle('is-low', !isMelee && player.ammoInMag <= 5)
       this.lastAmmo = player.ammoInMag
       this.lastWeapon = weapon.key
     }

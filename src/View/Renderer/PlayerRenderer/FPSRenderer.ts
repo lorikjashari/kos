@@ -35,6 +35,7 @@ import { Game } from '../../../Game'
 import { FPSCameraManager } from '../../CameraManager/FPSCameraManager'
 import { CameraManager } from '../../CameraManager/CameraManager'
 import { lerp } from '../../../Core/MathUtils'
+import { isTouchDevice } from '../../../UI/MobileDevice'
 
 // TODO: cette classe gère le mouvement de la FPS Mesh
 export class FPSRenderer extends PlayerRenderer implements IUpdatable {
@@ -256,6 +257,13 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   private tempEmitter: Emitter
   public weaponOffset = Vector3D.ZERO()
   public weaponRotation = Vector3D.ZERO()
+  /**
+   * Phones use a taller viewport and on-screen controls sit under the gun, so the
+   * viewmodel is nudged toward the bottom-right corner. Applied outside the
+   * hand-side flip so it is always screen-right / screen-down.
+   */
+  private readonly platformViewOffsetX = isTouchDevice() ? 0.062 : 0
+  private readonly platformViewOffsetY = isTouchDevice() ? -0.05 : 0
   private viewmodelLights: THREE.Light[] = []
   private weaponBobbingAcc = Vector3D.ZERO()
   /** 1 = right hand (default), -1 = left hand */
@@ -619,10 +627,12 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       ? 0
       : Math.min(0.04, Math.max(-0.06, -this.player.velocity.y * 0.004))
     this.fpsMesh.mesh.position.x =
-      (this.weaponOffset.x + this.fpsMesh.viewmodelOffset.x + idleSwayX) * this.handSide
+      (this.weaponOffset.x + this.fpsMesh.viewmodelOffset.x + idleSwayX) * this.handSide +
+      this.platformViewOffsetX
     this.fpsMesh.mesh.position.y =
       this.weaponOffset.y +
       this.fpsMesh.viewmodelOffset.y +
+      this.platformViewOffsetY +
       bobbingAmount +
       Math.sin(this.moveEffect.y) / 50 +
       idleSwayY +

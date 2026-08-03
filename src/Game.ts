@@ -50,7 +50,7 @@ import type { MobileControls } from './UI/MobileControls'
 import { isTouchDevice } from './UI/MobileDevice'
 import { MultiplayerMatch, type MultiplayerStartConfig } from './Net/MultiplayerMatch'
 import { botTargetForHumans } from './Net/NetTypes'
-import type { MobilePerfProfile } from './UI/SettingsStore'
+import type { MobilePerfProfile, MobileResMode } from './UI/SettingsStore'
 
 export class Game implements IUpdatable {
   public static game: Game
@@ -246,6 +246,7 @@ export class Game implements IUpdatable {
     this.setFpsCap(s.fpsMax === 999 ? 0 : s.fpsMax)
     if (isTouchDevice()) {
       this.mobileControls?.applySettings(s.mobile)
+      this.applyMobileResMode(s.mobile.resMode)
       this.applyMobilePerfProfile(s.mobile.perfProfile)
     } else {
       this.applyResolution(s.resolutionWidth, s.resolutionHeight)
@@ -263,6 +264,12 @@ export class Game implements IUpdatable {
   public applyMobilePerfProfile(profile: MobilePerfProfile): void {
     if (!isTouchDevice()) return
     this.renderer?.applyMobilePerfProfile(profile)
+  }
+
+  /** Mobile render aspect: `normal` = the screen's own aspect, `4:3` = stretched 4:3. */
+  public applyMobileResMode(mode: MobileResMode): void {
+    if (!isTouchDevice()) return
+    this.renderer?.setMobileResMode(mode)
   }
 
   /** Apply internal render resolution from settings (persists when saved via menu). */

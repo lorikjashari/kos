@@ -22,7 +22,7 @@ import { Key } from '../Input/KeyBinding'
 import { Game } from '../Game'
 import type { MobileControls } from './MobileControls'
 import { isTouchDevice } from './MobileDevice'
-import type { MobileHoldMode, MobilePerfProfile } from './SettingsStore'
+import type { MobileHoldMode, MobilePerfProfile, MobileResMode } from './SettingsStore'
 import { roomDirectory, type PublicRoomInfo } from '../Net/RoomDirectory'
 
 export type BotMatchConfig = {
@@ -415,20 +415,36 @@ export class MainMenu {
                   <button type="button" class="kos-chip" data-gfx="high">High</button>
                 </div>
               </div>
-              <div class="kos-mset-card">
+              <div class="kos-mset-card" data-mobile-only>
+                <div class="kos-mset-head">
+                  <strong>Resolution</strong>
+                  <em>Render aspect</em>
+                </div>
+                <div class="kos-chip-row" id="kos-mres-row">
+                  <button type="button" class="kos-chip" data-mres="normal">Normal</button>
+                  <button type="button" class="kos-chip" data-mres="4:3">4:3</button>
+                </div>
+                <p class="kos-hint tight" id="kos-mres-hint">Normal — your screen's native aspect.</p>
+              </div>
+              <div class="kos-mset-card" data-desktop-only>
                 <div class="kos-mset-head">
                   <strong>Frame rate</strong>
                   <em id="kos-fps-hint">Auto matches your display refresh.</em>
                 </div>
-                <p class="kos-hint" data-mobile-only>Native display resolution is used on mobile. Frame rate and Performance control smoothness.</p>
                 <div class="kos-chip-row" id="kos-fps-row">
                   <button type="button" class="kos-chip" data-fps="0">Auto</button>
                   <button type="button" class="kos-chip" data-fps="60">60</button>
-                  <button type="button" class="kos-chip" data-fps="120" data-mobile-only>120</button>
-                  <button type="button" class="kos-chip" data-fps="120" data-desktop-only>120</button>
-                  <button type="button" class="kos-chip" data-fps="144" data-desktop-only>144</button>
-                  <button type="button" class="kos-chip" data-fps="999" data-desktop-only>Unlimited</button>
+                  <button type="button" class="kos-chip" data-fps="120">120</button>
+                  <button type="button" class="kos-chip" data-fps="144">144</button>
+                  <button type="button" class="kos-chip" data-fps="999">Unlimited</button>
                 </div>
+              </div>
+              <div class="kos-mset-card" data-mobile-only>
+                <div class="kos-mset-head">
+                  <strong>Frame rate</strong>
+                  <em id="kos-mfps-hint">Runs at your display's maximum refresh.</em>
+                </div>
+                <p class="kos-hint tight">Uncapped — Performance in the Mobile tab controls smoothness.</p>
               </div>
             </div>
           </div>
@@ -468,7 +484,7 @@ export class MainMenu {
               <div class="kos-mset-card">
                 <div class="kos-mset-head">
                   <strong>Performance</strong>
-                  <em>Smooth keeps 120Hz devices playable</em>
+                  <em>Detail vs. framerate — resolution lives in Video</em>
                 </div>
                 <div class="kos-seg" data-seg="perfProfile">
                   <button type="button" data-perf="smooth">Smooth</button>
@@ -572,11 +588,28 @@ export class MainMenu {
           ? `Display ~${this.displayHz}Hz — Auto unlocks high refresh on this device.`
           : `Display ~${this.displayHz}Hz — Auto matches your screen refresh.`
     }
+    const mobileHint = this.root.querySelector('#kos-mfps-hint')
+    if (mobileHint) mobileHint.textContent = `Running at your display's max (~${this.displayHz}Hz).`
     const v = this.settings.fpsMax
     const current = v === 60 || v === 120 || v === 144 || v === 999 ? v : 0
     this.root.querySelectorAll('[data-fps]').forEach((el) => {
       el.classList.toggle('is-on', Number((el as HTMLElement).getAttribute('data-fps')) === current)
     })
+    this.syncMobileResControls()
+  }
+
+  private syncMobileResControls(): void {
+    const mode = this.settings.mobile.resMode
+    this.root.querySelectorAll('[data-mres]').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-mres') === mode)
+    })
+    const hint = this.root.querySelector('#kos-mres-hint')
+    if (hint) {
+      hint.textContent =
+        mode === '4:3'
+          ? '4:3 — 1280×960 stretched to fill the screen, like CS.'
+          : "Normal — your screen's native aspect, no stretching."
+    }
   }
 
   private bind(): void {
@@ -700,7 +733,7 @@ export class MainMenu {
       }
 
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
+        '[data-action], [data-diff], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -767,6 +800,18 @@ export class MainMenu {
         this.persist()
         try {
           Game.getInstance().applyMobilePerfProfile(perf)
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const mres = t.getAttribute('data-mres') as MobileResMode | null
+      if (mres === 'normal' || mres === '4:3') {
+        this.settings.mobile.resMode = mres
+        this.syncMobileResControls()
+        this.persist()
+        try {
+          Game.getInstance().applyMobileResMode(mres)
         } catch {
           /* ignore */
         }

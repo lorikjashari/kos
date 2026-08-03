@@ -6,6 +6,7 @@ import { SkyLight } from './SkyLight.js'
 import { FallingParticle } from '../Mesh/FallingParticle.js'
 import { Vector3D } from '../../Core/Vector'
 import { PeriodicUpdater } from '../../Core/PeriodicUpdater'
+import { isTouchDevice } from '../../UI/MobileDevice'
 
 export class SceneLighting implements IUpdatable {
   public renderer: Renderer
@@ -27,8 +28,8 @@ export class SceneLighting implements IUpdatable {
         { text: 'ACES Filmic', value: THREE.ACESFilmicToneMapping },
       ],
     })
-    this.renderer.toneMappingExposure = 0.72
-    this.renderer.setClearColor(0xb8cfe4)
+    this.renderer.toneMappingExposure = isTouchDevice() ? 0.92 : 0.72
+    this.renderer.setClearColor(isTouchDevice() ? 0xcbdcec : 0xb8cfe4)
     this.shadowUpdater = new PeriodicUpdater(
       150,
       () => {
@@ -57,7 +58,7 @@ export class SceneLighting implements IUpdatable {
     if (this.renderer.renderingConfig.hasParticle) {
       if (!this.particle) {
         this.particle = new FallingParticle({
-          count: 10000,
+          count: isTouchDevice() ? 2500 : 10000,
           size: 3,
           sizeVariation: false,
           fallDirection: new Vector3D(-0.1, -0.4, -0.1),

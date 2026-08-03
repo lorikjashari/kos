@@ -1,4 +1,5 @@
 import { Key } from '../Input/KeyBinding'
+import { isTouchDevice } from './MobileDevice'
 
 export type CrosshairStyle = 0 | 1 | 2 | 3 | 4 | 5
 
@@ -49,6 +50,8 @@ export type MobileLayoutMap = Record<MobileControlId, MobileControlSlot>
 
 export type MobileHoldMode = 'hold' | 'toggle'
 export type MobilePerfProfile = 'smooth' | 'balanced' | 'quality'
+/** `normal` renders at the screen's own aspect; `4:3` renders 4:3 and stretches (CS-style). */
+export type MobileResMode = 'normal' | '4:3'
 
 export interface MobileControlsSettings {
   enabled: boolean
@@ -58,6 +61,7 @@ export interface MobileControlsSettings {
   crouchMode: MobileHoldMode
   leanMode: MobileHoldMode
   perfProfile: MobilePerfProfile
+  resMode: MobileResMode
 }
 
 export interface PlayerSettings {
@@ -238,7 +242,8 @@ export function defaultMobileSettings(): MobileControlsSettings {
     layout: normalizeMobileLayout(),
     crouchMode: 'hold',
     leanMode: 'hold',
-    perfProfile: 'smooth',
+    perfProfile: 'balanced',
+    resMode: 'normal',
   }
 }
 
@@ -248,6 +253,10 @@ function normalizeHoldMode(v: unknown, fallback: MobileHoldMode): MobileHoldMode
 
 function normalizePerfProfile(v: unknown, fallback: MobilePerfProfile): MobilePerfProfile {
   return v === 'smooth' || v === 'balanced' || v === 'quality' ? v : fallback
+}
+
+function normalizeResMode(v: unknown, fallback: MobileResMode): MobileResMode {
+  return v === 'normal' || v === '4:3' ? v : fallback
 }
 
 export function normalizeMobileSettings(raw?: Partial<MobileControlsSettings>): MobileControlsSettings {
@@ -260,6 +269,7 @@ export function normalizeMobileSettings(raw?: Partial<MobileControlsSettings>): 
     crouchMode: normalizeHoldMode(raw?.crouchMode, d.crouchMode),
     leanMode: normalizeHoldMode(raw?.leanMode, d.leanMode),
     perfProfile: normalizePerfProfile(raw?.perfProfile, d.perfProfile),
+    resMode: normalizeResMode(raw?.resMode, d.resMode),
   }
 }
 
@@ -289,8 +299,10 @@ export function loadSettings(): PlayerSettings {
       musicVolume: clampVolume(
         typeof parsed.musicVolume === 'number' ? parsed.musicVolume : 0.38
       ),
-      fpsMax:
-        typeof parsed.fpsMax === 'number' && Number.isFinite(parsed.fpsMax)
+      // Phones always run at their own refresh rate; there is no cap to pick.
+      fpsMax: isTouchDevice()
+        ? 0
+        : typeof parsed.fpsMax === 'number' && Number.isFinite(parsed.fpsMax)
           ? Math.max(0, Math.min(999, Math.floor(parsed.fpsMax)))
           : 0,
       resolutionWidth: res.width,

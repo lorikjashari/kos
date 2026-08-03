@@ -5,6 +5,7 @@ import { Game } from '../../Game'
 import { TrimeshCollider } from '../../Physics/Collider/TrimeshCollider'
 import { FakeSpotLight } from './FakeSpotLight'
 import { LoadableMesh } from './LoadableMesh'
+import { isTouchDevice } from '../../UI/MobileDevice'
 
 export type MapMeshOptions = {
   /** Extra pool-day corridor fills + Spot named lights */
@@ -61,6 +62,7 @@ export class MapMesh extends LoadableMesh {
 
   public addPhysics(game: Game, options: MapMeshOptions = {}): void {
     const usePoolLights = options.usePoolLights ?? this.usePoolLights
+    const mobile = isTouchDevice()
     const extras = options.extras
     const removedMeshs: Array<THREE.Object3D> = new Array<THREE.Object3D>()
     const _worldPos = new THREE.Vector3()
@@ -107,10 +109,13 @@ export class MapMesh extends LoadableMesh {
             }
 
             if (usePoolLights) {
-              // Pool Day is baked dark — lift albedo + emissive so interiors read
+              // Pool Day is baked dark — lift albedo + emissive so interiors read.
+              // Phones get a smaller lift: without shadows the emissive fill was
+              // flattening the whole map into one flat tone.
+              const emissiveLift = mobile ? 0.24 : 0.45
               if (mat.color) {
-                mat.color.multiplyScalar(1.35)
-                mat.color.offsetHSL(0, 0.02, 0.04)
+                mat.color.multiplyScalar(mobile ? 1.18 : 1.35)
+                mat.color.offsetHSL(0, 0.02, mobile ? 0.015 : 0.04)
               }
               if ('metalness' in mat) mat.metalness = 0
               if ('roughness' in mat) mat.roughness = 0.92
@@ -118,10 +123,10 @@ export class MapMesh extends LoadableMesh {
                 if (mat.map) {
                   mat.emissiveMap = mat.map
                   mat.emissive.setRGB(1, 1, 1)
-                  mat.emissiveIntensity = 0.45
+                  mat.emissiveIntensity = emissiveLift
                 } else {
                   mat.emissive.copy(mat.color || new THREE.Color(0xffffff))
-                  mat.emissiveIntensity = 0.35
+                  mat.emissiveIntensity = emissiveLift * 0.78
                 }
               }
               mat.envMapIntensity = 0.4

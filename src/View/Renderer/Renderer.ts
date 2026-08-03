@@ -24,7 +24,7 @@ import { BloodManager } from '../Effects/BloodManager'
 import { Game } from '../../Game'
 import { GameHUD } from '../HUD/GameHUD'
 import { isTouchDevice } from '../../UI/MobileDevice'
-import type { MobilePerfProfile } from '../../UI/SettingsStore'
+import type { MobilePerfProfile, MobileResMode } from '../../UI/SettingsStore'
 
 export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   public scene: THREE.Scene
@@ -59,7 +59,7 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.shadowMap.autoUpdate = false
     this.players = players
     this.scene = new THREE.Scene()
-    this.scene.fog = new THREE.FogExp2(0xb8cfe4, mobile ? 0.00055 : 0.00035)
+    this.scene.fog = new THREE.FogExp2(mobile ? 0xcbdcec : 0xb8cfe4, mobile ? 0.0002 : 0.00035)
     this.viewmodelRenderer = new ViewmodelRenderer()
     this.particleManager = new ParticleManager(this.scene)
     this.projectileManager = new ProjectileManager(this.scene, () => Game.getInstance().getPhysics())
@@ -72,8 +72,12 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.gameResH = mobile ? 540 : 960
     this.setRenderingConfig()
     this.onWindowResize = this.onWindowResize.bind(this)
-    this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
-    this.applyGameResolution()
+    if (mobile) {
+      this.applyMobileResolution()
+    } else {
+      this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
+      this.applyGameResolution()
+    }
     this.hud = new GameHUD()
     this.fpsUpdater = new PeriodicUpdater(
       1000,
@@ -126,33 +130,63 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.applyGameResolution()
   }
 
+  private mobilePerfProfile: MobilePerfProfile = 'balanced'
+  private mobileResMode: MobileResMode = 'normal'
+
   public applyMobilePerfProfile(profile: MobilePerfProfile): void {
     if (!this.mobileGameplay) return
+    this.mobilePerfProfile = profile
     if (profile === 'smooth') {
       this.renderingConfig.hasPostProcess = false
       this.renderingConfig.hasParticle = false
-      this.renderingConfig.hasShadow = false
-      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.15)
-      this.setGameResolution(854, 480)
+      // Shadows are the single biggest depth cue; keep a cheap 1024 map even here
+      this.renderingConfig.hasShadow = true
     } else if (profile === 'balanced') {
       this.renderingConfig.hasPostProcess = false
       this.renderingConfig.hasParticle = true
       this.renderingConfig.hasShadow = true
-      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1.5)
-      this.setGameResolution(960, 540)
     } else {
       this.renderingConfig.hasPostProcess = true
       this.renderingConfig.hasParticle = true
       this.renderingConfig.hasShadow = true
-      this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 2)
-      this.setGameResolution(1280, 720)
     }
-    this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
+    this.applyMobileResolution()
     this.sceneLighting?.enableShadow(this.renderingConfig.hasShadow)
     this.sceneLighting?.applyRenderingConfig()
     if (this.renderingConfig.hasPostProcess && this.camera) {
       if (!this.composer) this.addPostProcess()
     }
+  }
+
+  public setMobileResMode(mode: MobileResMode): void {
+    if (!this.mobileGameplay) return
+    this.mobileResMode = mode
+    this.applyMobileResolution()
+  }
+
+  /**
+   * Mobile drives the backbuffer directly (pixel ratio pinned to 1) so the cost
+   * is predictable across very different device pixel ratios.
+   */
+  private applyMobileResolution(): void {
+    const scale =
+      this.mobilePerfProfile === 'smooth' ? 0.76 : this.mobilePerfProfile === 'balanced' ? 0.92 : 1.12
+    this.renderingConfig.resolution = 1
+    this.setPixelRatio(1)
+
+    if (this.mobileResMode === '4:3') {
+      const h = Math.round(THREE.MathUtils.clamp(768 * scale, 480, 960))
+      this.setGameResolution(Math.round((h * 4) / 3), h)
+      return
+    }
+
+    const vw = Math.max(320, window.innerWidth)
+    const vh = Math.max(240, window.innerHeight)
+    const aspect = vw / vh
+    // Track the screen's own aspect, budgeting on the short edge
+    const shortEdge = Math.round(THREE.MathUtils.clamp(Math.min(vw, vh) * window.devicePixelRatio * scale, 400, 1080))
+    if (aspect >= 1) this.setGameResolution(Math.round(shortEdge * aspect), shortEdge)
+    else this.setGameResolution(shortEdge, Math.round(shortEdge / aspect))
   }
 
   public getGameResolution(): { width: number; height: number } {
@@ -300,11 +334,11 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   private setRenderingConfig() {
     const mobile = this.mobileGameplay
     this.renderingConfig = {
-      resolution: Math.min(window.devicePixelRatio, mobile ? 1.25 : 1.5),
+      resolution: mobile ? 1 : Math.min(window.devicePixelRatio, 1.5),
       hasParticle: !mobile,
       hasPostProcess: !mobile,
       hasLight: true,
-      hasShadow: !mobile,
+      hasShadow: true,
       debugCamera: false,
       updateViewmodel: true,
       showViewmodel: true,
@@ -356,6 +390,12 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   }
 
   private onWindowResize(): void {
+    if (this.mobileGameplay) {
+      // Native mode follows the viewport, so recompute instead of reusing the old size
+      this.applyMobileResolution()
+      this.update()
+      return
+    }
     this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
     this.applyGameResolution()
     this.update()

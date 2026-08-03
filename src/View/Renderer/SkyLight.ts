@@ -4,6 +4,7 @@ import { Vector3D } from '../../Core/Vector'
 import { IUpdatable } from '../../Interface/IUpdatable.js'
 import { Renderer } from './Renderer.js'
 import { PeriodicUpdater } from '../../Core/PeriodicUpdater.js'
+import { isTouchDevice } from '../../UI/MobileDevice'
 
 /**
  * Balanced daylight for fy_pool_day:
@@ -34,16 +35,27 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
   private sun = new Vector3D()
   private applySky!: () => void
   private interiorFills: THREE.PointLight[] = []
+  /**
+   * Phones run without shadows on the lighter profiles, so a desktop-strength
+   * ambient/hemi fill leaves the map completely flat. Mobile trades fill for a
+   * stronger, warmer sun to keep shape and contrast readable.
+   */
+  private readonly mobile: boolean
 
   constructor(renderer: Renderer) {
     super()
     this.renderer = renderer
+    const mobile = isTouchDevice()
+    this.mobile = mobile
 
-    // Strong ambient fill so roof shadows aren't black
-    this.ambientLight = new THREE.AmbientLight(0xe8f0f8, 1.6)
+    this.ambientLight = new THREE.AmbientLight(0xe4edf7, mobile ? 0.72 : 1.6)
     this.renderer.addToRenderer(this.ambientLight)
 
-    this.hemiLight = new THREE.HemisphereLight(0xd0e4ff, 0xd0c4b0, 1.8)
+    this.hemiLight = new THREE.HemisphereLight(
+      mobile ? 0xcfe0f5 : 0xd0e4ff,
+      mobile ? 0xc4ab8a : 0xd0c4b0,
+      mobile ? 0.95 : 1.8
+    )
     this.renderer.addToRenderer(this.hemiLight)
 
     const lightInput = this.renderer.debugUI.addInput(this.hemiLight, 'intensity', {
@@ -53,23 +65,25 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
     this.renderer.debugUI.lightFolder.add(lightInput)
 
     // Main sun — moderate so sky stays blue
-    this.directionalLight = new THREE.DirectionalLight(0xfff2e0, 1.55)
+    this.directionalLight = new THREE.DirectionalLight(0xfff0da, mobile ? 2.5 : 1.55)
     this.directionalLight.shadow.camera.near = 0.1
     this.directionalLight.shadow.camera.far = 500
-    this.directionalLight.shadow.camera.right = 160
-    this.directionalLight.shadow.camera.left = -160
-    this.directionalLight.shadow.camera.top = 160
-    this.directionalLight.shadow.camera.bottom = -160
-    this.directionalLight.shadow.mapSize.width = 2048
-    this.directionalLight.shadow.mapSize.height = 2048
-    this.directionalLight.shadow.radius = 5
+    // Phones get a tighter shadow frustum so the smaller map keeps usable texel density
+    const shadowExtent = mobile ? 90 : 160
+    this.directionalLight.shadow.camera.right = shadowExtent
+    this.directionalLight.shadow.camera.left = -shadowExtent
+    this.directionalLight.shadow.camera.top = shadowExtent
+    this.directionalLight.shadow.camera.bottom = -shadowExtent
+    this.directionalLight.shadow.mapSize.width = mobile ? 1024 : 2048
+    this.directionalLight.shadow.mapSize.height = mobile ? 1024 : 2048
+    this.directionalLight.shadow.radius = mobile ? 3 : 5
     this.directionalLight.shadow.bias = -0.0003
-    this.directionalLight.shadow.normalBias = 0.025
+    this.directionalLight.shadow.normalBias = mobile ? 0.035 : 0.025
     this.directionalLight.castShadow = true
     this.directionalLight.shadow.autoUpdate = false
 
     // Opposite fill — lifts dark sides without killing contrast
-    this.fillLight = new THREE.DirectionalLight(0xb8d4f0, 0.55)
+    this.fillLight = new THREE.DirectionalLight(0xa9c8ea, mobile ? 0.3 : 0.55)
     this.fillLight.castShadow = false
 
     const dirLight = this.renderer.debugUI.addInput(this.directionalLight, 'intensity', {
@@ -107,8 +121,9 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
       { x: 30, y: 4.8, z: 40, i: 22, r: 36 },
       { x: -30, y: 4.8, z: 40, i: 22, r: 36 },
     ]
+    const scale = this.mobile ? 0.7 : 1
     for (const s of spots) {
-      const p = new THREE.PointLight(0xffe8cc, s.i, s.r, 1.35)
+      const p = new THREE.PointLight(0xffe8cc, s.i * scale, s.r, 1.35)
       p.position.set(s.x, s.y, s.z)
       p.castShadow = false
       this.renderer.addToRenderer(p)
@@ -173,25 +188,27 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
 
   /** Fixed pleasant midday look (auto cycle optional). */
   private applyDayLook(): void {
-    this.effectController.elevation = 55
+    const mobile = this.mobile
+    this.effectController.elevation = mobile ? 48 : 55
     this.effectController.azimuth = 155
-    this.effectController.turbidity = 6.5
-    this.effectController.rayleigh = 2.35
+    this.effectController.turbidity = mobile ? 4.2 : 6.5
+    this.effectController.rayleigh = mobile ? 1.7 : 2.35
     this.effectController.mieCoefficient = 0.0045
     this.effectController.mieDirectionalG = 0.72
-    this.effectController.exposure = 0.72
+    this.effectController.exposure = mobile ? 0.92 : 0.72
 
-    this.directionalLight.intensity = 1.55
-    this.directionalLight.color.setRGB(1, 0.95, 0.88)
-    this.fillLight.intensity = 0.55
-    this.fillLight.color.setRGB(0.72, 0.82, 0.95)
-    this.hemiLight.intensity = 1.8
-    this.ambientLight.intensity = 1.6
+    this.directionalLight.intensity = mobile ? 2.5 : 1.55
+    this.directionalLight.color.setRGB(1, 0.94, 0.85)
+    this.fillLight.intensity = mobile ? 0.3 : 0.55
+    this.fillLight.color.setRGB(0.66, 0.78, 0.92)
+    this.hemiLight.intensity = mobile ? 0.95 : 1.8
+    this.ambientLight.intensity = mobile ? 0.72 : 1.6
 
-    const fogColor = new THREE.Color(0xb8cfe4)
+    // Thinner, warmer haze on phones — the blue-grey wash was eating all contrast
+    const fogColor = new THREE.Color(mobile ? 0xcbdcec : 0xb8cfe4)
     if (this.renderer.scene.fog instanceof THREE.FogExp2) {
       this.renderer.scene.fog.color.copy(fogColor)
-      this.renderer.scene.fog.density = 0.00035
+      this.renderer.scene.fog.density = mobile ? 0.0002 : 0.00035
     }
     this.renderer.setClearColor(fogColor.getHex())
   }
