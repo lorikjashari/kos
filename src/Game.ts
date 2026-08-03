@@ -31,9 +31,11 @@ import * as THREE from 'three'
 import {
   BOT_GROUND_Y,
   DEFAULT_MAP_ID,
+  deriveSpawnsFromGeometry,
   getMapDefinition,
   spawnsFromBounds,
   type MapId,
+  type ProbeFn,
   type SpawnPoint,
 } from './Core/MapCatalog'
 import {
@@ -1224,33 +1226,26 @@ export class Game implements IUpdatable {
       colliders: this.mapColliders.length,
     })
 
-    if (def.id === 'de_dust2' || def.spawns.length <= 1) {
-      this.activeSpawns = spawnsFromBounds(
+    if (def.spawns.length > 1) {
+      this.activeSpawns = def.spawns
+    } else {
+      const probe: ProbeFn = (from, to) => {
+        const hit = this.physics.raycast(new Vector3D(from.x, from.y, from.z), new Vector3D(to.x, to.y, to.z))
+        return { hasHit: hit.hasHit, point: hit.hitPosition, normal: hit.hitNormal }
+      }
+      const derived = deriveSpawnsFromGeometry(
         { x: box.min.x, y: box.min.y, z: box.min.z },
         { x: box.max.x, y: box.max.y, z: box.max.z },
-        2.2
+        probe
       )
-      // Prefer a spawn near CT/T mid — center of normalized map
-      const mid = this.activeSpawns[0]
-      if (mid) {
-        // Drop onto ground via short physics ray once world exists
-        const from = new Vector3D(mid.x, box.max.y + 20, mid.z)
-        const to = new Vector3D(mid.x, box.min.y - 5, mid.z)
-        const hit = this.physics.raycast(from, to)
-        if (hit.hasHit && hit.hitPosition) {
-          mid.y = hit.hitPosition.y + 2.0
-          for (const s of this.activeSpawns) {
-            if (s === mid) continue
-            const h2 = this.physics.raycast(
-              new Vector3D(s.x, box.max.y + 20, s.z),
-              new Vector3D(s.x, box.min.y - 5, s.z)
-            )
-            if (h2.hasHit && h2.hitPosition) s.y = h2.hitPosition.y + 2.0
-          }
-        }
-      }
-    } else {
-      this.activeSpawns = def.spawns
+      this.activeSpawns = derived.length >= 2
+        ? derived
+        : spawnsFromBounds(
+            { x: box.min.x, y: box.min.y, z: box.min.z },
+            { x: box.max.x, y: box.max.y, z: box.max.z },
+            2.2
+          )
+      console.log('[map] derived spawns', mapId, this.activeSpawns.length)
     }
 
     this.activeMapId = mapId

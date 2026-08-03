@@ -64,7 +64,8 @@ export const MAP_CATALOG: Record<MapId, MapDefinition> = {
     normalizeToSize: 350,
     // Big map — slightly faster than pool, but not sprinty
     moveSpeedScale: 1.5,
-    defaultBotCount: 0,
+    // Spawns are probed from the collision mesh at load (deriveSpawnsFromGeometry)
+    defaultBotCount: 5,
     spawns: [{ x: 0, y: 2.0, z: 0 }],
   },
 }
@@ -98,6 +99,116 @@ export function shuffleInPlace<T>(arr: T[]): T[] {
     ;[arr[i], arr[j]] = [arr[j], arr[i]]
   }
   return arr
+}
+
+export type ProbeHit = {
+  hasHit: boolean
+  point?: { x: number; y: number; z: number }
+  normal?: { x: number; y: number; z: number }
+}
+
+export type ProbeFn = (
+  from: { x: number; y: number; z: number },
+  to: { x: number; y: number; z: number }
+) => ProbeHit
+
+/** Roughly the player capsule: 4 units tall, centre at y+2 above the feet. */
+export const PLAYER_HEIGHT = 4
+export const PLAYER_CENTER_OFFSET = 2
+
+/**
+ * Find real standing room by probing the loaded collision mesh instead of
+ * guessing from the bounding box. A box-derived ring drops players inside walls
+ * or off the playable area, which is why maps without authored spawns had to run
+ * with zero bots.
+ *
+ * Samples a grid from above, keeps points with flat ground and enough headroom
+ * for the capsule, then greedily spreads the picks out so nobody spawns on top
+ * of anyone else.
+ */
+export function deriveSpawnsFromGeometry(
+  min: { x: number; y: number; z: number },
+  max: { x: number; y: number; z: number },
+  probe: ProbeFn,
+  wanted = 12
+): SpawnPoint[] {
+  const spanX = max.x - min.x
+  const spanZ = max.z - min.z
+  if (spanX <= 0 || spanZ <= 0) return []
+
+  // Stay off the outer shell — that is usually skybox wall, not floor
+  const inset = 0.08
+  const steps = 42
+  const top = max.y + 10
+  const bottom = min.y - 10
+
+  type Cand = { x: number; y: number; z: number }
+  const candidates: Cand[] = []
+
+  for (let ix = 0; ix <= steps; ix++) {
+    for (let iz = 0; iz <= steps; iz++) {
+      const x = min.x + spanX * (inset + (1 - 2 * inset) * (ix / steps))
+      const z = min.z + spanZ * (inset + (1 - 2 * inset) * (iz / steps))
+
+      const ground = probe({ x, y: top, z }, { x, y: bottom, z })
+      if (!ground.hasHit || !ground.point) continue
+
+      // Reject walls, ramps too steep to stand on, and ceilings hit from above
+      const ny = ground.normal?.y ?? 1
+      if (ny < 0.7) continue
+
+      const feet = ground.point.y
+      const head = probe(
+        { x, y: feet + 0.6, z },
+        { x, y: feet + PLAYER_HEIGHT, z }
+      )
+      if (head.hasHit) continue
+
+      candidates.push({ x, y: feet, z })
+    }
+  }
+
+  if (candidates.length === 0) return []
+
+  // Rooftops and catwalks also pass the headroom test, so keep the height band
+  // most of the map sits in and drop the outliers.
+  const bucket = 3
+  const histogram = new Map<number, number>()
+  for (const c of candidates) {
+    const key = Math.round(c.y / bucket)
+    histogram.set(key, (histogram.get(key) ?? 0) + 1)
+  }
+  let dominant = 0
+  let dominantCount = -1
+  for (const [key, count] of histogram) {
+    if (count > dominantCount) {
+      dominantCount = count
+      dominant = key
+    }
+  }
+  const floorY = dominant * bucket
+  const onFloor = candidates.filter((c) => Math.abs(c.y - floorY) <= bucket * 2)
+  const pool = onFloor.length >= wanted ? onFloor : candidates
+
+  const minSep = Math.max(10, Math.min(spanX, spanZ) * 0.14)
+  const picked: SpawnPoint[] = []
+  for (const c of shuffleInPlace([...pool])) {
+    if (picked.every((p) => flatDistXZ(p.x, p.z, c.x, c.z) >= minSep)) {
+      picked.push({ x: c.x, y: c.y + PLAYER_CENTER_OFFSET, z: c.z })
+      if (picked.length >= wanted) break
+    }
+  }
+
+  // A cramped map may not fit `wanted` well-separated points; take what we can
+  if (picked.length < 4) {
+    for (const c of pool) {
+      if (picked.every((p) => flatDistXZ(p.x, p.z, c.x, c.z) >= minSep * 0.5)) {
+        picked.push({ x: c.x, y: c.y + PLAYER_CENTER_OFFSET, z: c.z })
+        if (picked.length >= wanted) break
+      }
+    }
+  }
+  return picked
 }
 
 /** Build a small spawn ring from a world-space AABB (after normalize). */

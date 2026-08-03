@@ -409,7 +409,7 @@ export class MainMenu {
                   <span>How many bots</span>
                   <input id="kos-bot-count" type="number" min="0" max="10" step="1" value="5" inputmode="numeric" />
                 </label>
-                <p class="kos-hint tight-left">Type any amount (0–10). Dust II starts at 0 while we tune it.</p>
+                <p class="kos-hint tight-left">Type any amount (0–10).</p>
                 <div class="kos-section-label">Match length</div>
                 <div class="kos-chip-row" id="kos-length">
                   ${(Object.keys(MATCH_LENGTHS) as MatchLength[])
@@ -1002,7 +1002,7 @@ export class MainMenu {
     if (hint) {
       hint.textContent =
         mapId === 'de_dust2'
-          ? 'Dust II — no bots yet while we tune collision & spawns.'
+          ? 'Dust II — large map, spawns spread across the site.'
           : 'Classic pool arena — bots ready.'
     }
   }
