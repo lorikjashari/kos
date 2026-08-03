@@ -181,6 +181,49 @@ export class TrainingBotRenderer implements IUpdatable {
   }
 
   /**
+   * A nearby bot is the only thing that can cover most of a phone screen, so its
+   * per-pixel cost dominates. Two things were making that expensive: the skins are
+   * double-sided, which shades a second pass over the same pixels, and they use
+   * MeshStandardMaterial, which evaluates a full GGX specular lobe per light. The
+   * skins are already clamped to rough and non-metal so that lobe contributes
+   * almost nothing, and Lambert keeps the diffuse and normal-map detail without it.
+   */
+  private static prepareSkinMaterials(mesh: THREE.Mesh): void {
+    if (!mesh.material) return
+    const mobile = isTouchDevice()
+    const convert = (m: THREE.Material): THREE.Material => {
+      const src = m as THREE.MeshStandardMaterial
+      if (src.map) src.map.colorSpace = THREE.SRGBColorSpace
+      const out = mobile && (src as unknown as { isMeshStandardMaterial?: boolean }).isMeshStandardMaterial
+        ? TrainingBotRenderer.toLambert(src)
+        : src
+      out.side = mobile ? THREE.FrontSide : THREE.DoubleSide
+      TrainingBotRenderer.applySkinLift(out as THREE.MeshStandardMaterial)
+      return out
+    }
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(convert) : convert(mesh.material)
+  }
+
+  private static toLambert(src: THREE.MeshStandardMaterial): THREE.MeshLambertMaterial {
+    // Not disposing src: prewarm clones can still share materials with the loaded asset
+    const lambert = new THREE.MeshLambertMaterial({
+      name: src.name,
+      color: src.color,
+      alphaTest: src.alphaTest,
+      transparent: src.transparent,
+      opacity: src.opacity,
+      vertexColors: src.vertexColors,
+      flatShading: src.flatShading,
+    })
+    lambert.map = src.map
+    lambert.normalMap = src.normalMap
+    lambert.normalScale = src.normalScale
+    lambert.aoMap = src.aoMap
+    lambert.alphaMap = src.alphaMap
+    return lambert
+  }
+
+  /**
    * The map is lifted with an emissive pass so its interiors read, but bots had no
    * equivalent, so they sank into black in any corner the sun couldn't reach. Give
    * them a matching floor of self-illumination from their own albedo.
@@ -222,15 +265,10 @@ export class TrainingBotRenderer implements IUpdatable {
       if (Array.isArray(child.material)) child.material = child.material.map((m) => m.clone())
       else child.material = child.material.clone()
       child.castShadow = true
-      child.receiveShadow = true
-      // Sketchfab CS skins often need double-side + correct color space
-      const mats = Array.isArray(child.material) ? child.material : [child.material]
-      for (const m of mats) {
-        const mat = m as THREE.MeshStandardMaterial
-        mat.side = THREE.DoubleSide
-        if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace
-        TrainingBotRenderer.applySkinLift(mat)
-      }
+      // Nothing casts onto a bot on mobile now that the baked map doesn't, so the
+      // per-pixel PCF taps buy nothing
+      child.receiveShadow = !isTouchDevice()
+      TrainingBotRenderer.prepareSkinMaterials(child)
     })
 
     root.add(model)
@@ -393,14 +431,8 @@ export class TrainingBotRenderer implements IUpdatable {
         const mesh = child as THREE.Mesh
         if (!mesh.isMesh || !mesh.material) return
         mesh.castShadow = true
-        mesh.receiveShadow = true
-        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-        for (const m of mats) {
-          const mat = m as THREE.MeshStandardMaterial
-          mat.side = THREE.DoubleSide
-          if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace
-          TrainingBotRenderer.applySkinLift(mat)
-        }
+        mesh.receiveShadow = !isTouchDevice()
+        TrainingBotRenderer.prepareSkinMaterials(mesh)
       })
       stage.add(model)
     }
