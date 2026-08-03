@@ -7,6 +7,7 @@ export type PublicRoomInfo = {
   players: number
   max: number
   ts: number
+  mapId?: 'pool_day' | 'de_dust2'
 }
 
 const TOPIC = 'kos/fps/rooms/v1'
@@ -84,9 +85,11 @@ export class RoomDirectory {
     host: string
     players: number
     max?: number
+    mapId?: 'pool_day' | 'de_dust2'
   }): Promise<void> {
     await this.ensureConnected()
     const host = (info.host || 'Player').trim().slice(0, 24) || 'Player'
+    const mapId = info.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
     this.hosting = {
       code: info.code.toUpperCase(),
       name: `${host}'s Room`,
@@ -94,6 +97,7 @@ export class RoomDirectory {
       players: Math.max(1, info.players),
       max: Math.max(2, Math.min(MAX_PLAYERS, info.max ?? MAX_PLAYERS)),
       ts: Date.now(),
+      mapId,
     }
     this.publishNow()
     if (this.publishTimer) window.clearInterval(this.publishTimer)
@@ -172,6 +176,7 @@ export class RoomDirectory {
         players: Math.max(1, Number(room.players) || 1),
         max: Math.max(2, Math.min(MAX_PLAYERS, Number(room.max) || MAX_PLAYERS)),
         ts: Number(room.ts) || Date.now(),
+        mapId: room.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day',
       })
       this.emit()
     } catch {

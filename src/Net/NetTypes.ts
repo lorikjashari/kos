@@ -10,8 +10,15 @@ export type NetMsg =
       humans: Array<{ id: string; name: string }>
       botTarget: number
       teamMode: TeamMode
+      mapId?: 'pool_day' | 'de_dust2'
     }
-  | { t: 'roster'; humans: Array<{ id: string; name: string }>; botTarget: number; teamMode: TeamMode }
+  | {
+      t: 'roster'
+      humans: Array<{ id: string; name: string }>
+      botTarget: number
+      teamMode: TeamMode
+      mapId?: 'pool_day' | 'de_dust2'
+    }
   | {
       t: 'player'
       id: string

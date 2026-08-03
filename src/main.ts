@@ -49,7 +49,8 @@ async function main() {
         try {
           menu.setMultiplayerStatus(config.mode === 'host' ? 'Opening room…' : 'Connecting…')
           await game.audioManager.unlock()
-          await game.ensureMap('pool_day')
+          const mapId = config.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
+          await game.ensureMap(mapId)
           await game.prepareCombat()
           menu.hide()
           const code = await game.startMultiplayerMatch({
@@ -58,6 +59,9 @@ async function main() {
             playerName: config.playerName,
             difficulty: config.difficulty,
             botCount: config.botCount,
+            matchLength: config.matchLength,
+            teamMode: config.teamMode,
+            mapId,
           })
           menu.setMultiplayerStatus(config.mode === 'host' ? `Room ${code}` : `Joined ${code}`)
         } catch (error) {

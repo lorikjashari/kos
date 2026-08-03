@@ -12,6 +12,7 @@ import {
 } from './NetTypes'
 import { roomDirectory, RoomDirectory } from './RoomDirectory'
 import type { MatchLength, TeamMode } from '../Core/MatchStats'
+import type { MapId } from '../Core/MapCatalog'
 
 export type MultiplayerStartConfig = {
   mode: 'host' | 'join'
@@ -22,6 +23,8 @@ export type MultiplayerStartConfig = {
   botCount?: number
   matchLength?: MatchLength
   teamMode?: TeamMode
+  /** Host-chosen map; clients adopt from welcome */
+  mapId?: MapId
 }
 
 type HumanRec = { id: string; name: string }
@@ -43,6 +46,7 @@ export class MultiplayerMatch {
   private pendingShoot = false
   /** Host's choice; clients adopt it from welcome/roster */
   private teamMode: TeamMode = 'ffa'
+  private mapId: MapId = 'pool_day'
 
   public get active(): boolean {
     return this.enabled && this.role !== 'offline'
@@ -69,6 +73,7 @@ export class MultiplayerMatch {
     this.localName = (config.playerName || 'Player').slice(0, 24)
     this.fillBots = Math.max(0, Math.min(MP_FILL_BOTS, Math.round(config.botCount ?? MP_FILL_BOTS)))
     this.teamMode = config.teamMode ?? 'ffa'
+    this.mapId = config.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
     this.enabled = true
     this.humans.clear()
 
@@ -91,6 +96,7 @@ export class MultiplayerMatch {
         host: this.localName,
         players: 1,
         max: RoomDirectory.MAX_PLAYERS,
+        mapId: this.mapId,
       })
       return { code, role: 'host' }
     }
@@ -187,6 +193,7 @@ export class MultiplayerMatch {
           humans: [...this.humans.values()],
           botTarget: botTargetForHumans(this.humans.size, this.fillBots),
           teamMode: this.teamMode,
+          mapId: this.mapId,
         })
         this.broadcastRoster()
         this.reconcileBotCount()
@@ -202,11 +209,17 @@ export class MultiplayerMatch {
         })
         // The host owns the rule set; a joining client adopts it
         this.teamMode = msg.teamMode ?? 'ffa'
+        this.mapId = msg.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
         Game.getInstance().setTeamMode(this.teamMode)
+        void Game.getInstance().adoptMultiplayerMap(this.mapId)
         break
       }
       case 'roster': {
         this.teamMode = msg.teamMode ?? this.teamMode
+        if (msg.mapId === 'de_dust2' || msg.mapId === 'pool_day') {
+          this.mapId = msg.mapId
+          void Game.getInstance().adoptMultiplayerMap(this.mapId)
+        }
         Game.getInstance().setTeamMode(this.teamMode)
         const keep = new Set(msg.humans.map((h) => h.id))
         this.humans.clear()
@@ -335,6 +348,7 @@ export class MultiplayerMatch {
       humans: [...this.humans.values()],
       botTarget: botTargetForHumans(this.humans.size, this.fillBots),
       teamMode: this.teamMode,
+      mapId: this.mapId,
     }
     this.session.broadcast(msg)
   }

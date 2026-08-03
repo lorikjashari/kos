@@ -1090,6 +1090,7 @@ export class Game implements IUpdatable {
     const mp = new MultiplayerMatch()
     this.multiplayer?.stop()
     this.multiplayer = mp
+    const mapId = config.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
     const { code, role } = await mp.start(config)
     const botCount =
       role === 'host' ? botTargetForHumans(1, config.botCount ?? 10) : 0
@@ -1099,11 +1100,21 @@ export class Game implements IUpdatable {
       botCount,
       playerName: config.playerName,
       refillAmmoOnKill: false,
-      mapId: 'pool_day',
+      mapId,
       matchLength: config.matchLength ?? DEFAULT_MATCH_LENGTH,
     })
     this.showMpBanner(code, role === 'host')
     return code
+  }
+
+  /** Joining client: switch to the host's map and land on a spawn. */
+  public async adoptMultiplayerMap(mapId: MapId): Promise<void> {
+    const id = mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
+    if (this.activeMapId === id && this.activeMapMesh) return
+    await this.ensureMap(id)
+    if (this.currentPlayer?.player && !this.currentPlayer.player.isDead) {
+      this.currentPlayer.player.teleportToSpawn(this.pickRespawnPosition(undefined, false))
+    }
   }
 
   public getMultiplayer(): MultiplayerMatch | null {

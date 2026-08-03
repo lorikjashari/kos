@@ -56,6 +56,7 @@ type MenuCallbacks = {
     botCount: number
     matchLength: MatchLength
     teamMode: TeamMode
+    mapId: MapId
   }) => void
   onSettingsChanged: (settings: PlayerSettings) => void
 }
@@ -331,7 +332,12 @@ export class MainMenu {
               <div class="kos-mset-card">
                 <div class="kos-mset-head">
                   <strong>Create room</strong>
-                  <em>Host on Pool Day</em>
+                  <em>Host picks the map</em>
+                </div>
+                <div class="kos-section-label">Map</div>
+                <div class="kos-chip-row" id="kos-mp-map">
+                  <button type="button" class="kos-chip is-on" data-mp-map="pool_day">Pool Day</button>
+                  <button type="button" class="kos-chip" data-mp-map="de_dust2">Dust II</button>
                 </div>
                 <label class="kos-field kos-field-inline">
                   <span>Bots</span>
@@ -792,12 +798,14 @@ export class MainMenu {
       const roomBtn = (e.target as HTMLElement).closest('[data-join-code]') as HTMLElement | null
       if (roomBtn) {
         const code = (roomBtn.getAttribute('data-join-code') || '').trim().toUpperCase()
+        const roomMap = roomBtn.getAttribute('data-map-id') as MapId | null
+        if (roomMap === 'pool_day' || roomMap === 'de_dust2') this.selectMap(roomMap)
         if (code) this.startMultiplayer('join', code)
         return
       }
 
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-length], [data-team], [data-mp-diff], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
+        '[data-action], [data-diff], [data-length], [data-team], [data-mp-diff], [data-mp-map], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -914,7 +922,11 @@ export class MainMenu {
       const mapId = t.getAttribute('data-map') as MapId | null
       if (mapId === 'pool_day' || mapId === 'de_dust2') {
         this.selectMap(mapId)
-        this.root.querySelectorAll('[data-map]').forEach((el) => el.classList.toggle('is-on', el === t))
+      }
+
+      const mpMap = t.getAttribute('data-mp-map') as MapId | null
+      if (mpMap === 'pool_day' || mpMap === 'de_dust2') {
+        this.selectMap(mpMap)
       }
 
       const diff = t.getAttribute('data-diff') as BotDifficulty | null
@@ -1005,6 +1017,12 @@ export class MainMenu {
           ? 'Dust II — large map, spawns spread across the site.'
           : 'Classic pool arena — bots ready.'
     }
+    this.root.querySelectorAll('[data-map]').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-map') === mapId)
+    })
+    this.root.querySelectorAll('[data-mp-map]').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-mp-map') === mapId)
+    })
   }
 
   private readBotCount(): number {
@@ -1057,6 +1075,7 @@ export class MainMenu {
       botCount,
       matchLength: this.selectedMatchLength,
       teamMode: this.selectedTeamMode,
+      mapId: this.selectedMapId,
     })
   }
 
@@ -1089,9 +1108,10 @@ export class MainMenu {
       btn.type = 'button'
       btn.className = 'kos-mp-room'
       btn.setAttribute('data-join-code', room.code)
+      btn.setAttribute('data-map-id', room.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day')
       btn.innerHTML = `
         <span class="kos-mp-room-name">${this.escapeHtml(room.name)}</span>
-        <span class="kos-mp-room-meta">${room.players}/${room.max}</span>
+        <span class="kos-mp-room-meta">${room.mapId === 'de_dust2' ? 'Dust II' : 'Pool Day'} · ${room.players}/${room.max}</span>
       `
       host.appendChild(btn)
     }
