@@ -64,9 +64,20 @@ export const MAP_CATALOG: Record<MapId, MapDefinition> = {
     normalizeToSize: 350,
     // Big map — slightly faster than pool, but not sprinty
     moveSpeedScale: 1.5,
-    // Spawns are probed from the collision mesh at load (deriveSpawnsFromGeometry)
+    // Authored only — players/bots never use derived or fallback spawns on this map
     defaultBotCount: 5,
-    spawns: [{ x: 0, y: 2.0, z: 0 }],
+    spawns: [
+      { x: 97.7, y: 21.0, z: -87.8 },
+      { x: 53.8, y: 21.0, z: -54.9 },
+      { x: 3.2, y: 6.2, z: -24.2 },
+      { x: -89.6, y: 16.8, z: -18.0 },
+      { x: -115.0, y: 16.8, z: -111.8 },
+      { x: 26.3, y: 6.2, z: -91.8 },
+      { x: -27.3, y: 14.7, z: 41.3 },
+      { x: 55.8, y: 14.7, z: 51.1 },
+      { x: 40.9, y: 14.7, z: 128.2 },
+      { x: -52.7, y: 23.1, z: 101.4 },
+    ],
   },
 }
 
@@ -80,11 +91,12 @@ export function spawnToPlayerVector(s: SpawnPoint): Vector3D {
   return new Vector3D(s.x, s.y, s.z)
 }
 
-/** Bot root / feet height (player Y=2 is capsule mid, not feet) */
+/** Default bot feet Y on flat maps where player capsule centre is ~2 */
 export const BOT_GROUND_Y = 0
 
+/** Bot root / feet height — player spawn Y is capsule mid, not feet */
 export function spawnToBotVector(s: SpawnPoint): Vector3D {
-  return new Vector3D(s.x, BOT_GROUND_Y, s.z)
+  return new Vector3D(s.x, s.y - PLAYER_CENTER_OFFSET, s.z)
 }
 
 export function flatDistXZ(ax: number, az: number, bx: number, bz: number): number {
