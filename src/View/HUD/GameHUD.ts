@@ -86,14 +86,6 @@ export class GameHUD {
   private lastArmorShown = -1
   private deathShown = false
   private lastLockdownShown = -1
-  private coordsEl: HTMLElement | null = null
-  private coordsTextEl: HTMLElement | null = null
-  private coordsListEl: HTMLElement | null = null
-  private coordsStatusEl: HTMLElement | null = null
-  private coordsVisible = false
-  private markedSpawns: Array<{ x: number; y: number; z: number }> = []
-  private lastCoordsKey = ''
-  private boundCoordsKeyDown = (e: KeyboardEvent) => this.onCoordsKeyDown(e)
   private feedId = 0
   private readonly feedLifetimeMs = 4200
   private readonly maxFeed = 5
@@ -151,23 +143,6 @@ export class GameHUD {
       </div>
 
       <div class="cs-killfeed" id="hud-killfeed" aria-live="polite"></div>
-
-      <div class="cs-coords" id="hud-coords" aria-hidden="true">
-        <div class="cs-coords-head">
-          <span class="cs-coords-title">Coordinates</span>
-          <span class="cs-coords-map">Dust II</span>
-        </div>
-        <div class="cs-coords-pos" id="hud-coords-pos">X 0.0  Y 0.0  Z 0.0</div>
-        <div class="cs-coords-hint">M mark · P copy · O copy all</div>
-        <div class="cs-coords-actions">
-          <button type="button" class="cs-coords-btn" data-coords="mark">Mark</button>
-          <button type="button" class="cs-coords-btn" data-coords="copy">Copy</button>
-          <button type="button" class="cs-coords-btn" data-coords="copy-all">Copy all</button>
-          <button type="button" class="cs-coords-btn" data-coords="clear">Clear</button>
-        </div>
-        <div class="cs-coords-list" id="hud-coords-list"></div>
-        <div class="cs-coords-status" id="hud-coords-status"></div>
-      </div>
 
       <div class="cs-lockdown" id="hud-lockdown" aria-hidden="true">
         <div class="cs-lockdown-num" id="hud-lockdown-num">3</div>
@@ -289,7 +264,6 @@ export class GameHUD {
     this.topRoot.style.display = 'none'
     this.bind()
     this.applyTouchUiHints()
-    window.addEventListener('keydown', this.boundCoordsKeyDown)
     requestAnimationFrame(() => this.bakeIcons())
   }
 
@@ -358,10 +332,7 @@ export class GameHUD {
         else this.resultHandlers?.onMenu()
       })
     })
-    const blockSelect = (e: Event) => {
-      if ((e.target as HTMLElement | null)?.closest?.('#hud-coords')) return
-      e.preventDefault()
-    }
+    const blockSelect = (e: Event) => e.preventDefault()
     for (const el of [this.root, this.topRoot]) {
       el.addEventListener('selectstart', blockSelect)
       el.addEventListener('contextmenu', blockSelect)
@@ -424,31 +395,6 @@ export class GameHUD {
         }
         if (action === 'menu') game.returnToMenu()
       }
-      btn.addEventListener('pointerup', run)
-      btn.addEventListener('click', (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-      })
-    })
-
-    this.coordsEl = document.getElementById('hud-coords')
-    this.coordsTextEl = document.getElementById('hud-coords-pos')
-    this.coordsListEl = document.getElementById('hud-coords-list')
-    this.coordsStatusEl = document.getElementById('hud-coords-status')
-    this.coordsEl?.querySelectorAll('[data-coords]').forEach((btn) => {
-      const run = (e: Event) => {
-        e.preventDefault()
-        e.stopPropagation()
-        const action = (btn as HTMLElement).getAttribute('data-coords')
-        if (action === 'mark') this.markCurrentSpawn()
-        else if (action === 'copy') this.copyCurrentSpawn()
-        else if (action === 'copy-all') this.copyMarkedSpawns()
-        else if (action === 'clear') this.clearMarkedSpawns()
-      }
-      btn.addEventListener('pointerdown', (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-      })
       btn.addEventListener('pointerup', run)
       btn.addEventListener('click', (e) => {
         e.preventDefault()
@@ -1652,101 +1598,6 @@ export class GameHUD {
       .cs-matchbar-lead.is-on { display: block; }
       @keyframes kos-clock-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
 
-      /* ---- dust2 spawn coordinates ---- */
-      .cs-coords {
-        position: absolute;
-        top: calc(56px + env(safe-area-inset-top));
-        left: max(14px, env(safe-area-inset-left));
-        z-index: 8;
-        display: none;
-        flex-direction: column;
-        gap: 6px;
-        min-width: 220px;
-        max-width: min(320px, 46vw);
-        padding: 10px 12px;
-        border-radius: 10px;
-        background: linear-gradient(180deg, rgba(8,12,18,0.88), rgba(8,12,18,0.72));
-        border: 1px solid rgba(255, 196, 90, 0.35);
-        box-shadow: 0 10px 28px rgba(0,0,0,0.35);
-        pointer-events: auto;
-        text-shadow: none;
-        font-variant-numeric: tabular-nums;
-      }
-      .cs-coords.is-on { display: flex; }
-      .cs-coords-head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: 10px;
-      }
-      .cs-coords-title {
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        color: rgba(255,210,120,0.95);
-      }
-      .cs-coords-map {
-        font-size: 10px;
-        font-weight: 600;
-        opacity: 0.55;
-      }
-      .cs-coords-pos {
-        font-size: 15px;
-        font-weight: 700;
-        letter-spacing: 0.02em;
-        color: #fff;
-        user-select: text !important;
-        -webkit-user-select: text !important;
-      }
-      .cs-coords-hint {
-        font-size: 10px;
-        font-weight: 600;
-        opacity: 0.45;
-        letter-spacing: 0.04em;
-      }
-      .cs-coords-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-      }
-      .cs-coords-btn {
-        appearance: none;
-        border: 1px solid rgba(255,255,255,0.16);
-        background: rgba(255,255,255,0.06);
-        color: #fff;
-        font: inherit;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        padding: 5px 8px;
-        border-radius: 6px;
-        cursor: pointer;
-        pointer-events: auto;
-      }
-      .cs-coords-btn:hover {
-        background: rgba(255,196,90,0.18);
-        border-color: rgba(255,196,90,0.45);
-      }
-      .cs-coords-list {
-        max-height: 140px;
-        overflow: auto;
-        font-size: 11px;
-        font-weight: 600;
-        line-height: 1.35;
-        color: rgba(255,255,255,0.78);
-        white-space: pre-wrap;
-        user-select: text !important;
-        -webkit-user-select: text !important;
-      }
-      .cs-coords-list:empty { display: none; }
-      .cs-coords-status {
-        min-height: 14px;
-        font-size: 10px;
-        font-weight: 700;
-        color: rgba(140, 220, 160, 0.95);
-      }
-
       /* ---- match results ---- */
       .cs-result {
         position: fixed;
@@ -2018,123 +1869,6 @@ export class GameHUD {
     return player.reserveAmmo()
   }
 
-  private roundCoord(n: number): number {
-    return Math.round(n * 10) / 10
-  }
-
-  private currentSpawnPoint(player: Player): { x: number; y: number; z: number } {
-    return {
-      x: this.roundCoord(player.position.x),
-      y: this.roundCoord(player.position.y),
-      z: this.roundCoord(player.position.z),
-    }
-  }
-
-  private formatSpawnLine(s: { x: number; y: number; z: number }): string {
-    return `{ x: ${s.x.toFixed(1)}, y: ${s.y.toFixed(1)}, z: ${s.z.toFixed(1)} },`
-  }
-
-  private formatSpawnList(list: Array<{ x: number; y: number; z: number }>): string {
-    return list.map((s) => this.formatSpawnLine(s)).join('\n')
-  }
-
-  private setCoordsStatus(msg: string): void {
-    if (this.coordsStatusEl) this.coordsStatusEl.textContent = msg
-  }
-
-  private refreshCoordsList(): void {
-    if (!this.coordsListEl) return
-    this.coordsListEl.textContent = this.formatSpawnList(this.markedSpawns)
-  }
-
-  private async writeClipboard(text: string): Promise<boolean> {
-    try {
-      await navigator.clipboard.writeText(text)
-      return true
-    } catch {
-      try {
-        const ta = document.createElement('textarea')
-        ta.value = text
-        ta.style.cssText = 'position:fixed;left:-9999px;top:0'
-        document.body.appendChild(ta)
-        ta.select()
-        const ok = document.execCommand('copy')
-        ta.remove()
-        return ok
-      } catch {
-        return false
-      }
-    }
-  }
-
-  private markCurrentSpawn(): void {
-    const player = Game.getInstance().currentPlayer?.player
-    if (!player) return
-    const s = this.currentSpawnPoint(player)
-    this.markedSpawns.push(s)
-    this.refreshCoordsList()
-    this.setCoordsStatus(`Marked #${this.markedSpawns.length}`)
-  }
-
-  private async copyCurrentSpawn(): Promise<void> {
-    const player = Game.getInstance().currentPlayer?.player
-    if (!player) return
-    const line = this.formatSpawnLine(this.currentSpawnPoint(player))
-    const ok = await this.writeClipboard(line)
-    this.setCoordsStatus(ok ? 'Copied current' : 'Copy failed')
-  }
-
-  private async copyMarkedSpawns(): Promise<void> {
-    if (this.markedSpawns.length === 0) {
-      this.setCoordsStatus('Nothing marked')
-      return
-    }
-    const ok = await this.writeClipboard(this.formatSpawnList(this.markedSpawns))
-    this.setCoordsStatus(ok ? `Copied ${this.markedSpawns.length} spawn(s)` : 'Copy failed')
-  }
-
-  private clearMarkedSpawns(): void {
-    this.markedSpawns = []
-    this.refreshCoordsList()
-    this.setCoordsStatus('Cleared')
-  }
-
-  private onCoordsKeyDown(e: KeyboardEvent): void {
-    if (!this.coordsVisible || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
-    const game = Game.getInstance()
-    if (game.isCommandConsoleOpen() || game.matchPaused) return
-    const tag = (e.target as HTMLElement | null)?.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return
-    const key = e.key.toLowerCase()
-    if (key === 'm') {
-      e.preventDefault()
-      this.markCurrentSpawn()
-    } else if (key === 'p') {
-      e.preventDefault()
-      void this.copyCurrentSpawn()
-    } else if (key === 'o') {
-      e.preventDefault()
-      void this.copyMarkedSpawns()
-    }
-  }
-
-  private syncCoordsPanel(player: Player): void {
-    const onDust2 = Game.getInstance().activeMapId === 'de_dust2'
-    if (onDust2 !== this.coordsVisible) {
-      this.coordsVisible = onDust2
-      this.coordsEl?.classList.toggle('is-on', onDust2)
-      this.coordsEl?.setAttribute('aria-hidden', onDust2 ? 'false' : 'true')
-      if (!onDust2) this.setCoordsStatus('')
-    }
-    if (!onDust2 || !this.coordsTextEl) return
-
-    const s = this.currentSpawnPoint(player)
-    const key = `${s.x},${s.y},${s.z}`
-    if (key === this.lastCoordsKey) return
-    this.lastCoordsKey = key
-    this.coordsTextEl.textContent = `X ${s.x.toFixed(1)}  Y ${s.y.toFixed(1)}  Z ${s.z.toFixed(1)}`
-  }
-
   public update(player: Player): void {
     if (!this.iconsReady) this.bakeIcons()
 
@@ -2146,7 +1880,6 @@ export class GameHUD {
       this.damageFlashEl.style.opacity = '0'
     }
     this.updateDeathHud(player)
-    this.syncCoordsPanel(player)
 
     if (this.scoreboardEl?.classList.contains('is-on')) {
       this.refreshScoreboard()

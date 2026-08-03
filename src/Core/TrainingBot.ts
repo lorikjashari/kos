@@ -5,6 +5,9 @@ import { IUpdatable } from '../Interface/IUpdatable'
 import { Game } from '../Game'
 import type { Player } from './Player'
 
+/** World Y at or below this → fall through map / void death */
+const VOID_DEATH_Y = -30
+
 export type BotDifficulty = 'easy' | 'medium' | 'hard'
 
 interface DifficultyTuning {
@@ -259,6 +262,8 @@ export class TrainingBot implements IUpdatable {
       return
     }
 
+    if (this.checkVoidDeath()) return
+
     // Editor dummy — stay planted; optional face-player; no move / shoot
     if (this.aiFrozen) {
       this.isMoving = false
@@ -280,13 +285,29 @@ export class TrainingBot implements IUpdatable {
       this.isMoving = false
       this.idlePatrol(dt, physics)
       this.followTerrain(physics, dt)
+      this.checkVoidDeath()
       return
     }
 
     // Keep fighting even if the player is dead (bot free-for-all)
     this.combatThink(dt, player, physics)
     this.followTerrain(physics, dt)
+    this.checkVoidDeath()
     if (this.shootFlash > 0) this.shootFlash = Math.max(0, this.shootFlash - dt)
+  }
+
+  /** Fell through the map — die and respawn on a real spawn after the death timer. */
+  private checkVoidDeath(): boolean {
+    if (!this.isAlive || this.aiFrozen || this.isNetworkPuppet) return false
+    if (this.position.y > VOID_DEATH_Y) return false
+    this.health = 0
+    this.isAlive = false
+    this.deathAge = 0
+    this.isMoving = false
+    this.waypoint = undefined
+    this.velocityY = 0
+    this.deaths++
+    return true
   }
 
   private idlePatrol(dt: number, physics: Physics): void {
@@ -774,12 +795,6 @@ export class TrainingBot implements IUpdatable {
     this.isOnGround = false
     this.velocityY -= this.gravity * dt
     this.position.y += this.velocityY * dt
-    // Soft kill-floor so a bot that falls off the map eventually respawns via death logic elsewhere
-    if (this.position.y < -80) {
-      this.position.y = this.spawnPosition.y
-      this.velocityY = 0
-      this.isOnGround = true
-    }
   }
 
   private flatDist(a: Vector3D, b: Vector3D): number {

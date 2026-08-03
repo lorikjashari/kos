@@ -14,6 +14,9 @@ import { damageAtRange } from './BodyPart'
 import { FPSMesh } from '../View/Mesh/FPSMesh'
 import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
 
+/** World Y at or below this → fall through map / void death */
+const VOID_DEATH_Y = -30
+
 // Good reference : https://github.com/222464/EvolvedVirtualCreaturesRepo/blob/master/VirtualCreatures/Volumetric_SDL/Source/SceneObjects/Physics/DynamicCharacterController.cpp
 export class Player extends Pawn implements IUpdatable {
   public velocity: Vector3D = new Vector3D(0, 0, 0)
@@ -596,6 +599,7 @@ export class Player extends Pawn implements IUpdatable {
    * camera renders is the frame the body is actually standing on. */
   public postPhysics(dt: number): void {
     this.syncPositionFromBody()
+    this.checkVoidDeath()
 
     const wasOnGround = this.isOnGround
     this.updateGroundState()
@@ -609,6 +613,17 @@ export class Player extends Pawn implements IUpdatable {
     const slopeY = this.slopeAlignedY(this.velocity.x, this.velocity.z)
     this.body.getLinearVelocity().setY(slopeY)
     this.velocity.y = slopeY
+  }
+
+  /** Glitched under the map / fell off — die and let the normal respawn timer fire. */
+  private checkVoidDeath(): void {
+    if (this.isDead) return
+    if (this.position.y > VOID_DEATH_Y) return
+    this.takeDamage(99999, 'void')
+    this.setVelocity(Vector3D.ZERO())
+    const lv = this.body.getLinearVelocity()
+    lv.setValue(0, 0, 0)
+    this.setBodyGravityEnabled(false)
   }
 
   private updateReload(dt: number): void {
