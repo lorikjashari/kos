@@ -27,10 +27,7 @@ export function buildMainMenuHtml(): string {
       <section class="kos-screen" data-screen="main">
         <div class="kos-shell kos-shell-main">
           <div class="kos-main-col">
-            <header class="kos-brand">
-              <img class="kos-logo kos-logo-hero" src="/logo.png" alt="KoS FPS Shooting" width="640" height="640" />
-              <p class="kos-tagline">Browser FPS · bots &amp; friends</p>
-            </header>
+            <img class="kos-logo kos-logo-hero" src="/logo-menu.png" alt="KoS FPS Shooting" width="382" height="220" />
 
             <div class="kos-menu-rail">
               <label class="kos-field">
