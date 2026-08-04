@@ -2605,22 +2605,27 @@ export class Game implements IUpdatable {
     this.renderer.update(renderDt)
   }
 
-  /** Soft capsule: player cannot walk through bot bodies. */
+  /** Soft capsule: player cannot walk through bots or remote humans. */
   private resolvePlayerBotOverlap(): void {
     const player = this.currentPlayer?.player
     if (!player || player.isDead) return
     const minDist = 0.85 + 0.95
     for (const bot of this.trainingBots) {
-      if (!bot.isAlive || bot.aiFrozen || bot.isNetworkPuppet) continue
+      if (!bot.isAlive || bot.aiFrozen) continue
+      // Network puppets are snapshotted — only push the local player so we don't
+      // fight the next remote pose update. AI bots share the correction.
+      const botWeight = bot.isNetworkPuppet ? 0 : 0.45
       const out = separatePair(
         { x: bot.position.x, z: bot.position.z },
         { x: player.position.x, z: player.position.z },
         minDist,
-        0.45
+        botWeight
       )
       if (!out) continue
-      bot.position.x = out.a.x
-      bot.position.z = out.a.z
+      if (!bot.isNetworkPuppet) {
+        bot.position.x = out.a.x
+        bot.position.z = out.a.z
+      }
       player.nudgeHorizontal(out.b.x - player.position.x, out.b.z - player.position.z)
     }
   }

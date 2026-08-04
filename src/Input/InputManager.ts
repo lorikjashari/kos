@@ -302,14 +302,10 @@ export class InputManager implements IUpdatable {
         void game.audioManager.playSwitch(logicKey)
         return
       }
-      // Re-selecting the same slot still plays the switch / draw
-      const same = player.currentWeapon.key === logicKey
-      if (same || player.setWeapon(logicKey)) {
-        if (same) {
-          fps?.replayWeaponSwitch(logicKey)
-        } else {
-          fps?.equipWeaponMesh(logicKey)
-        }
+      // Already holding this slot — ignore so 1/2/3 don't re-draw
+      if (player.currentWeapon.key === logicKey) return
+      if (player.setWeapon(logicKey)) {
+        fps?.equipWeaponMesh(logicKey)
         void game.audioManager.playSwitch(logicKey)
       }
     }
