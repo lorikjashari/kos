@@ -124,12 +124,65 @@ export class AudioManager extends THREE.AudioListener {
   private menuMusic: HTMLAudioElement | null = null
   private menuMusicWanted = false
   private lastHoverAt = 0
+  private lifecycleInstalled = false
 
   constructor() {
     super()
     const unlock = () => void this.unlock()
     window.addEventListener('pointerdown', unlock, { once: true })
     window.addEventListener('keydown', unlock, { once: true })
+    this.installLifecycleGuards()
+  }
+
+  /**
+   * iOS / PWA: leaving the bookmark (Home, app switcher, lock) must stop
+   * HTMLAudio menu music — Safari keeps playing it after the page is hidden.
+   */
+  private installLifecycleGuards(): void {
+    if (this.lifecycleInstalled) return
+    this.lifecycleInstalled = true
+
+    const leave = () => this.suspendForBackground()
+    const returnToPage = () => {
+      if (document.visibilityState === 'visible' && !document.hidden) {
+        this.resumeFromBackground()
+      }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden || document.visibilityState === 'hidden') leave()
+      else returnToPage()
+    })
+    // iOS fires pagehide when dismissing a standalone PWA / freezing the tab
+    window.addEventListener('pagehide', leave)
+    window.addEventListener('freeze', leave)
+    window.addEventListener('pageshow', returnToPage)
+    // Cover cases where visibility lags (some iOS PWA home transitions)
+    document.addEventListener('freeze', leave)
+  }
+
+  /** Pause menu music + suspend WebAudio so nothing keeps playing off-screen. */
+  public suspendForBackground(): void {
+    if (this.menuMusic) {
+      try {
+        this.menuMusic.pause()
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      if (this.ctx && this.ctx.state === 'running') {
+        void this.ctx.suspend()
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private resumeFromBackground(): void {
+    if (document.hidden || document.visibilityState === 'hidden') return
+    if (!this.menuMusicWanted) return
+    void this.resumeMenuMusicElement()
   }
 
   private getCtx(): AudioContext {
@@ -240,6 +293,8 @@ export class AudioManager extends THREE.AudioListener {
   }
 
   private async resumeMenuMusicElement(): Promise<void> {
+    if (!this.menuMusicWanted) return
+    if (document.hidden || document.visibilityState === 'hidden') return
     try {
       if (!this.menuMusic) {
         this.menuMusic = new Audio('/kosmenusong.m4a')
