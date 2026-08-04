@@ -26,35 +26,37 @@ export function buildMainMenuHtml(): string {
 
       <section class="kos-screen" data-screen="main">
         <div class="kos-shell kos-shell-main">
-          <div class="kos-menu-rail">
+          <div class="kos-main-col">
             <header class="kos-brand">
               <img class="kos-logo kos-logo-hero" src="/logo.png" alt="KoS FPS Shooting" width="640" height="640" />
               <p class="kos-tagline">Browser FPS · bots &amp; friends</p>
             </header>
 
-            <label class="kos-field">
-              <span>Your Name</span>
-              <input id="kos-name" type="text" maxlength="24" placeholder="Enter name" autocomplete="off" spellcheck="false" />
-            </label>
+            <div class="kos-menu-rail">
+              <label class="kos-field">
+                <span>Your Name</span>
+                <input id="kos-name" type="text" maxlength="24" placeholder="Enter name" autocomplete="off" spellcheck="false" />
+              </label>
 
-            <nav class="kos-nav">
-              <button type="button" class="kos-btn kos-btn-primary" data-action="bots">
-                <span class="kos-btn-label">Play with Bots</span>
-              </button>
-              <button type="button" class="kos-btn kos-btn-ghost-line" data-action="mp">
-                <span class="kos-btn-label">Multiplayer</span>
-              </button>
-              <button type="button" class="kos-btn kos-btn-ghost-line" data-action="settings">
-                <span class="kos-btn-label">Settings</span>
-              </button>
-            </nav>
+              <nav class="kos-nav">
+                <button type="button" class="kos-btn kos-btn-primary" data-action="bots">
+                  <span class="kos-btn-label">Play with Bots</span>
+                </button>
+                <button type="button" class="kos-btn kos-btn-ghost-line" data-action="mp">
+                  <span class="kos-btn-label">Multiplayer</span>
+                </button>
+                <button type="button" class="kos-btn kos-btn-ghost-line" data-action="settings">
+                  <span class="kos-btn-label">Settings</span>
+                </button>
+              </nav>
 
-            <div class="kos-career" id="kos-career" hidden></div>
+              <div class="kos-career" id="kos-career" hidden></div>
 
-            <p class="kos-legal">
-              Independent prototype — not affiliated with Valve.
-              <a href="/LEGAL.md" target="_blank" rel="noopener noreferrer">Legal notes</a>
-            </p>
+              <p class="kos-legal">
+                Independent prototype — not affiliated with Valve.
+                <a href="/LEGAL.md" target="_blank" rel="noopener noreferrer">Legal notes</a>
+              </p>
+            </div>
           </div>
         </div>
       </section>

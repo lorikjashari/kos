@@ -118,9 +118,12 @@ export const MAIN_MENU_CSS = `
         position: relative;
         z-index: 1;
         width: min(280px, 62vw, 38vh);
+        max-height: min(160px, 28vh);
         height: auto;
         display: block;
-        filter: drop-shadow(0 18px 44px rgba(26, 95, 255, 0.2));
+        object-fit: contain;
+        mix-blend-mode: screen;
+        filter: drop-shadow(0 18px 44px rgba(26, 95, 255, 0.22));
         animation: kos-logo-in 0.85s var(--kos-ease) both;
       }
       .kos-load-wrap {
@@ -180,62 +183,75 @@ export const MAIN_MENU_CSS = `
         text-align: center;
       }
 
-      /* One left-rail composition; art stays full-bleed on the right */
+      /* Brand above controls; art stays full-bleed on the right */
       .kos-shell-main {
         width: 100%;
         height: 100%;
         min-height: 100%;
         display: flex;
-        align-items: stretch;
+        align-items: center;
         justify-content: flex-start;
         padding:
-          clamp(28px, 5vh, 56px)
-          clamp(24px, 4vw, 48px)
-          clamp(28px, 5vh, 48px)
-          clamp(28px, 5vw, 72px);
+          clamp(24px, 4vh, 48px)
+          clamp(20px, 4vw, 48px)
+          clamp(24px, 4vh, 48px)
+          clamp(24px, 4vw, 64px);
       }
-      .kos-menu-rail {
+      .kos-main-col {
         display: flex;
         flex-direction: column;
+        align-items: stretch;
         justify-content: center;
-        gap: clamp(14px, 2.2vh, 22px);
-        width: min(380px, 100%);
-        max-width: 380px;
-        margin: 0;
-        padding: clamp(18px, 2.5vh, 28px) clamp(18px, 2vw, 26px);
-        border-radius: 0;
-        background: linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.28) 100%);
-        border: 1px solid rgba(255,255,255,0.65);
-        border-left: 3px solid var(--kos-blue);
-        box-shadow: 0 20px 50px rgba(10, 30, 80, 0.08);
-        backdrop-filter: blur(10px) saturate(1.05);
-        -webkit-backdrop-filter: blur(10px) saturate(1.05);
+        gap: clamp(14px, 2.4vh, 22px);
+        width: min(360px, 100%);
+        max-width: 360px;
         animation: kos-slide-up 560ms var(--kos-ease) both;
       }
       .kos-brand {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
-        gap: 6px;
-        margin: 0 0 4px;
+        gap: 4px;
+        flex-shrink: 0;
+        max-width: 100%;
+        overflow: hidden;
       }
       .kos-logo-hero {
-        width: min(300px, 100%, 42vh);
+        /* logo.png is on black — screen blend drops the plate on the light veil */
+        width: min(240px, 100%);
+        max-height: min(110px, 18vh);
         height: auto;
         display: block;
         object-fit: contain;
-        filter: drop-shadow(0 16px 36px rgba(26, 95, 255, 0.16));
+        object-position: left center;
+        mix-blend-mode: screen;
+        filter: drop-shadow(0 10px 28px rgba(26, 95, 255, 0.22));
         pointer-events: none;
         user-select: none;
+        -webkit-user-drag: none;
         animation: kos-logo-in 0.8s var(--kos-ease) both;
       }
       .kos-tagline {
         margin: 0;
+        padding-left: 2px;
         font-size: 11px;
         font-weight: 700;
-        letter-spacing: 0.18em;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
         color: var(--kos-muted);
+      }
+      .kos-menu-rail {
+        display: flex;
+        flex-direction: column;
+        gap: clamp(12px, 2vh, 18px);
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
       }
 
       .kos-career {
@@ -1079,19 +1095,15 @@ export const MAIN_MENU_CSS = `
       @media (max-width: 900px) {
         .kos-shell-main {
           align-items: center;
-          padding: 32px 24px 36px;
+          padding: 28px 22px 32px;
         }
-        .kos-menu-rail { max-width: 360px; width: min(360px, 100%); }
-        .kos-logo-hero { width: min(260px, 70vw); }
+        .kos-main-col { max-width: 340px; width: min(340px, 100%); }
+        .kos-logo-hero { width: min(220px, 64vw); max-height: min(96px, 16vh); }
       }
       @media (max-width: 520px) {
-        .kos-shell-main { padding: 20px 16px 28px; }
-        .kos-menu-rail {
-          max-width: 100%;
-          width: 100%;
-          padding: 16px 14px;
-        }
-        .kos-logo-hero { width: min(220px, 72vw); }
+        .kos-shell-main { padding: 18px 16px 24px; }
+        .kos-main-col { max-width: 100%; width: 100%; gap: 12px; }
+        .kos-logo-hero { width: min(200px, 70vw); max-height: min(88px, 14vh); }
         .kos-career-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .kos-btn { font-size: 15px; min-height: 50px; padding: 14px 14px; }
         .kos-btn-primary { font-size: 15px; }
@@ -1099,9 +1111,9 @@ export const MAIN_MENU_CSS = `
         .kos-heading { font-size: 24px; }
       }
       @media (min-width: 1400px) {
-        .kos-shell-main { padding: 64px 96px 72px; }
-        .kos-menu-rail { max-width: 420px; width: min(420px, 100%); }
-        .kos-logo-hero { width: min(340px, 28vw); }
+        .kos-shell-main { padding: 56px 88px 64px; }
+        .kos-main-col { max-width: 400px; width: min(400px, 100%); }
+        .kos-logo-hero { width: min(280px, 24vw); max-height: min(120px, 16vh); }
       }
 
       /* Mobile: always keep menu buttons reachable (esp. iPhone landscape) */
@@ -1155,15 +1167,16 @@ export const MAIN_MENU_CSS = `
           max(16px, env(safe-area-inset-bottom))
           max(16px, env(safe-area-inset-left));
       }
-      #kos-menu.is-mobile-ui .kos-logo-hero {
-        width: min(200px, 58vw, 28vh);
-      }
-      #kos-menu.is-mobile-ui .kos-menu-rail {
-        max-width: min(400px, 100%);
-        width: min(400px, 100%);
+      #kos-menu.is-mobile-ui .kos-main-col {
+        max-width: min(360px, 100%);
+        width: min(360px, 100%);
         gap: 12px;
-        padding: 14px 14px 16px;
       }
+      #kos-menu.is-mobile-ui .kos-logo-hero {
+        width: min(200px, 56vw);
+        max-height: min(84px, 14vh);
+      }
+      #kos-menu.is-mobile-ui .kos-menu-rail { gap: 12px; }
       #kos-menu.is-mobile-ui .kos-tagline {
         font-size: 10px;
         letter-spacing: 0.14em;
@@ -1423,7 +1436,7 @@ export const MAIN_MENU_CSS = `
         height: 22px;
       }
 
-      /* Wide / short phones: compact single rail, keep art readable on the right */
+      /* Wide / short phones: compact left column, art stays readable */
       @media (orientation: landscape) and (max-height: 520px) {
         #kos-menu.is-mobile-ui .kos-shell-main {
           align-items: center;
@@ -1434,16 +1447,16 @@ export const MAIN_MENU_CSS = `
             max(8px, env(safe-area-inset-bottom))
             max(14px, env(safe-area-inset-left));
         }
-        #kos-menu.is-mobile-ui .kos-menu-rail {
-          max-width: min(420px, 52vw);
-          width: min(420px, 52vw);
-          gap: 6px;
-          padding: 10px 12px;
-          justify-content: center;
+        #kos-menu.is-mobile-ui .kos-main-col {
+          max-width: min(380px, 48vw);
+          width: min(380px, 48vw);
+          gap: 8px;
         }
-        #kos-menu.is-mobile-ui .kos-brand { gap: 2px; margin: 0; }
+        #kos-menu.is-mobile-ui .kos-menu-rail { gap: 6px; }
+        #kos-menu.is-mobile-ui .kos-brand { gap: 2px; }
         #kos-menu.is-mobile-ui .kos-logo-hero {
-          width: min(140px, 22vw, 42vh);
+          width: min(150px, 24vw);
+          max-height: min(56px, 22vh);
         }
         #kos-menu.is-mobile-ui .kos-tagline {
           font-size: 9px;
@@ -1467,7 +1480,8 @@ export const MAIN_MENU_CSS = `
         }
         #kos-menu.is-mobile-ui .kos-legal { font-size: 9px; }
         #kos-menu.is-mobile-ui .kos-logo-load {
-          width: min(120px, 24vw, 40vh);
+          width: min(140px, 28vw);
+          max-height: min(72px, 30vh);
         }
         #kos-menu.is-mobile-ui .kos-load-mark {
           width: min(180px, 36vw);
@@ -1497,7 +1511,7 @@ export const MAIN_MENU_CSS = `
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .kos-screen, .kos-logo-load, .kos-logo-hero, .kos-menu-rail, .kos-load-mark,
+        .kos-screen, .kos-logo-load, .kos-logo-hero, .kos-main-col, .kos-load-mark,
         .kos-load-wrap, .kos-career, .kos-shell-sub, .kos-tab-panel {
           animation: none !important;
         }
