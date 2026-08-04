@@ -29,21 +29,49 @@ export type SpawnAssignment = {
   botTeams: Array<Team | null>
 }
 
+/**
+ * FFA / deathmatch: pick player + bots so each new seat maximizes distance to
+ * already-taken pits. A plain shuffle often stacks several bots in one corner
+ * of a large map (Dust II) even when plenty of far spawns exist.
+ */
 export function assignFfaSpawns(
   spawns: ReadonlyArray<SpawnPoint>,
   botCount: number
 ): SpawnAssignment {
-  const indices = shuffleInPlace([...spawns.keys()])
-  const playerIdx = indices[0] ?? 0
+  if (spawns.length === 0) {
+    return {
+      playerPos: new Vector3D(0, 2, 0),
+      botPositions: [],
+      botTeams: [],
+    }
+  }
+  const order = shuffleInPlace([...spawns.keys()])
+  const playerIdx = order[0] ?? 0
   const playerPos = spawnToPlayerVector(spawns[playerIdx] ?? { x: 0, y: 2, z: 0 })
   const used = new Set<number>([playerIdx])
   const botPositions: Vector3D[] = []
   const need = Math.min(botCount, Math.max(0, spawns.length - 1))
-  for (const idx of indices) {
-    if (botPositions.length >= need) break
-    if (used.has(idx)) continue
-    used.add(idx)
-    botPositions.push(spawnToBotVector(spawns[idx]))
+  while (botPositions.length < need) {
+    let bestIdx = -1
+    let bestScore = -1
+    for (let i = 0; i < spawns.length; i++) {
+      if (used.has(i)) continue
+      const s = spawns[i]
+      let nearest = Infinity
+      for (const u of used) {
+        const o = spawns[u]
+        nearest = Math.min(nearest, flatDistXZ(s.x, s.z, o.x, o.z))
+      }
+      // Tiny jitter so ties don't always prefer the lowest index
+      const score = nearest + Math.random() * 0.01
+      if (score > bestScore) {
+        bestScore = score
+        bestIdx = i
+      }
+    }
+    if (bestIdx < 0) break
+    used.add(bestIdx)
+    botPositions.push(spawnToBotVector(spawns[bestIdx]))
   }
   return { playerPos, botPositions, botTeams: botPositions.map(() => null) }
 }

@@ -1940,6 +1940,11 @@ export class Game implements IUpdatable {
       if (!bot.isAlive) continue
       occupied.push({ x: bot.position.x, z: bot.position.z })
     }
+    // Pending seats must count too — otherwise adding N bots in one frame all
+    // land on the same "farthest from player" pit on large maps like Dust II.
+    for (const pending of this.pendingBotSpawns) {
+      occupied.push({ x: pending.pos.x, z: pending.pos.z })
+    }
     return pickRespawnFromList(spawnList, occupied, preferAwayFrom, forBot)
   }
 
