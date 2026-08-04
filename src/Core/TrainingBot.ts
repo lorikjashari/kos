@@ -5,6 +5,13 @@ import { IUpdatable } from '../Interface/IUpdatable'
 import { Game } from '../Game'
 import type { Player } from './Player'
 import type { Team } from './Teams'
+import {
+  pathToVectors,
+  routeForRole,
+  type Dust2Role,
+  type Dust2Site,
+  type TacticPoint,
+} from './Dust2Tactics'
 
 /** World Y at or below this → fall through map / void death */
 const VOID_DEATH_Y = -30
@@ -67,6 +74,9 @@ export class TrainingBot implements IUpdatable {
   public name = 'BOT'
   /** Set only in team deathmatch; null means free-for-all */
   public team: Team | null = null
+  /** Dust II TDM role (Long / B / Mid hold, etc.) */
+  public tacticRole: Dust2Role | null = null
+  public tacticSite: Dust2Site | null = null
   public isMoving = false
   public weaponKey = 'AK47'
   public lastShotDir = new Vector3D(0, 0, -1)
@@ -119,10 +129,17 @@ export class TrainingBot implements IUpdatable {
   private stuckTimer = 0
   private lastPos = new Vector3D()
   private wallFollowDir = 1
-  private readonly probeDist = 2.4
-  private readonly stepProbe = 0.95
+  private readonly probeDist = 3.6
+  private readonly stepProbe = 1.2
+  private readonly bodyRadius = 0.9
+  private readonly wallPrefer = 1.55
+  private readonly planProbe = 5.2
+  private escapeTimer = 0
+  private escapeDir?: Vector3D
   private repathTimer = 0
   private huntBias = Math.random() < 0.6 ? 'player' : 'any'
+  private navMem: Vector3D[] = []
+  private navMemAcc = 0
   /** Vertical velocity while airborne (bot feet are kinematic — no rigid body) */
   private velocityY = 0
   private isOnGround = true
@@ -153,6 +170,16 @@ export class TrainingBot implements IUpdatable {
   private burstCount = 0
   /** Target eye position last frame — used to gauge how fast it's moving */
   private prevTargetEye?: Vector3D
+
+  /** execute → walk route, hold → anchor, rotate → CT help site, free → old DM AI */
+  private tacticMode: 'execute' | 'hold' | 'rotate' | 'free' = 'free'
+  private tacticPath: Vector3D[] = []
+  private tacticPathIndex = 0
+  private holdCenter?: Vector3D
+  private holdRadius = 12
+  private holdStrafeT = 0
+  /** Fight immediately inside this range; otherwise finish the default */
+  private readonly tacticFightRange = 34
 
   constructor(position: Vector3D, yaw = 0, difficulty: BotDifficulty = 'medium', name = 'BOT') {
     this.position = position.clone()
@@ -250,6 +277,49 @@ export class TrainingBot implements IUpdatable {
     this.retargetTimer = 0
     this.burstCount = 0
     this.prevTargetEye = undefined
+    this.escapeTimer = 0
+    this.escapeDir = undefined
+    this.stuckTimer = 0
+    this.navMem = []
+    if (this.tacticRole) this.assignDust2Tactic(this.tacticRole)
+  }
+
+  /** CS-style default / hold for Dust II TDM. */
+  public assignDust2Tactic(role: Dust2Role): void {
+    const route = routeForRole(role)
+    this.tacticRole = role
+    this.tacticSite = route.site
+    this.applyTacticPath(route.path, route.holdRadius, 'execute')
+  }
+
+  /** CT rotate to a threatened site (keeps role label for re-hold later). */
+  public rotateDust2To(path: ReadonlyArray<TacticPoint>, holdRadius: number, site: Dust2Site): void {
+    this.tacticSite = site
+    this.applyTacticPath(path, holdRadius, 'rotate')
+  }
+
+  public clearTactic(): void {
+    this.tacticRole = null
+    this.tacticSite = null
+    this.tacticMode = 'free'
+    this.tacticPath = []
+    this.tacticPathIndex = 0
+    this.holdCenter = undefined
+  }
+
+  private applyTacticPath(
+    path: ReadonlyArray<TacticPoint>,
+    holdRadius: number,
+    mode: 'execute' | 'rotate'
+  ): void {
+    this.tacticPath = pathToVectors(path)
+    this.tacticPathIndex = 0
+    this.holdRadius = holdRadius
+    this.holdCenter = this.tacticPath.length
+      ? this.tacticPath[this.tacticPath.length - 1].clone()
+      : undefined
+    this.tacticMode = this.tacticPath.length ? mode : 'hold'
+    this.waypoint = undefined
   }
 
   public update(dt: number): void {
@@ -346,6 +416,7 @@ export class TrainingBot implements IUpdatable {
 
   private idlePatrol(dt: number, physics: Physics): void {
     const tune = TUNING[this.difficulty]
+    if (this.tacticMode !== 'free' && this.runTacticMove(dt, physics, tune.moveSpeed)) return
     this.patrolAngle += dt * 0.85
     // Roam farther so they cover the map instead of circling spawn
     const r = this.homeRadius * (0.45 + 0.35 * Math.abs(Math.sin(this.patrolAngle * 0.37)))
@@ -355,6 +426,47 @@ export class TrainingBot implements IUpdatable {
       this.spawnPosition.z + Math.sin(this.patrolAngle) * r
     )
     this.navigateToward(target, tune.moveSpeed * 0.7, dt, physics)
+  }
+
+  /** Walk route waypoints, then micro-strafe on the hold. */
+  private runTacticMove(dt: number, physics: Physics, speed: number): boolean {
+    if (this.tacticMode === 'free') return false
+
+    if (this.tacticMode === 'execute' || this.tacticMode === 'rotate') {
+      while (this.tacticPathIndex < this.tacticPath.length) {
+        const wp = this.tacticPath[this.tacticPathIndex]
+        const d = this.flatDist(this.position, wp)
+        if (d <= 4.2) {
+          this.tacticPathIndex++
+          this.waypoint = undefined
+          this.stuckTimer = 0
+          continue
+        }
+        this.navigateToward(wp, speed * (this.tacticMode === 'rotate' ? 1.2 : 1.0), dt, physics)
+        return true
+      }
+      this.tacticMode = 'hold'
+    }
+
+    if (this.tacticMode === 'hold' && this.holdCenter) {
+      this.holdStrafeT += dt
+      const anchor = this.holdCenter
+      const d = this.flatDist(this.position, anchor)
+      if (d > this.holdRadius) {
+        this.navigateToward(anchor, speed * 0.85, dt, physics)
+        this.faceToward(anchor)
+        return true
+      }
+      // Jiggle on the angle so holds don't look AFK
+      const ang = this.holdStrafeT * 1.1 + this.patrolAngle
+      const r = Math.min(this.holdRadius * 0.55, 6)
+      const jig = new Vector3D(anchor.x + Math.cos(ang) * r, this.position.y, anchor.z + Math.sin(ang) * r)
+      this.navigateToward(jig, speed * 0.45, dt, physics)
+      // Face toward map center-ish so peeks read as watching the choke
+      this.faceToward(new Vector3D(anchor.x * 0.35, this.position.y, anchor.z * 0.35))
+      return true
+    }
+    return false
   }
 
   private combatThink(dt: number, player: Player, physics: Physics): void {
@@ -378,9 +490,23 @@ export class TrainingBot implements IUpdatable {
       this.retargetTimer = 1.4 + Math.random() * 1.2
     }
 
+    // Dust II defaults: keep executing / holding unless a fight is close
+    if (this.tacticMode !== 'free') {
+      const threatDist = threat ? this.flatDist(this.position, threat.pos) : Infinity
+      const mustFight =
+        !!threat &&
+        (threatDist < this.tacticFightRange ||
+          (threatDist < tune.engageRange * 0.75 &&
+            this.hasLineOfSight(physics, myEye, threat.eye)))
+      if (!mustFight) {
+        if (!threat) this.seeTimer = 0
+        if (this.runTacticMove(dt, physics, tune.moveSpeed)) return
+      }
+    }
+
     if (!threat) {
       this.seeTimer = 0
-      // Hunt last known position, then roam the map
+      // Hunt last known position, then roam / hold
       if (this.lastKnownTarget) {
         const d = this.flatDist(this.position, this.lastKnownTarget)
         if (d > 1.2) {
@@ -549,41 +675,117 @@ export class TrainingBot implements IUpdatable {
     return { kind: best.kind, eye: best.eye, pos: best.pos, bot: best.bot }
   }
 
-  /**
-   * Wall-aware step: never walk through geometry.
-   * If direct path blocked, pick the free side / detour that gets closer to the goal.
-   */
   private navigateToward(goal: Vector3D, speed: number, dt: number, physics: Physics): void {
-    if (this.waypoint && this.flatDist(this.position, this.waypoint) < 0.55) {
-      this.waypoint = undefined
+    this.navMemAcc += dt
+    if (this.navMemAcc > 0.2) {
+      this.navMemAcc = 0
+      this.navMem.push(this.position.clone())
+      if (this.navMem.length > 8) this.navMem.shift()
     }
 
-    // Periodically repath when stuck or blocked so they don't orbit walls
+    if (this.escapeTimer > 0) {
+      this.escapeTimer -= dt
+      const dir = this.escapeDir
+      if (dir && this.isCorridorClear(physics, dir, this.stepProbe * 1.3)) {
+        this.stepAlong(dir, speed * 1.15, dt)
+        this.faceDir(dir)
+        return
+      }
+      this.escapeTimer = 0
+      this.escapeDir = undefined
+    }
+
+    if (this.isCornered(physics) || this.isSpinningInPlace()) {
+      if (this.beginCornerEscape(physics, goal)) return
+    }
+
+    if (this.waypoint && this.flatDist(this.position, this.waypoint) < 1.1) {
+      this.waypoint = undefined
+    }
+    if (this.repathTimer > 0) this.repathTimer -= dt
     if (this.repathTimer <= 0 && this.waypoint && !this.canWalkToward(physics, this.waypoint)) {
       this.waypoint = undefined
-      this.repathTimer = 0.25
+      this.repathTimer = 0.12
     }
 
     let target = this.waypoint ?? goal
-
-    if (!this.canWalkToward(physics, target)) {
+    const direct = this.canWalkToward(physics, goal)
+    if (!this.canWalkToward(physics, target) || (!this.waypoint && !direct)) {
       const detour = this.findDetour(physics, goal)
       if (detour) {
         this.waypoint = detour
         target = detour
-        this.repathTimer = 0.4
-      } else if (!this.canWalkToward(physics, goal)) {
+        this.repathTimer = 0.35
+      } else if (!direct) {
+        if (this.beginCornerEscape(physics, goal)) return
         this.wallFollowSideStep(physics, goal, speed, dt)
         return
       } else {
         target = goal
         this.waypoint = undefined
       }
-    } else if (!this.waypoint && this.canWalkToward(physics, goal)) {
+    } else if (!this.waypoint && direct) {
       target = goal
     }
 
     this.stepWithCollision(physics, target, speed, dt)
+  }
+
+  private isSpinningInPlace(): boolean {
+    if (this.navMem.length < 5) return false
+    let travel = 0
+    for (let i = 1; i < this.navMem.length; i++) {
+      travel += this.flatDist(this.navMem[i - 1], this.navMem[i])
+    }
+    return travel < 1.4 && this.stuckTimer > 0.25
+  }
+
+  private isCornered(physics: Physics): boolean {
+    const forward = new Vector3D(Math.sin(this.yaw), 0, Math.cos(this.yaw))
+    const left = new Vector3D(-forward.z, 0, forward.x)
+    const right = new Vector3D(forward.z, 0, -forward.x)
+    const back = forward.clone().multiplyScalar(-1)
+    const fwd = !this.isCorridorClear(physics, forward, this.wallPrefer)
+    const l = !this.isCorridorClear(physics, left, this.wallPrefer * 0.85)
+    const r = !this.isCorridorClear(physics, right, this.wallPrefer * 0.85)
+    const b = this.isCorridorClear(physics, back, this.probeDist)
+    return fwd && l && r && b
+  }
+
+  private beginCornerEscape(physics: Physics, goal: Vector3D): boolean {
+    const toGoal = goal.clone().sub(this.position).setY(0)
+    if (toGoal.lengthSq() > 0.01) toGoal.normalize()
+    else toGoal.set(Math.sin(this.yaw), 0, Math.cos(this.yaw))
+
+    const samples: Vector3D[] = []
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2
+      samples.push(new Vector3D(Math.cos(a), 0, Math.sin(a)))
+    }
+    let best: Vector3D | undefined
+    let bestScore = -Infinity
+    for (const dir of samples) {
+      if (!this.isCorridorClear(physics, dir, this.probeDist)) continue
+      const open = this.opennessAhead(physics, dir, this.planProbe)
+      const toward = dir.x * toGoal.x + dir.z * toGoal.z
+      const score = open * 3 + toward * 1.4
+      if (score > bestScore) {
+        bestScore = score
+        best = dir
+      }
+    }
+    if (!best) {
+      this.wallFollowDir *= -1
+      return false
+    }
+    this.escapeDir = best
+    this.escapeTimer = 0.55 + Math.random() * 0.35
+    this.waypoint = this.position.clone().add(best.clone().multiplyScalar(4.5))
+    this.stuckTimer = 0
+    this.navMem = []
+    this.stepAlong(best, TUNING[this.difficulty].moveSpeed * 1.2, 0.05)
+    this.faceDir(best)
+    return true
   }
 
   private wallFollowSideStep(physics: Physics, goal: Vector3D, speed: number, dt: number): void {
@@ -596,20 +798,32 @@ export class TrainingBot implements IUpdatable {
     const side = new Vector3D(-toGoal.z * this.wallFollowDir, 0, toGoal.x * this.wallFollowDir)
     const tryDirs = [
       side.clone().add(toGoal).normalize(),
-      side.clone().add(toGoal.clone().multiplyScalar(0.5)).normalize(),
+      side.clone().add(toGoal.clone().multiplyScalar(0.35)).normalize(),
       side,
       side.clone().multiplyScalar(-1).add(toGoal).normalize(),
       side.clone().multiplyScalar(-1),
+      toGoal.clone().multiplyScalar(-1).add(side).normalize(),
       toGoal.clone().multiplyScalar(-1),
     ]
+    let best: Vector3D | undefined
+    let bestScore = -Infinity
     for (const dir of tryDirs) {
-      if (this.isDirClear(physics, dir, this.probeDist)) {
-        this.stepAlong(dir, speed * 1.05, dt)
-        this.faceDir(dir)
-        return
+      if (!this.isCorridorClear(physics, dir, this.stepProbe * 1.2)) continue
+      const open = this.opennessAhead(physics, dir, this.planProbe)
+      const toward = dir.x * toGoal.x + dir.z * toGoal.z
+      const score = open * 2.5 + toward
+      if (score > bestScore) {
+        bestScore = score
+        best = dir
       }
     }
+    if (best) {
+      this.stepAlong(best, speed * 1.08, dt)
+      this.faceDir(best)
+      return
+    }
     this.wallFollowDir *= -1
+    this.stuckTimer += dt
     this.isMoving = false
   }
 
@@ -619,25 +833,33 @@ export class TrainingBot implements IUpdatable {
     if (dist < 0.2) return undefined
     toGoal.normalize()
 
-    const baseAngles = [
-      0.2, -0.2, 0.4, -0.4, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, Math.PI * 0.5, -Math.PI * 0.5, 1.9, -1.9, 2.4, -2.4,
-    ]
-    const stepLens = [2.8, 4.0, 5.5, 7.0]
+    const angles: number[] = []
+    for (let i = 1; i <= 10; i++) {
+      const a = (i / 10) * Math.PI
+      angles.push(a, -a)
+    }
+    angles.push(Math.PI)
+    const stepLens = [2.2, 3.4, 4.8, 6.4, 8.2, 10]
     let best: Vector3D | undefined
     let bestScore = Number.POSITIVE_INFINITY
 
-    for (const a of baseAngles) {
+    for (const a of angles) {
       const c = Math.cos(a)
       const s = Math.sin(a)
       const dir = new Vector3D(toGoal.x * c - toGoal.z * s, 0, toGoal.x * s + toGoal.z * c)
-      if (!this.isDirClear(physics, dir, this.probeDist)) continue
+      if (!this.isCorridorClear(physics, dir, this.probeDist)) continue
 
       for (const stepLen of stepLens) {
-        if (!this.isDirClear(physics, dir, Math.min(stepLen, this.probeDist * 1.6))) continue
+        if (!this.isCorridorClear(physics, dir, Math.min(stepLen, this.planProbe))) continue
         const step = this.position.clone().add(dir.clone().multiplyScalar(stepLen))
+        if (!this.hasGroundNear(physics, step.x, step.z)) continue
+        const clear = this.clearanceAt(physics, step)
+        if (clear < this.bodyRadius * 0.85) continue
         const remain = this.flatDist(step, goal)
-        const openBonus = this.canWalkToward(physics, goal, step) ? -10 : 0
-        const score = remain + Math.abs(a) * 0.4 + openBonus
+        const seesGoal = this.canWalkToward(physics, goal, step) ? -18 : 0
+        const wide = -clear * 2.2
+        const turnCost = Math.abs(a) * 0.55
+        const score = remain + turnCost + wide + seesGoal
         if (score < bestScore) {
           bestScore = score
           best = step
@@ -645,7 +867,7 @@ export class TrainingBot implements IUpdatable {
       }
     }
 
-    if (best) this.wallFollowDir = Math.random() < 0.5 ? -1 : 1
+    if (best) this.wallFollowDir = best.x * -toGoal.z + best.z * toGoal.x >= 0 ? 1 : -1
     return best
   }
 
@@ -653,44 +875,129 @@ export class TrainingBot implements IUpdatable {
     const delta = target.clone().sub(this.position)
     delta.y = 0
     const len = delta.length()
-    if (len < 0.12) {
+    if (len < 0.18) {
       this.isMoving = false
       return
     }
-    const dir = delta.clone().normalize()
+    let dir = delta.clone().normalize()
+    dir = this.steerAwayFromWalls(physics, dir)
     this.faceDir(dir)
 
-    if (!this.isDirClear(physics, dir, this.stepProbe)) {
-      // Slide along wall: try slight left/right of current dir
-      for (const a of [0.55, -0.55, 1.0, -1.0]) {
+    if (!this.isCorridorClear(physics, dir, this.stepProbe)) {
+      for (const a of [0.35, -0.35, 0.7, -0.7, 1.15, -1.15, 1.7, -1.7]) {
         const c = Math.cos(a)
         const s = Math.sin(a)
         const slide = new Vector3D(dir.x * c - dir.z * s, 0, dir.x * s + dir.z * c)
-        if (this.isDirClear(physics, slide, this.stepProbe)) {
-          this.stepAlong(slide, speed, dt)
+        if (this.isCorridorClear(physics, slide, this.stepProbe)) {
+          this.stuckTimer = Math.max(0, this.stuckTimer - dt)
+          this.stepAlong(slide, speed * 0.95, dt)
           return
         }
       }
       this.isMoving = false
       this.stuckTimer += dt
-      if (this.stuckTimer > 0.6) {
+      if (this.stuckTimer > 0.28) {
         this.waypoint = undefined
         this.wallFollowDir *= -1
+        this.beginCornerEscape(physics, target)
         this.stuckTimer = 0
       }
       return
     }
 
-    this.stuckTimer = 0
+    this.stuckTimer = Math.max(0, this.stuckTimer - dt * 2)
     this.stepAlong(dir, speed, dt)
+  }
+
+  private steerAwayFromWalls(physics: Physics, desired: Vector3D): Vector3D {
+    const flat = desired.clone().setY(0)
+    if (flat.lengthSq() < 1e-8) return desired
+    flat.normalize()
+    const push = this.wallRepulsion(physics)
+    if (push.lengthSq() < 1e-6) return flat
+    const blended = flat.clone().multiplyScalar(1.15).add(push.multiplyScalar(1.6))
+    if (blended.lengthSq() < 1e-6) return flat
+    blended.normalize()
+    if (!this.isCorridorClear(physics, blended, this.stepProbe)) return flat
+    return blended
+  }
+
+  private wallRepulsion(physics: Physics): Vector3D {
+    const push = new Vector3D()
+    const rings = 12
+    for (let i = 0; i < rings; i++) {
+      const a = (i / rings) * Math.PI * 2
+      const dir = new Vector3D(Math.cos(a), 0, Math.sin(a))
+      const dist = this.wallDistance(physics, dir, this.wallPrefer * 1.8)
+      if (dist >= this.wallPrefer) continue
+      const strength = 1 - dist / this.wallPrefer
+      push.x -= dir.x * strength * strength
+      push.z -= dir.z * strength * strength
+    }
+    return push
+  }
+
+  private wallDistance(physics: Physics, dir: Vector3D, maxDist: number): number {
+    const flat = dir.clone().setY(0)
+    if (flat.lengthSq() < 1e-8) return maxDist
+    flat.normalize()
+    const heights = [0.45, 1.05, 1.55]
+    let nearest = maxDist
+    for (const h of heights) {
+      const origin = this.position.clone().add(new Vector3D(0, h, 0))
+      const end = origin.clone().add(flat.clone().multiplyScalar(maxDist))
+      const hit = physics.raycast(origin, end)
+      if (!hit.hasHit || !hit.hitPosition) continue
+      if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) continue
+      nearest = Math.min(nearest, hit.hitPosition.distanceTo(origin))
+    }
+    return nearest
+  }
+
+  private clearanceAt(physics: Physics, at: Vector3D): number {
+    let min = this.wallPrefer * 2
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2
+      const dir = new Vector3D(Math.cos(a), 0, Math.sin(a))
+      const origin = at.clone().add(new Vector3D(0, 1.05, 0))
+      const end = origin.clone().add(dir.clone().multiplyScalar(this.wallPrefer * 2))
+      const hit = physics.raycast(origin, end)
+      if (!hit.hasHit || !hit.hitPosition) continue
+      if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) continue
+      min = Math.min(min, hit.hitPosition.distanceTo(origin))
+    }
+    return min
+  }
+
+  private opennessAhead(physics: Physics, dir: Vector3D, dist: number): number {
+    let open = 0
+    const spreads = [0, 0.4, -0.4, 0.85, -0.85]
+    for (const a of spreads) {
+      const c = Math.cos(a)
+      const s = Math.sin(a)
+      const d = new Vector3D(dir.x * c - dir.z * s, 0, dir.x * s + dir.z * c)
+      open += this.wallDistance(physics, d, dist) / dist
+    }
+    return open / spreads.length
+  }
+
+  private hasGroundNear(physics: Physics, x: number, z: number): boolean {
+    const g = this.probeGround(physics, x, z, this.position.y + 2.5, 6)
+    return !!g?.walkable
   }
 
   private stepAlong(dir: Vector3D, speed: number, dt: number): void {
     const physics = Game.getInstance().getPhysics()
-    const step = Math.min(speed * dt, this.stepProbe * 0.9)
-    this.tryStepUp(physics, dir)
-    this.position.x += dir.x * step
-    this.position.z += dir.z * step
+    const steered = this.steerAwayFromWalls(physics, dir)
+    const use = this.isCorridorClear(physics, steered, this.stepProbe) ? steered : dir
+    if (!this.isCorridorClear(physics, use, this.stepProbe * 0.7)) {
+      this.isMoving = false
+      return
+    }
+    const step = Math.min(speed * dt, this.stepProbe * 0.85)
+    this.tryStepUp(physics, use)
+    this.position.x += use.x * step
+    this.position.z += use.z * step
     this.isMoving = true
   }
 
@@ -699,23 +1006,42 @@ export class TrainingBot implements IUpdatable {
     delta.y = 0
     const len = delta.length()
     if (len < 0.1) return true
-    return this.isDirClear(physics, delta.normalize(), Math.min(len, this.probeDist), from)
+    return this.isCorridorClear(physics, delta.normalize(), Math.min(len, this.planProbe), from)
   }
 
-  private isDirClear(physics: Physics, dir: Vector3D, distance: number, from = this.position): boolean {
-    const origin = from.clone().add(new Vector3D(0, 1.05, 0))
+  private isCorridorClear(
+    physics: Physics,
+    dir: Vector3D,
+    distance: number,
+    from = this.position
+  ): boolean {
     const flat = dir.clone().setY(0)
     if (flat.lengthSq() < 1e-8) return true
     flat.normalize()
-    const end = origin.clone().add(flat.clone().multiplyScalar(distance))
-    const hit = physics.raycast(origin, end)
-    if (!hit.hasHit || !hit.hitPosition) return true
-    if (hit.hitPosition.distanceTo(origin) > distance - 0.08) return true
-    // Walkable slope ahead — not a blocking wall
-    if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) return true
-    // Stair / curb we can climb
-    if (this.canStepAt(physics, from, flat, Math.min(distance, 1.35))) return true
-    return false
+    const side = new Vector3D(-flat.z, 0, flat.x)
+    const offsets = [0, this.bodyRadius * 0.72, -this.bodyRadius * 0.72]
+    const heights = [0.5, 1.05, 1.55]
+    for (const off of offsets) {
+      const base = from.clone().add(side.clone().multiplyScalar(off))
+      for (const h of heights) {
+        const origin = base.clone().add(new Vector3D(0, h, 0))
+        const end = origin.clone().add(flat.clone().multiplyScalar(distance))
+        const hit = physics.raycast(origin, end)
+        if (!hit.hasHit || !hit.hitPosition) continue
+        const hitDist = hit.hitPosition.distanceTo(origin)
+        if (hitDist > distance - 0.1) continue
+        if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) continue
+        if (off === 0 && h < 1.1 && this.canStepAt(physics, from, flat, Math.min(distance, 1.35))) {
+          continue
+        }
+        return false
+      }
+    }
+    return true
+  }
+
+  private isDirClear(physics: Physics, dir: Vector3D, distance: number, from = this.position): boolean {
+    return this.isCorridorClear(physics, dir, distance, from)
   }
 
   /**

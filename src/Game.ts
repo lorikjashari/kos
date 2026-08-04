@@ -39,6 +39,14 @@ import {
   type ProbeFn,
   type SpawnPoint,
 } from './Core/MapCatalog'
+import {
+  assignDust2Roles,
+  ctRolesForRotate,
+  DUST2_ROUTES,
+  pointInDust2Site,
+  type Dust2Role,
+  type Dust2Site,
+} from './Core/Dust2Tactics'
 import { clampTeamSize, DEFAULT_TEAM_SIZE, otherTeam, TEAM_COLOR, type Team } from './Core/Teams'
 import {
   flatDistXZ,
@@ -103,8 +111,10 @@ export class Game implements IUpdatable {
     difficulty: BotDifficulty
     name: string
     team: Team | null
+    tacticRole?: Dust2Role | null
   }> = []
   private botSpawnAcc = 0
+  private tacticRotateAcc = 0
   private effectsWarmed = false
   private graphicsWarmed = false
   private audioWarmed = false
@@ -1091,14 +1101,17 @@ export class Game implements IUpdatable {
     }
 
     this.nameQueue = pickBotNames(botCount)
+    const tacticRoles = this.planDust2Roles(assignment.botTeams)
     this.pendingBotSpawns = assignment.botPositions.map((pos, i) => ({
       pos,
       yaw: Math.random() * Math.PI * 2,
       difficulty: config.difficulty,
       name: this.nameQueue[i] || `BOT ${i + 1}`,
       team: assignment.botTeams[i] ?? null,
+      tacticRole: tacticRoles[i] ?? null,
     }))
     this.botSpawnAcc = 0
+    this.tacticRotateAcc = 0
     // Two up front, the rest trickle in during the loadout pick / lockdown so a
     // 9-bot match doesn't clone nine skeletons in a single frame
     this.flushPendingBots(2)
@@ -1189,9 +1202,37 @@ export class Game implements IUpdatable {
           difficulty,
           name: names[i] || `BOT ${live.length + i + 1}`,
           team,
+          tacticRole: team ? this.nextDust2RoleForTeam(team) : null,
         })
       }
     }
+  }
+
+  private nextDust2RoleForTeam(team: Team): Dust2Role | null {
+    if (this.activeMapId !== 'de_dust2') return null
+    const pool = team === 'T'
+      ? (['t_long', 't_b', 't_mid_short', 't_mid_lower', 't_mid_peek'] as Dust2Role[])
+      : (['ct_a', 'ct_b', 'ct_mid', 'ct_a_depth', 'ct_b_depth', 'ct_cat'] as Dust2Role[])
+    const counts = new Map<Dust2Role, number>()
+    for (const r of pool) counts.set(r, 0)
+    for (const b of this.trainingBots) {
+      if (b.team !== team || !b.tacticRole) continue
+      counts.set(b.tacticRole, (counts.get(b.tacticRole) ?? 0) + 1)
+    }
+    for (const p of this.pendingBotSpawns) {
+      if (p.team !== team || !p.tacticRole) continue
+      counts.set(p.tacticRole, (counts.get(p.tacticRole) ?? 0) + 1)
+    }
+    let best = pool[0]
+    let bestN = Infinity
+    for (const r of pool) {
+      const n = counts.get(r) ?? 0
+      if (n < bestN) {
+        bestN = n
+        best = r
+      }
+    }
+    return best
   }
 
   private showMpBanner(code: string, _isHost: boolean): void {
@@ -1906,11 +1947,102 @@ export class Game implements IUpdatable {
       bot.team = p.team
       bot.visualModel = 'CsTerrorist'
       bot.weaponKey = botGuns[Math.floor(Math.random() * botGuns.length)]
+      if (p.tacticRole) bot.assignDust2Tactic(p.tacticRole)
       bot.addToWorld(this.physics)
       const renderer = new TrainingBotRenderer(bot)
       this.trainingBots.push(bot)
       this.botRenderers.push(renderer)
       n++
+    }
+  }
+
+  /** Spread Long / B / Mid defaults across the actual T and CT bot counts. */
+  private planDust2Roles(botTeams: Array<Team | null>): Array<Dust2Role | null> {
+    if (!this.teamPlay || this.activeMapId !== 'de_dust2') {
+      return botTeams.map(() => null)
+    }
+    let tCount = 0
+    let ctCount = 0
+    for (const t of botTeams) {
+      if (t === 'T') tCount++
+      else if (t === 'CT') ctCount++
+    }
+    const planned = assignDust2Roles(tCount, ctCount)
+    let ti = 0
+    let ci = 0
+    return botTeams.map((team) => {
+      if (team === 'T') return planned.T[ti++] ?? 't_mid_peek'
+      if (team === 'CT') return planned.CT[ci++] ?? 'ct_mid'
+      return null
+    })
+  }
+
+  private countInSite(site: Dust2Site, team: Team | 'enemy-of-ct' | 'any'): number {
+    let n = 0
+    const player = this.currentPlayer?.player
+    const playerIsCt = this.playerTeam === 'CT'
+    if (player && !player.isDead && pointInDust2Site(player.position.x, player.position.z, site)) {
+      if (team === 'any') n++
+      else if (team === 'CT' && playerIsCt) n++
+      else if (team === 'enemy-of-ct' && !playerIsCt) n++
+    }
+    for (const bot of this.trainingBots) {
+      if (!bot.isAlive || bot.isNetworkPuppet) continue
+      if (!pointInDust2Site(bot.position.x, bot.position.z, site)) continue
+      if (team === 'any') n++
+      else if (team === 'CT' && bot.team === 'CT') n++
+      else if (team === 'enemy-of-ct' && bot.team === 'T') n++
+      else if (team === 'T' && bot.team === 'T') n++
+    }
+    return n
+  }
+
+  /**
+   * Comp-style CT rotates: when Ts flood A or B, peel mid/cat (and spare site)
+   * holders toward the pressure — never leave a site empty if we can help it.
+   */
+  private updateDust2Rotates(dt: number): void {
+    if (!this.teamPlay || this.activeMapId !== 'de_dust2' || !this.combatLive) return
+    this.tacticRotateAcc += dt
+    if (this.tacticRotateAcc < 0.85) return
+    this.tacticRotateAcc = 0
+
+    const pressureA = this.countInSite('A', 'enemy-of-ct')
+    const pressureB = this.countInSite('B', 'enemy-of-ct')
+    const ctA = this.countInSite('A', 'CT')
+    const ctB = this.countInSite('B', 'CT')
+
+    let need: Dust2Site | null = null
+    if (pressureA >= 2 && ctA < 2) need = 'A'
+    else if (pressureB >= 2 && ctB < 2) need = 'B'
+    else if (pressureA >= 1 && ctA < 1) need = 'A'
+    else if (pressureB >= 1 && ctB < 1) need = 'B'
+    if (!need) return
+
+    const other: Dust2Site = need === 'A' ? 'B' : 'A'
+    const otherCt = need === 'A' ? ctB : ctA
+    const prefer = ctRolesForRotate(need)
+
+    const candidates = this.trainingBots
+      .filter((b) => b.isAlive && !b.isNetworkPuppet && b.team === 'CT' && b.tacticRole)
+      .sort((a, b) => {
+        const pa = prefer.indexOf(a.tacticRole!)
+        const pb = prefer.indexOf(b.tacticRole!)
+        return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb)
+      })
+
+    for (const bot of candidates) {
+      if (bot.tacticSite === need) continue
+      // Don't strip the quiet site down to zero
+      if (bot.tacticSite === other && otherCt <= 1 && pressureA < 3 && pressureB < 3) continue
+      const route =
+        need === 'A'
+          ? DUST2_ROUTES.ct_a
+          : need === 'B'
+            ? DUST2_ROUTES.ct_b
+            : DUST2_ROUTES.ct_mid
+      bot.rotateDust2To(route.path, route.holdRadius, need)
+      break
     }
   }
 
@@ -2080,6 +2212,7 @@ export class Game implements IUpdatable {
       if (this.combatLive && !this.matchOver) {
         this.matchElapsed += dt
         this.checkMatchEnd()
+        this.updateDust2Rotates(dt)
       }
       if (!this.matchOver) this.syncMatchStatus()
 
