@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   CareerStats,
   MATCH_LENGTHS,
+  BOT_NAME_POOL,
   MatchStats,
   formatClock,
   formatPlaytime,
@@ -146,7 +147,7 @@ describe('pickBotNames', () => {
   })
 
   it('clamps to the size of the pool', () => {
-    expect(pickBotNames(999).length).toBeLessThanOrEqual(10)
+    expect(pickBotNames(999).length).toBeLessThanOrEqual(BOT_NAME_POOL.length)
     expect(pickBotNames(-3)).toHaveLength(0)
   })
 })
