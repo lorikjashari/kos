@@ -24,7 +24,12 @@ import { BloodManager } from '../Effects/BloodManager'
 import { Game } from '../../Game'
 import { GameHUD } from '../HUD/GameHUD'
 import { isTouchDevice } from '../../UI/MobileDevice'
-import type { MobilePerfProfile, MobileResMode } from '../../UI/SettingsStore'
+import {
+  parseMobileRes43,
+  type MobilePerfProfile,
+  type MobileRes43,
+  type MobileResMode,
+} from '../../UI/SettingsStore'
 
 export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
   public scene: THREE.Scene
@@ -132,6 +137,7 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
 
   private mobilePerfProfile: MobilePerfProfile = 'balanced'
   private mobileResMode: MobileResMode = 'normal'
+  private mobileRes43: MobileRes43 = '1280x960'
   /** Multiplies mobile backbuffer scale (Dust II is heavier than Pool Day). */
   private mapPerfScale = 1
   private dust2Mobile = false
@@ -180,6 +186,12 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.applyMobileResolution()
   }
 
+  public setMobileRes43(preset: MobileRes43): void {
+    if (!this.mobileGameplay) return
+    this.mobileRes43 = preset
+    if (this.mobileResMode === '4:3') this.applyMobileResolution()
+  }
+
   /**
    * Mobile drives the backbuffer directly (pixel ratio pinned to 1) so the cost
    * is predictable across very different device pixel ratios.
@@ -192,8 +204,11 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.setPixelRatio(1)
 
     if (this.mobileResMode === '4:3') {
-      const h = Math.round(THREE.MathUtils.clamp(768 * scale, 480, 960))
-      this.setGameResolution(Math.round((h * 4) / 3), h)
+      // Exact CS-style pick; Soft-scale only for Dust II / Smooth budget
+      const { width, height } = parseMobileRes43(this.mobileRes43)
+      const budget =
+        this.mobilePerfProfile === 'smooth' ? 0.85 * this.mapPerfScale : this.mapPerfScale
+      this.setGameResolution(Math.round(width * budget), Math.round(height * budget))
       return
     }
 

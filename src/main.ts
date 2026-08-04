@@ -123,7 +123,7 @@ async function main() {
       }
       game.getMobileControls()?.applySettings(settings.mobile)
       if (isTouchDevice()) {
-        game.applyMobileResMode(settings.mobile.resMode)
+        game.applyMobileResMode(settings.mobile.resMode, settings.mobile.res43)
         game.applyMobilePerfProfile(settings.mobile.perfProfile)
       }
     },
@@ -172,7 +172,7 @@ async function main() {
     menu.setLoadingProgress('Preparing world…', 75)
     game.onLoad()
     if (isTouchDevice()) {
-      game.applyMobileResMode(settings.mobile.resMode)
+      game.applyMobileResMode(settings.mobile.resMode, settings.mobile.res43)
       game.applyMobilePerfProfile(settings.mobile.perfProfile)
     } else {
       game.applyResolution(settings.resolutionWidth, settings.resolutionHeight)

@@ -30,7 +30,7 @@ import { Key } from '../Input/KeyBinding'
 import { Game } from '../Game'
 import type { MobileControls } from './MobileControls'
 import { isTouchDevice } from './MobileDevice'
-import type { MobileHoldMode, MobilePerfProfile, MobileResMode } from './SettingsStore'
+import type { MobileHoldMode, MobilePerfProfile, MobileRes43, MobileResMode } from './SettingsStore'
 import { roomDirectory, type PublicRoomInfo } from '../Net/RoomDirectory'
 import {
   CareerStats,
@@ -327,14 +327,20 @@ export class MainMenu {
 
   private syncMobileResControls(): void {
     const mode = this.settings.mobile.resMode
+    const res43 = this.settings.mobile.res43
     this.root.querySelectorAll('[data-mres]').forEach((el) => {
       el.classList.toggle('is-on', el.getAttribute('data-mres') === mode)
+    })
+    const sizeRow = this.root.querySelector('#kos-mres43-row') as HTMLElement | null
+    if (sizeRow) sizeRow.hidden = mode !== '4:3'
+    this.root.querySelectorAll('[data-mres43]').forEach((el) => {
+      el.classList.toggle('is-on', el.getAttribute('data-mres43') === res43)
     })
     const hint = this.root.querySelector('#kos-mres-hint')
     if (hint) {
       hint.textContent =
         mode === '4:3'
-          ? '4:3 — 1280×960 stretched to fill the screen, like CS.'
+          ? `4:3 — ${res43.replace('x', '×')} stretched to fill the screen, like CS.`
           : "Normal — your screen's native aspect, no stretching."
     }
   }
@@ -462,7 +468,7 @@ export class MainMenu {
       }
 
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-length], [data-team], [data-mode], [data-side], [data-mp-side], [data-mp-diff], [data-mp-map], [data-tab], [data-map], [data-res], [data-mres], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
+        '[data-action], [data-diff], [data-length], [data-team], [data-mode], [data-side], [data-mp-side], [data-mp-diff], [data-mp-map], [data-tab], [data-map], [data-res], [data-mres], [data-mres43], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -540,7 +546,20 @@ export class MainMenu {
         this.syncMobileResControls()
         this.persist()
         try {
-          Game.getInstance().applyMobileResMode(mres)
+          Game.getInstance().applyMobileResMode(mres, this.settings.mobile.res43)
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const mres43 = t.getAttribute('data-mres43') as MobileRes43 | null
+      if (mres43 === '1280x960' || mres43 === '1440x1080') {
+        this.settings.mobile.res43 = mres43
+        this.settings.mobile.resMode = '4:3'
+        this.syncMobileResControls()
+        this.persist()
+        try {
+          Game.getInstance().applyMobileResMode('4:3', mres43)
         } catch {
           /* ignore */
         }

@@ -52,6 +52,23 @@ export type MobileHoldMode = 'hold' | 'toggle'
 export type MobilePerfProfile = 'smooth' | 'balanced' | 'quality'
 /** `normal` renders at the screen's own aspect; `4:3` renders 4:3 and stretches (CS-style). */
 export type MobileResMode = 'normal' | '4:3'
+/** Internal backbuffer when mobile Video is set to 4:3. */
+export type MobileRes43 = '1280x960' | '1440x1080'
+
+export const MOBILE_RES_43_PRESETS: ReadonlyArray<{
+  key: MobileRes43
+  width: number
+  height: number
+  label: string
+}> = [
+  { key: '1280x960', width: 1280, height: 960, label: '1280×960' },
+  { key: '1440x1080', width: 1440, height: 1080, label: '1440×1080' },
+]
+
+export function parseMobileRes43(key: MobileRes43): { width: number; height: number } {
+  const hit = MOBILE_RES_43_PRESETS.find((p) => p.key === key)
+  return hit ? { width: hit.width, height: hit.height } : { width: 1280, height: 960 }
+}
 
 export interface MobileControlsSettings {
   enabled: boolean
@@ -62,6 +79,8 @@ export interface MobileControlsSettings {
   leanMode: MobileHoldMode
   perfProfile: MobilePerfProfile
   resMode: MobileResMode
+  /** Used only when `resMode === '4:3'`. */
+  res43: MobileRes43
 }
 
 export interface PlayerSettings {
@@ -244,6 +263,7 @@ export function defaultMobileSettings(): MobileControlsSettings {
     leanMode: 'hold',
     perfProfile: 'balanced',
     resMode: 'normal',
+    res43: '1280x960',
   }
 }
 
@@ -259,6 +279,10 @@ function normalizeResMode(v: unknown, fallback: MobileResMode): MobileResMode {
   return v === 'normal' || v === '4:3' ? v : fallback
 }
 
+function normalizeRes43(v: unknown, fallback: MobileRes43): MobileRes43 {
+  return v === '1280x960' || v === '1440x1080' ? v : fallback
+}
+
 export function normalizeMobileSettings(raw?: Partial<MobileControlsSettings>): MobileControlsSettings {
   const d = defaultMobileSettings()
   return {
@@ -270,6 +294,7 @@ export function normalizeMobileSettings(raw?: Partial<MobileControlsSettings>): 
     leanMode: normalizeHoldMode(raw?.leanMode, d.leanMode),
     perfProfile: normalizePerfProfile(raw?.perfProfile, d.perfProfile),
     resMode: normalizeResMode(raw?.resMode, d.resMode),
+    res43: normalizeRes43(raw?.res43, d.res43),
   }
 }
 

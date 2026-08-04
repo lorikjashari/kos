@@ -278,6 +278,10 @@ export function buildMainMenuHtml(): string {
                   <button type="button" class="kos-chip" data-mres="normal">Normal</button>
                   <button type="button" class="kos-chip" data-mres="4:3">4:3</button>
                 </div>
+                <div class="kos-chip-row" id="kos-mres43-row" hidden>
+                  <button type="button" class="kos-chip" data-mres43="1280x960">1280×960</button>
+                  <button type="button" class="kos-chip" data-mres43="1440x1080">1440×1080</button>
+                </div>
                 <p class="kos-hint tight" id="kos-mres-hint">Normal — your screen's native aspect.</p>
               </div>
               <div class="kos-mset-card" data-desktop-only>
