@@ -108,8 +108,22 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.applyGameResolution()
   }
 
+  private mobilePerfProfile: MobilePerfProfile = 'balanced'
+  private mobileResMode: MobileResMode = 'normal'
+  private mobileRes43: MobileRes43 = '1280x960'
+  /** Multiplies mobile backbuffer scale (Dust II is heavier than Pool Day). */
+  private mapPerfScale = 1
+  private dust2Mobile = false
+  private dust2Active = false
+  private desktopGraphicsProfile: 'low' | 'medium' | 'high' = 'high'
+
   public applyGraphicsProfile(profile: 'low' | 'medium' | 'high'): void {
     if (this.mobileGameplay) return
+    this.desktopGraphicsProfile = profile
+    if (this.dust2Active) {
+      this.applyDust2DesktopBudget()
+      return
+    }
     if (profile === 'low') {
       this.renderingConfig.hasPostProcess = false
       this.renderingConfig.hasParticle = false
@@ -128,6 +142,7 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     }
     this.setPixelRatio(Math.min(window.devicePixelRatio, this.renderingConfig.resolution))
     this.sceneLighting?.enableShadow(this.renderingConfig.hasShadow)
+    this.sceneLighting?.setShadowMapSize(2048)
     this.sceneLighting?.applyRenderingConfig()
     if (this.renderingConfig.hasPostProcess) {
       if (!this.composer && this.camera) this.addPostProcess()
@@ -135,12 +150,37 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.applyGameResolution()
   }
 
-  private mobilePerfProfile: MobilePerfProfile = 'balanced'
-  private mobileResMode: MobileResMode = 'normal'
-  private mobileRes43: MobileRes43 = '1280x960'
-  /** Multiplies mobile backbuffer scale (Dust II is heavier than Pool Day). */
-  private mapPerfScale = 1
-  private dust2Mobile = false
+  /** Dust II desktop: drop fill-rate stack, keep character shadows cheap. */
+  private applyDust2DesktopBudget(): void {
+    // Prioritize frame rate for every user — playdemo felt fast because sim was off;
+    // graphics stay lean so live play can match that ceiling.
+    this.renderingConfig.hasParticle = false
+    this.renderingConfig.hasPostProcess = false
+    this.renderingConfig.hasShadow = this.desktopGraphicsProfile !== 'low'
+    this.renderingConfig.resolution = Math.min(window.devicePixelRatio, 1)
+    this.setPixelRatio(1)
+    this.sceneLighting?.enableShadow(this.renderingConfig.hasShadow)
+    this.sceneLighting?.setShadowMapSize(512)
+    this.sceneLighting?.sky?.setOutdoorMapMode(true)
+    this.sceneLighting?.applyRenderingConfig()
+    this.applyGameResolution()
+    this.applyDust2CameraFar(true)
+  }
+
+  private applyDust2CameraFar(dust2: boolean): void {
+    const far = dust2 ? 520 : 1000
+    const cams: Array<THREE.PerspectiveCamera | undefined | null> = [
+      this.camera as THREE.PerspectiveCamera,
+      this.currentPlayer?.renderer?.camera as THREE.PerspectiveCamera | undefined,
+      this.debugCamera,
+    ]
+    for (const cam of cams) {
+      if (cam instanceof THREE.PerspectiveCamera && cam.far !== far) {
+        cam.far = far
+        cam.updateProjectionMatrix()
+      }
+    }
+  }
 
   public applyMobilePerfProfile(profile: MobilePerfProfile): void {
     if (!this.mobileGameplay) return
@@ -173,16 +213,27 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     }
   }
 
-  /** Dust II on phones: lower res scale and drop shadows on Smooth/Balanced. */
+  /** Dust II: lower res / drop shadows on phones; desktop drops particles + map cost. */
   public applyMapPerfBudget(mapId: string): void {
-    if (!this.mobileGameplay) {
-      this.mapPerfScale = 1
-      this.dust2Mobile = false
+    const isDust2 = mapId === 'de_dust2'
+    this.dust2Active = isDust2
+
+    if (this.mobileGameplay) {
+      this.dust2Mobile = isDust2
+      this.mapPerfScale = isDust2 ? 0.7 : 1
+      this.sceneLighting?.sky?.setOutdoorMapMode(isDust2)
+      this.applyMobilePerfProfile(this.mobilePerfProfile)
+      this.applyDust2CameraFar(isDust2)
       return
     }
-    this.dust2Mobile = mapId === 'de_dust2'
-    this.mapPerfScale = this.dust2Mobile ? 0.7 : 1
-    this.applyMobilePerfProfile(this.mobilePerfProfile)
+
+    if (isDust2) {
+      this.applyDust2DesktopBudget()
+    } else {
+      this.sceneLighting?.sky?.setOutdoorMapMode(false)
+      this.applyDust2CameraFar(false)
+      this.applyGraphicsProfile(this.desktopGraphicsProfile)
+    }
   }
 
   public setMobileResMode(mode: MobileResMode): void {

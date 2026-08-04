@@ -13,6 +13,10 @@ import { MapMesh } from './View/Mesh/MapMesh'
 import { AudioManager } from './View/Audio/AudioManager'
 import { BotDifficulty, TrainingBot } from './Core/TrainingBot'
 import { TrainingBotRenderer } from './View/Renderer/TrainingBotRenderer'
+import {
+  BOT_FULL_THINKS_PER_FRAME,
+  BOT_FULL_THINKS_PER_FRAME_HEAVY,
+} from './Core/BotPerf'
 import { FPSRenderer } from './View/Renderer/PlayerRenderer/FPSRenderer'
 import type { BotMatchConfig } from './UI/MainMenu'
 import {
@@ -140,6 +144,8 @@ export class Game implements IUpdatable {
     tacticRole?: Dust2Role | null
   }> = []
   private botSpawnAcc = 0
+  /** Round-robin index so only a few bots run heavy combatThink each frame. */
+  private botThinkCursor = 0
   private tacticRotateAcc = 0
   private effectsWarmed = false
   private graphicsWarmed = false
@@ -2557,6 +2563,25 @@ export class Game implements IUpdatable {
       if (!this.matchOver) this.syncMatchStatus()
 
       const botsActive = this.combatLive
+      const aliveAi: TrainingBot[] = []
+      for (let i = 0; i < this.trainingBots.length; i++) {
+        const bot = this.trainingBots[i]
+        bot.preferFullThink = false
+        if ((botsActive || bot.isNetworkPuppet) && bot.isAlive && !bot.aiFrozen && !bot.isNetworkPuppet) {
+          aliveAi.push(bot)
+        }
+      }
+      // Cap full AI thinks — playdemo freezes all AI; live play staggered to match that FPS
+      if (aliveAi.length > 0 && botsActive) {
+        const budget =
+          this.activeMapId === 'de_dust2' ? BOT_FULL_THINKS_PER_FRAME_HEAVY : BOT_FULL_THINKS_PER_FRAME
+        const n = aliveAi.length
+        const take = Math.min(budget, n)
+        for (let k = 0; k < take; k++) {
+          aliveAi[(this.botThinkCursor + k) % n].preferFullThink = true
+        }
+        this.botThinkCursor = (this.botThinkCursor + take) % n
+      }
       for (let i = 0; i < this.trainingBots.length; i++) {
         const bot = this.trainingBots[i]
         if (botsActive || bot.isNetworkPuppet) bot.update(dt)

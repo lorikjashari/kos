@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { TQuaternion } from '../../Core/Quaternion'
 import { Vector3D } from '../../Core/Vector'
 import { Game } from '../../Game'
@@ -6,6 +7,13 @@ import { TrimeshCollider } from '../../Physics/Collider/TrimeshCollider'
 import { FakeSpotLight } from './FakeSpotLight'
 import { LoadableMesh } from './LoadableMesh'
 import { isTouchDevice } from '../../UI/MobileDevice'
+
+/** Shared no-draw stand-in so collider meshes stay in the graph without a GPU pass. */
+const invisibleOutdoorMat = new THREE.MeshBasicMaterial({
+  visible: false,
+  colorWrite: false,
+  depthWrite: false,
+})
 
 export type MapMeshOptions = {
   /** Extra pool-day corridor fills + Spot named lights */
@@ -40,6 +48,7 @@ export class MapMesh extends LoadableMesh {
       const mats = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
       for (const mat of mats) {
         if (!mat || seenMat.has(mat)) continue
+        if (mat === invisibleOutdoorMat) continue
         seenMat.add(mat)
         const std = mat as THREE.MeshStandardMaterial
         for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap'] as const) {
@@ -165,22 +174,32 @@ export class MapMesh extends LoadableMesh {
               }
               mat.envMapIntensity = 0.4
             } else {
-              // Lit Sketchfab / CS maps — keep textures, don't blow out to white
-              if ('metalness' in mat) mat.metalness = Math.min(mat.metalness ?? 0, 0.15)
-              if ('roughness' in mat) mat.roughness = Math.max(mat.roughness ?? 0.8, 0.65)
-              if ('emissive' in mat && mat.emissive) {
-                mat.emissiveIntensity = Math.min(mat.emissiveIntensity ?? 0, 0.05)
+              // Dust II: MeshStandard + DoubleSide + many scene lights = FPS death.
+              // Lambert + FrontSide keeps the textures lit by the sun without the PBR cost.
+              if (!(mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+                mat.side = THREE.FrontSide
+                mat.needsUpdate = true
+                continue
               }
-              mat.envMapIntensity = 0.85
-              // DoubleSide is expensive on phones; Dust II is closed enough for FrontSide
-              mat.side = mobile ? THREE.FrontSide : THREE.DoubleSide
+              const lambert = MapMesh.toOutdoorLambert(mat)
+              if (Array.isArray(mesh.material)) {
+                const idx = materials.indexOf(raw)
+                if (idx >= 0) {
+                  const arr = mesh.material as THREE.Material[]
+                  arr[idx] = lambert
+                }
+              } else {
+                mesh.material = lambert
+              }
+              mat.dispose()
+              continue
             }
             mat.needsUpdate = true
           }
         }
-        // On mobile the map only receives shadows — characters alone go into the
-        // shadow map (Pool Day baked, Dust II too big to cast 34 meshes every frame).
-        mesh.castShadow = !mobile
+        // Dust II: map never casts (34 shadow draws every update). Characters still cast.
+        // Pool Day desktop keeps map casting for roof soft-shadows.
+        mesh.castShadow = usePoolLights && !mobile
         mesh.receiveShadow = true
         // Pool Day is a small interior; Dust II is large — cull what the camera
         // can't see so draw calls drop while looking around.
@@ -214,7 +233,108 @@ export class MapMesh extends LoadableMesh {
       this.mesh.remove(removedMeshs[i])
     }
 
+    // Bake Dust II into fewer draw calls after colliders own their triangle copies
+    if (!usePoolLights) this.consolidateOutdoorDrawCalls()
+
     if (usePoolLights) this.addIndoorCorridorLights(game, extras)
+  }
+
+  /** Drop PBR path — outdoor maps only need sun/hemi/ambient. */
+  private static toOutdoorLambert(src: THREE.MeshStandardMaterial): THREE.MeshLambertMaterial {
+    const lambert = new THREE.MeshLambertMaterial({
+      color: src.color?.clone() ?? new THREE.Color(0xffffff),
+      map: src.map ?? null,
+      emissive: src.emissive?.clone() ?? new THREE.Color(0x000000),
+      emissiveMap: src.emissiveMap ?? null,
+      emissiveIntensity: Math.min(src.emissiveIntensity ?? 0, 0.05),
+      alphaMap: src.alphaMap ?? null,
+      transparent: !!src.transparent,
+      opacity: src.opacity ?? 1,
+      alphaTest: src.alphaTest ?? 0,
+      side: THREE.FrontSide,
+      fog: src.fog !== false,
+      flatShading: false,
+    })
+    if (lambert.map) lambert.map.colorSpace = THREE.SRGBColorSpace
+    lambert.needsUpdate = true
+    return lambert
+  }
+
+  /**
+   * Sketchfab Dust II ships ~34 unique-material meshes. Group by albedo texture
+   * (or flat color) and merge so open sightlines don't pay 34 Mesh draws.
+   * Colliders already copied triangles — visuals can be replaced freely.
+   */
+  private consolidateOutdoorDrawCalls(): void {
+    const meshes: THREE.Mesh[] = []
+    this.mesh.traverse((child) => {
+      const m = child as THREE.Mesh
+      if (m.isMesh && m.geometry) meshes.push(m)
+    })
+    if (meshes.length < 2) return
+
+    type Bucket = { meshes: THREE.Mesh[]; material: THREE.Material }
+    const buckets = new Map<string, Bucket>()
+    for (const mesh of meshes) {
+      const mat = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshLambertMaterial
+      if (!mat) continue
+      const key = mat.map?.uuid ?? `c:${mat.color?.getHexString?.() ?? 'fff'}`
+      let bucket = buckets.get(key)
+      if (!bucket) {
+        bucket = { meshes: [], material: mat }
+        buckets.set(key, bucket)
+      }
+      bucket.meshes.push(mesh)
+    }
+
+    this.mesh.updateMatrixWorld(true)
+    const rootInv = this.mesh.matrixWorld.clone().invert()
+    const mergedRoot = new THREE.Group()
+    mergedRoot.name = 'Dust2Batched'
+    let mergedCount = 0
+
+    for (const bucket of buckets.values()) {
+      if (bucket.meshes.length === 1) {
+        // Already a single draw — keep, but ensure outdoor flags
+        const only = bucket.meshes[0]
+        only.castShadow = false
+        only.receiveShadow = true
+        only.frustumCulled = true
+        continue
+      }
+
+      const geos: THREE.BufferGeometry[] = []
+      for (const mesh of bucket.meshes) {
+        const geo = mesh.geometry.clone() as THREE.BufferGeometry
+        // Bake into map-root local space so the batched group can sit at identity
+        const toRoot = new THREE.Matrix4().multiplyMatrices(rootInv, mesh.matrixWorld)
+        geo.applyMatrix4(toRoot)
+        geos.push(geo)
+      }
+
+      const merged = mergeGeometries(geos, false)
+      for (const g of geos) g.dispose()
+      if (!merged) continue
+
+      const mat = bucket.material.clone()
+      mat.side = THREE.FrontSide
+      const batch = new THREE.Mesh(merged, mat)
+      batch.name = `dust2_batch_${mergedCount++}`
+      batch.castShadow = false
+      batch.receiveShadow = true
+      batch.frustumCulled = true
+      mergedRoot.add(batch)
+
+      for (const mesh of bucket.meshes) {
+        mesh.visible = false
+        mesh.castShadow = false
+        mesh.frustumCulled = true
+        // Drop GPU draw without disposing geometry Ammo / Actor may still reference
+        mesh.material = invisibleOutdoorMat
+      }
+    }
+
+    if (mergedCount > 0) this.mesh.add(mergedRoot)
   }
 
   /**

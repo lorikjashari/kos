@@ -18,14 +18,15 @@ describe('botLodFromDistSq', () => {
 })
 
 describe('botAiSkipFrames', () => {
-  it('never skips near bots', () => {
-    expect(botAiSkipFrames('near', true)).toBe(0)
-    expect(botAiSkipFrames('near', false)).toBe(0)
+  it('skips near bots on heavy maps so Dust II stays playable', () => {
+    expect(botAiSkipFrames('near', false, true)).toBeGreaterThanOrEqual(1)
+    expect(botAiSkipFrames('near', false, false)).toBe(0)
   })
 
-  it('skips more on mobile far bots', () => {
+  it('skips more on mobile / far / heavy', () => {
     expect(botAiSkipFrames('far', true)).toBeGreaterThan(botAiSkipFrames('far', false))
     expect(botAiSkipFrames('mid', true)).toBeGreaterThanOrEqual(1)
+    expect(botAiSkipFrames('mid', false, true)).toBeGreaterThan(botAiSkipFrames('mid', false, false))
   })
 })
 

@@ -35,6 +35,8 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
   private sun = new Vector3D()
   private applySky!: () => void
   private interiorFills: THREE.PointLight[] = []
+  private interiorFillsEnabled = true
+  private outdoorMapMode = false
   /**
    * Phones run without shadows on the lighter profiles, so a desktop-strength
    * ambient/hemi fill leaves the map completely flat. Mobile trades fill for a
@@ -111,6 +113,45 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
     this.setSky()
   }
 
+  /**
+   * Pool Day point fills have no range culling — every Dust II fragment still
+   * evaluates them. Toggle off for outdoor maps.
+   */
+  public setInteriorFillsEnabled(enabled: boolean): void {
+    this.interiorFillsEnabled = enabled
+    for (const p of this.interiorFills) {
+      p.visible = enabled
+      p.intensity = enabled ? p.userData.baseIntensity ?? p.intensity : 0
+    }
+  }
+
+  /**
+   * Dust II: stronger sun/ambient (no point fills), tighter shadow follow grid,
+   * slightly denser haze so far geometry fades cheaper to the eye.
+   */
+  public setOutdoorMapMode(enabled: boolean): void {
+    this.outdoorMapMode = enabled
+    if (enabled) {
+      this.setInteriorFillsEnabled(false)
+      this.directionalLight.intensity = this.mobile ? 2.7 : 1.85
+      this.fillLight.intensity = this.mobile ? 0.4 : 0.7
+      this.hemiLight.intensity = this.mobile ? 1.65 : 2.0
+      this.ambientLight.intensity = this.mobile ? 1.35 : 1.75
+      const extent = this.mobile ? 110 : 180
+      this.directionalLight.shadow.camera.right = extent
+      this.directionalLight.shadow.camera.left = -extent
+      this.directionalLight.shadow.camera.top = extent
+      this.directionalLight.shadow.camera.bottom = -extent
+      this.directionalLight.shadow.camera.updateProjectionMatrix()
+      if (this.renderer.scene.fog instanceof THREE.FogExp2) {
+        this.renderer.scene.fog.density = this.mobile ? 0.00045 : 0.00055
+      }
+    } else {
+      this.setInteriorFillsEnabled(true)
+      this.applyDayLook()
+    }
+  }
+
   /** Soft warm point lights under covered pool areas */
   private addInteriorFillLights(): void {
     // Every point light is per-fragment work for the whole scene, so mobile gets two
@@ -134,6 +175,7 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
       const p = new THREE.PointLight(0xffe8cc, s.i, s.r, 1.35)
       p.position.set(s.x, s.y, s.z)
       p.castShadow = false
+      p.userData.baseIntensity = s.i
       this.renderer.addToRenderer(p)
       this.interiorFills.push(p)
     }
@@ -244,7 +286,12 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
     this.ambientLight.intensity = THREE.MathUtils.lerp(0.4, 0.95, dayAmount)
 
     for (const p of this.interiorFills) {
-      p.intensity = THREE.MathUtils.lerp(8, 18, dayAmount)
+      if (!this.interiorFillsEnabled) {
+        p.intensity = 0
+        continue
+      }
+      const base = (p.userData.baseIntensity as number) ?? 18
+      p.intensity = THREE.MathUtils.lerp(base * 0.35, base, dayAmount)
     }
 
     const fogColor = new THREE.Color(
@@ -266,10 +313,10 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
     const pos = this.renderer.camera.position.clone()
     this.position.copy(this.renderer.camera.position)
 
-    // Re-rendering the shadow map means redrawing the whole map. Snap the rig to a
-    // grid on mobile so it only happens when the player actually crosses a cell,
-    // not on every tick of a walk.
-    const grid = this.mobile ? 24 : 0
+    // Re-rendering the shadow map means redrawing casters. Snap the rig to a
+    // grid so it only happens when the player actually crosses a cell — Dust II
+    // desktop used to refresh every 200ms while walking across 350 units.
+    const grid = this.mobile || this.outdoorMapMode ? (this.mobile ? 24 : 32) : 0
     if (grid > 0) {
       pos.set(Math.round(pos.x / grid) * grid, Math.round(pos.y / grid) * grid, Math.round(pos.z / grid) * grid)
       if (pos.distanceToSquared(this.lastShadowAnchor) < 0.01) return
@@ -279,7 +326,8 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
 
     const sunDir = this.sun.clone().normalize()
     const y = Math.max(sunDir.y, 0.15)
-    this.directionalLight.position.set(pos.x + sunDir.x * 140, pos.y + y * 140, pos.z + sunDir.z * 140)
+    const reach = this.outdoorMapMode ? 200 : 140
+    this.directionalLight.position.set(pos.x + sunDir.x * reach, pos.y + y * reach, pos.z + sunDir.z * reach)
     this.directionalLight.target.position.set(pos.x, pos.y, pos.z)
 
     // Fill from opposite side / sky

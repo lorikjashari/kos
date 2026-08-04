@@ -197,8 +197,20 @@ export class TrainingBot implements IUpdatable {
   private readonly playerRadius = 0.85
   /** Distance LOD vs local player — drives AI skip + renderer cheap path. */
   public renderLod: BotLod = 'near'
+  /**
+   * Set by Game each frame — only budgeted bots run combatThink / heavy nav.
+   * Others glide + snap to ground (demo-like CPU, live combat still works).
+   */
+  public preferFullThink = false
   private aiSkipCounter = 0
   private pendingAiDt = 0
+  private wallPushCache = new Vector3D()
+  private wallPushCacheT = 0
+  private groundCacheY = 0
+  private groundCacheT = 0
+  private corridorCacheKey = ''
+  private corridorCacheT = 0
+  private corridorCacheOk = true
 
   constructor(position: Vector3D, yaw = 0, difficulty: BotDifficulty = 'medium', name = 'BOT') {
     this.position = position.clone()
@@ -402,8 +414,9 @@ export class TrainingBot implements IUpdatable {
 
     if (this.checkVoidDeath()) return
 
-    // Editor dummy — stay planted; optional face-player; no move / shoot
+    // Editor dummy / playdemo — stay planted; force far LOD so render matches demo cost
     if (this.aiFrozen) {
+      this.renderLod = 'far'
       this.isMoving = false
       if (this.lookAtPlayer) {
         const game = Game.getInstance()
@@ -428,6 +441,10 @@ export class TrainingBot implements IUpdatable {
       return
     }
 
+    if (this.wallPushCacheT > 0) this.wallPushCacheT = Math.max(0, this.wallPushCacheT - dt)
+    if (this.corridorCacheT > 0) this.corridorCacheT = Math.max(0, this.corridorCacheT - dt)
+    if (this.groundCacheT > 0) this.groundCacheT = Math.max(0, this.groundCacheT - dt)
+
     const distSq = flatDistSq(
       this.position.x,
       this.position.z,
@@ -435,25 +452,26 @@ export class TrainingBot implements IUpdatable {
       player.position.z
     )
     this.renderLod = botLodFromDistSq(distSq)
-    const skipN = botAiSkipFrames(this.renderLod, isTouchDevice())
+    const heavyMap = game.activeMapId === 'de_dust2'
+    const skipN = botAiSkipFrames(this.renderLod, isTouchDevice(), heavyMap)
     this.pendingAiDt += dt
     this.aiSkipCounter++
-    const runFull = skipN <= 0 || this.aiSkipCounter % (skipN + 1) === 0
+    const lodAllowsFull = skipN <= 0 || this.aiSkipCounter % (skipN + 1) === 0
+    // Global frame budget (preferFullThink) + LOD — demo freezes AI entirely; we stagger it
+    const runFull = this.preferFullThink && lodAllowsFull
 
     if (!runFull) {
-      // Cheap frame: keep clocks ticking + ground stick; no LOS / retarget / nav rebuild
+      // Cheap frame: no LOS / retarget / wall rings — just glide + ground stick
       this.fireCooldown = Math.max(0, this.fireCooldown - dt)
       this.strafeTimer -= dt
       this.retargetTimer -= dt
+      const cheapSpeed = TUNING[this.difficulty].moveSpeed * 0.85
       if (this.lastKnownTarget && this.flatDist(this.position, this.lastKnownTarget) > 1.4) {
-        this.navigateToward(
-          this.lastKnownTarget,
-          TUNING[this.difficulty].moveSpeed * 0.85,
-          dt,
-          physics
-        )
-      } else if (this.tacticMode !== 'free') {
-        this.runTacticMove(dt, physics, TUNING[this.difficulty].moveSpeed * 0.7)
+        this.glideToward(this.lastKnownTarget, cheapSpeed, dt)
+      } else if (this.tacticMode !== 'free' && this.waypoint) {
+        this.glideToward(this.waypoint, cheapSpeed * 0.85, dt)
+      } else {
+        this.isMoving = false
       }
       this.followTerrain(physics, dt)
       this.checkVoidDeath()
@@ -472,6 +490,22 @@ export class TrainingBot implements IUpdatable {
     this.checkVoidDeath()
     if (this.shootFlash > 0) this.shootFlash = Math.max(0, this.shootFlash - dt)
     this.trackAimAndGait(dt)
+  }
+
+  /** Ray-free slide used on budget frames — full think corrects wall clips. */
+  private glideToward(goal: Vector3D, speed: number, dt: number): void {
+    const dx = goal.x - this.position.x
+    const dz = goal.z - this.position.z
+    const len = Math.hypot(dx, dz)
+    if (len < 0.45) {
+      this.isMoving = false
+      return
+    }
+    const step = Math.min(speed * dt, len)
+    this.position.x += (dx / len) * step
+    this.position.z += (dz / len) * step
+    this.isMoving = true
+    if (!this.lockCombatFacing) this.faceToward(goal)
   }
 
   /** Keep bots / player from stacking and orbiting inside each other. */
@@ -782,8 +816,6 @@ export class TrainingBot implements IUpdatable {
       if (other.health < 50) score -= 6
       if (this.huntBias === 'any') score -= 3
       if (coop) score -= 12
-      // LOS raycasts are expensive — only score visibility for close fights
-      if (d < 32 && this.hasLineOfSight(physics, myEye, eye)) score -= 14
       cands.push({
         kind: 'bot',
         eye,
@@ -798,8 +830,7 @@ export class TrainingBot implements IUpdatable {
       const d = this.flatDist(this.position, player.position)
       const eye = player.position.clone().add(new Vector3D(0, player.eyeOffsetY, 0))
       const playerBias = this.huntBias === 'player' ? 18 : 9
-      let score = d - playerBias
-      if (d < 36 && this.hasLineOfSight(physics, myEye, eye)) score -= 16
+      const score = d - playerBias
       cands.push({
         kind: 'player',
         eye,
@@ -811,7 +842,14 @@ export class TrainingBot implements IUpdatable {
 
     if (cands.length === 0) return undefined
     cands.sort((a, b) => a.score - b.score)
+    // One LOS check on the best candidate (was N rays across every nearby enemy)
     const best = cands[0]
+    if (best.dist < 36 && this.hasLineOfSight(physics, myEye, best.eye)) {
+      best.score -= best.kind === 'player' ? 16 : 14
+    } else if (cands.length > 1 && cands[1].dist < 28) {
+      const alt = cands[1]
+      if (this.hasLineOfSight(physics, myEye, alt.eye)) return { kind: alt.kind, eye: alt.eye, pos: alt.pos, bot: alt.bot }
+    }
     return { kind: best.kind, eye: best.eye, pos: best.pos, bot: best.bot }
   }
 
@@ -898,17 +936,16 @@ export class TrainingBot implements IUpdatable {
     else toGoal.set(Math.sin(this.yaw), 0, Math.cos(this.yaw))
 
     const samples: Vector3D[] = []
-    for (let i = 0; i < 16; i++) {
-      const a = (i / 16) * Math.PI * 2
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2
       samples.push(new Vector3D(Math.cos(a), 0, Math.sin(a)))
     }
     let best: Vector3D | undefined
     let bestScore = -Infinity
     for (const dir of samples) {
       if (!this.isCorridorClear(physics, dir, this.probeDist)) continue
-      const open = this.opennessAhead(physics, dir, this.planProbe)
       const toward = dir.x * toGoal.x + dir.z * toGoal.z
-      const score = open * 3 + toward * 1.4
+      const score = this.wallDistance(physics, dir, this.planProbe) * 0.2 + toward * 1.4
       if (score > bestScore) {
         bestScore = score
         best = dir
@@ -938,20 +975,16 @@ export class TrainingBot implements IUpdatable {
     const side = new Vector3D(-toGoal.z * this.wallFollowDir, 0, toGoal.x * this.wallFollowDir)
     const tryDirs = [
       side.clone().add(toGoal).normalize(),
-      side.clone().add(toGoal.clone().multiplyScalar(0.35)).normalize(),
       side,
-      side.clone().multiplyScalar(-1).add(toGoal).normalize(),
       side.clone().multiplyScalar(-1),
-      toGoal.clone().multiplyScalar(-1).add(side).normalize(),
       toGoal.clone().multiplyScalar(-1),
     ]
     let best: Vector3D | undefined
     let bestScore = -Infinity
     for (const dir of tryDirs) {
       if (!this.isCorridorClear(physics, dir, this.stepProbe * 1.2)) continue
-      const open = this.opennessAhead(physics, dir, this.planProbe)
       const toward = dir.x * toGoal.x + dir.z * toGoal.z
-      const score = open * 2.5 + toward
+      const score = toward + this.wallDistance(physics, dir, this.planProbe) * 0.15
       if (score > bestScore) {
         bestScore = score
         best = dir
@@ -973,13 +1006,9 @@ export class TrainingBot implements IUpdatable {
     if (dist < 0.2) return undefined
     toGoal.normalize()
 
-    const angles: number[] = []
-    for (let i = 1; i <= 10; i++) {
-      const a = (i / 10) * Math.PI
-      angles.push(a, -a)
-    }
-    angles.push(Math.PI)
-    const stepLens = [2.2, 3.4, 4.8, 6.4, 8.2, 10]
+    // Compact search — old 21×6 ray grid spiked FPS whenever a bot got stuck
+    const angles = [0.45, -0.45, 0.9, -0.9, 1.4, -1.4, Math.PI]
+    const stepLens = [3.4, 6.4, 10]
     let best: Vector3D | undefined
     let bestScore = Number.POSITIVE_INFINITY
 
@@ -990,16 +1019,10 @@ export class TrainingBot implements IUpdatable {
       if (!this.isCorridorClear(physics, dir, this.probeDist)) continue
 
       for (const stepLen of stepLens) {
-        if (!this.isCorridorClear(physics, dir, Math.min(stepLen, this.planProbe))) continue
         const step = this.position.clone().add(dir.clone().multiplyScalar(stepLen))
         if (!this.hasGroundNear(physics, step.x, step.z)) continue
-        const clear = this.clearanceAt(physics, step)
-        if (clear < this.bodyRadius * 0.85) continue
         const remain = this.flatDist(step, goal)
-        const seesGoal = this.canWalkToward(physics, goal, step) ? -18 : 0
-        const wide = -clear * 2.2
-        const turnCost = Math.abs(a) * 0.55
-        const score = remain + turnCost + wide + seesGoal
+        const score = remain + Math.abs(a) * 0.55
         if (score < bestScore) {
           bestScore = score
           best = step
@@ -1063,8 +1086,12 @@ export class TrainingBot implements IUpdatable {
   }
 
   private wallRepulsion(physics: Physics): Vector3D {
+    if (this.wallPushCacheT > 0) {
+      return this.wallPushCache.clone()
+    }
     const push = new Vector3D()
-    const rings = 12
+    // Was 12 rings × 3 heights = 36 rays; 6 × 1 is enough to slide off walls
+    const rings = 6
     for (let i = 0; i < rings; i++) {
       const a = (i / rings) * Math.PI * 2
       const dir = new Vector3D(Math.cos(a), 0, Math.sin(a))
@@ -1074,6 +1101,8 @@ export class TrainingBot implements IUpdatable {
       push.x -= dir.x * strength * strength
       push.z -= dir.z * strength * strength
     }
+    this.wallPushCache.copy(push)
+    this.wallPushCacheT = 0.12
     return push
   }
 
@@ -1081,23 +1110,18 @@ export class TrainingBot implements IUpdatable {
     const flat = dir.clone().setY(0)
     if (flat.lengthSq() < 1e-8) return maxDist
     flat.normalize()
-    const heights = [0.45, 1.05, 1.55]
-    let nearest = maxDist
-    for (const h of heights) {
-      const origin = this.position.clone().add(new Vector3D(0, h, 0))
-      const end = origin.clone().add(flat.clone().multiplyScalar(maxDist))
-      const hit = physics.raycast(origin, end)
-      if (!hit.hasHit || !hit.hitPosition) continue
-      if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) continue
-      nearest = Math.min(nearest, hit.hitPosition.distanceTo(origin))
-    }
-    return nearest
+    const origin = this.position.clone().add(new Vector3D(0, 1.05, 0))
+    const end = origin.clone().add(flat.clone().multiplyScalar(maxDist))
+    const hit = physics.raycast(origin, end)
+    if (!hit.hasHit || !hit.hitPosition) return maxDist
+    if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) return maxDist
+    return hit.hitPosition.distanceTo(origin)
   }
 
   private clearanceAt(physics: Physics, at: Vector3D): number {
     let min = this.wallPrefer * 2
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2
       const dir = new Vector3D(Math.cos(a), 0, Math.sin(a))
       const origin = at.clone().add(new Vector3D(0, 1.05, 0))
       const end = origin.clone().add(dir.clone().multiplyScalar(this.wallPrefer * 2))
@@ -1111,7 +1135,7 @@ export class TrainingBot implements IUpdatable {
 
   private opennessAhead(physics: Physics, dir: Vector3D, dist: number): number {
     let open = 0
-    const spreads = [0, 0.4, -0.4, 0.85, -0.85]
+    const spreads = [0, 0.55, -0.55]
     for (const a of spreads) {
       const c = Math.cos(a)
       const s = Math.sin(a)
@@ -1158,26 +1182,32 @@ export class TrainingBot implements IUpdatable {
     const flat = dir.clone().setY(0)
     if (flat.lengthSq() < 1e-8) return true
     flat.normalize()
+    // Short-lived cache — stepAlong used to fire this 2–3× per move with identical args
+    const key = `${from.x.toFixed(1)},${from.z.toFixed(1)},${flat.x.toFixed(2)},${flat.z.toFixed(2)},${distance.toFixed(1)}`
+    if (this.corridorCacheT > 0 && this.corridorCacheKey === key) return this.corridorCacheOk
+
     const side = new Vector3D(-flat.z, 0, flat.x)
+    // Was 3 offsets × 3 heights = 9 rays; center + sides at chest height is enough
     const offsets = [0, this.bodyRadius * 0.72, -this.bodyRadius * 0.72]
-    const heights = [0.5, 1.05, 1.55]
+    let ok = true
     for (const off of offsets) {
-      const base = from.clone().add(side.clone().multiplyScalar(off))
-      for (const h of heights) {
-        const origin = base.clone().add(new Vector3D(0, h, 0))
-        const end = origin.clone().add(flat.clone().multiplyScalar(distance))
-        const hit = physics.raycast(origin, end)
-        if (!hit.hasHit || !hit.hitPosition) continue
-        const hitDist = hit.hitPosition.distanceTo(origin)
-        if (hitDist > distance - 0.1) continue
-        if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) continue
-        if (off === 0 && h < 1.1 && this.canStepAt(physics, from, flat, Math.min(distance, 1.35))) {
-          continue
-        }
-        return false
+      const origin = from.clone().add(side.clone().multiplyScalar(off)).add(new Vector3D(0, 1.05, 0))
+      const end = origin.clone().add(flat.clone().multiplyScalar(distance))
+      const hit = physics.raycast(origin, end)
+      if (!hit.hasHit || !hit.hitPosition) continue
+      const hitDist = hit.hitPosition.distanceTo(origin)
+      if (hitDist > distance - 0.1) continue
+      if (hit.hitNormal && Math.abs(hit.hitNormal.y) >= this.minWalkableNy) continue
+      if (off === 0 && this.canStepAt(physics, from, flat, Math.min(distance, 1.35))) {
+        continue
       }
+      ok = false
+      break
     }
-    return true
+    this.corridorCacheKey = key
+    this.corridorCacheT = 0.08
+    this.corridorCacheOk = ok
+    return ok
   }
 
   private isDirClear(physics: Physics, dir: Vector3D, distance: number, from = this.position): boolean {
@@ -1223,7 +1253,7 @@ export class TrainingBot implements IUpdatable {
     if (flat.lengthSq() < 1e-6) return false
     flat.normalize()
 
-    const distances = [0.35, 0.55, 0.8, 1.05, 1.35]
+    const distances = [0.45, 0.85, 1.25]
     for (const forward of distances) {
       const ax = this.position.x + flat.x * forward
       const az = this.position.z + flat.z * forward
@@ -1268,6 +1298,13 @@ export class TrainingBot implements IUpdatable {
     // inside the floor, so the first frame gets one generous settle probe.
     const settling = this.needsGroundSettle
     this.needsGroundSettle = false
+
+    // Reuse last ground Y briefly while planted — 5 bots × 1 ray/frame adds up on Dust II
+    if (!settling && this.isOnGround && this.groundCacheT > 0 && Math.abs(this.velocityY) < 0.01) {
+      this.position.y = this.groundCacheY
+      return
+    }
+
     const probeUp = settling ? 4 : 0.6
     const fallProbe = this.isOnGround && !settling ? this.groundSnapDown + 0.15 : 400
     const ground = this.probeGround(
@@ -1287,23 +1324,29 @@ export class TrainingBot implements IUpdatable {
         this.position.y = targetY
         this.velocityY = 0
         this.isOnGround = true
+        this.groundCacheY = targetY
+        this.groundCacheT = 0.1
         return
       }
 
       // Floor is further below — fall toward it and land exactly on top
       this.isOnGround = false
+      this.groundCacheT = 0
       this.velocityY -= this.gravity * dt
       this.position.y += this.velocityY * dt
       if (this.position.y <= targetY) {
         this.position.y = targetY
         this.velocityY = 0
         this.isOnGround = true
+        this.groundCacheY = targetY
+        this.groundCacheT = 0.1
       }
       return
     }
 
     // Nothing below at all — void death picks them up after the fall
     this.isOnGround = false
+    this.groundCacheT = 0
     this.velocityY -= this.gravity * dt
     this.position.y += this.velocityY * dt
   }
