@@ -12,9 +12,13 @@ export type DeviceProbe = {
 
 /** Heuristic for phones that will struggle with Dust II + bots. */
 export function probeDevicePerf(touch: boolean): DeviceProbe {
-  const nav = navigator as Navigator & { deviceMemory?: number }
-  const memoryGb = typeof nav.deviceMemory === 'number' ? nav.deviceMemory : null
-  const cores = typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : null
+  // CI / Node vitest has no `navigator` — guard before any property access
+  const nav =
+    typeof globalThis !== 'undefined' && 'navigator' in globalThis
+      ? (globalThis.navigator as Navigator & { deviceMemory?: number })
+      : null
+  const memoryGb = typeof nav?.deviceMemory === 'number' ? nav.deviceMemory : null
+  const cores = typeof nav?.hardwareConcurrency === 'number' ? nav.hardwareConcurrency : null
 
   if (!touch) {
     return { memoryGb, cores, touch, suggested: 'quality', reason: 'desktop' }
