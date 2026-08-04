@@ -287,6 +287,20 @@ export class SkyLight extends THREE.Object3D implements IUpdatable {
     this.fillLight.target.position.set(pos.x, pos.y, pos.z)
   }
 
+  /** Resize directional shadow atlas (dispose old map so Three rebuilds). */
+  public setShadowMapSize(size: number): void {
+    const s = Math.max(256, Math.min(2048, Math.floor(size)))
+    const shadow = this.directionalLight.shadow
+    if (shadow.mapSize.width === s && shadow.mapSize.height === s) return
+    shadow.mapSize.set(s, s)
+    if (shadow.map) {
+      shadow.map.dispose()
+      // Three recreates on next shadow render
+      ;(shadow as { map: THREE.WebGLRenderTarget | null }).map = null
+    }
+    shadow.needsUpdate = true
+  }
+
   public update(dt: number): void {
     if (this.effectController.autoCycle) {
       const cycleSeconds = Math.max(60, this.effectController.cycleMinutes * 60)

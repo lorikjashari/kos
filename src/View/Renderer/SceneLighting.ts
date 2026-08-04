@@ -80,6 +80,10 @@ export class SceneLighting implements IUpdatable {
       }
     })
   }
+
+  public setShadowMapSize(size: number): void {
+    this.sky.setShadowMapSize(size)
+  }
   update(dt: number): void {
     this.sky.update(dt)
     if (this.renderer.renderingConfig.hasParticle) {

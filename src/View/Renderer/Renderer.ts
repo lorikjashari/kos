@@ -148,27 +148,32 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     if (profile === 'smooth') {
       this.renderingConfig.hasPostProcess = false
       this.renderingConfig.hasParticle = false
-      // Shadows are the single biggest depth cue; keep a cheap 1024 map even here
+      // Dust II Smooth: no shadows (fill-rate killer). Pool Day keeps a cheap map.
       this.renderingConfig.hasShadow = !this.dust2Mobile
     } else if (profile === 'balanced') {
       this.renderingConfig.hasPostProcess = false
       // 2.5k alpha-blended sprites is pure fill rate for ambient dust nobody notices
       this.renderingConfig.hasParticle = false
-      this.renderingConfig.hasShadow = true
+      // Dust II Balanced also drops shadows — map geometry already costs enough
+      this.renderingConfig.hasShadow = !this.dust2Mobile
     } else {
       this.renderingConfig.hasPostProcess = true
-      this.renderingConfig.hasParticle = true
+      this.renderingConfig.hasParticle = !this.dust2Mobile
       this.renderingConfig.hasShadow = true
     }
     this.applyMobileResolution()
     this.sceneLighting?.enableShadow(this.renderingConfig.hasShadow)
+    // Smaller shadow atlas when shadows stay on (Pool Day / Quality Dust II)
+    this.sceneLighting?.setShadowMapSize(
+      this.dust2Mobile || profile === 'smooth' ? 512 : 1024
+    )
     this.sceneLighting?.applyRenderingConfig()
     if (this.renderingConfig.hasPostProcess && this.camera) {
       if (!this.composer) this.addPostProcess()
     }
   }
 
-  /** Dust II on phones: lower res scale and drop shadows on the smooth profile. */
+  /** Dust II on phones: lower res scale and drop shadows on Smooth/Balanced. */
   public applyMapPerfBudget(mapId: string): void {
     if (!this.mobileGameplay) {
       this.mapPerfScale = 1
@@ -176,7 +181,7 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
       return
     }
     this.dust2Mobile = mapId === 'de_dust2'
-    this.mapPerfScale = this.dust2Mobile ? 0.82 : 1
+    this.mapPerfScale = this.dust2Mobile ? 0.7 : 1
     this.applyMobilePerfProfile(this.mobilePerfProfile)
   }
 
@@ -204,10 +209,11 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     this.setPixelRatio(1)
 
     if (this.mobileResMode === '4:3') {
-      // Exact CS-style pick; Soft-scale only for Dust II / Smooth budget
+      // Exact CS-style pick; Soft-scale for Dust II / Smooth budget
       const { width, height } = parseMobileRes43(this.mobileRes43)
-      const budget =
-        this.mobilePerfProfile === 'smooth' ? 0.85 * this.mapPerfScale : this.mapPerfScale
+      let budget = this.mapPerfScale
+      if (this.mobilePerfProfile === 'smooth') budget *= this.dust2Mobile ? 0.72 : 0.85
+      else if (this.mobilePerfProfile === 'balanced' && this.dust2Mobile) budget *= 0.88
       this.setGameResolution(Math.round(width * budget), Math.round(height * budget))
       return
     }
@@ -216,7 +222,14 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     const vh = Math.max(240, window.innerHeight)
     const aspect = vw / vh
     // Track the screen's own aspect, budgeting on the short edge
-    const shortEdge = Math.round(THREE.MathUtils.clamp(Math.min(vw, vh) * window.devicePixelRatio * scale, 400, 1080))
+    const shortCap = this.dust2Mobile
+      ? this.mobilePerfProfile === 'smooth'
+        ? 820
+        : 960
+      : 1080
+    const shortEdge = Math.round(
+      THREE.MathUtils.clamp(Math.min(vw, vh) * window.devicePixelRatio * scale, 400, shortCap)
+    )
     if (aspect >= 1) this.setGameResolution(Math.round(shortEdge * aspect), shortEdge)
     else this.setGameResolution(shortEdge, Math.round(shortEdge / aspect))
   }

@@ -22,6 +22,8 @@ export class TrainingBotRenderer implements IUpdatable {
   private overlayOn = false
   private hitMeshes: THREE.Mesh[] = []
   private wasAlive = true
+  /** Far-LOD frame counter — skip expensive anim/zone sync most frames */
+  private lodFrame = 0
   /** Random side of fall: -1 or 1 */
   private fallSide = 1
   private deathBaseY = 0
@@ -1973,6 +1975,21 @@ export class TrainingBotRenderer implements IUpdatable {
     }
 
     if (this.staticModel) {
+      const lod = this.bot.renderLod
+      this.lodFrame++
+      // Far bots: pose + gun only most frames (hit zones every 3rd for hitscan)
+      if (lod === 'far' && this.lodFrame % 3 !== 0) {
+        this.mesh.updateMatrixWorld(true)
+        this.syncCsGun()
+        return
+      }
+      if (lod === 'mid' && this.lodFrame % 2 !== 0) {
+        if (this.matchBot) this.driveMatchClip(dt)
+        this.mesh.updateMatrixWorld(true)
+        this.syncHitZonesToBones()
+        this.syncCsGun()
+        return
+      }
       if (this.matchBot) this.driveMatchClip(dt)
       this.updateCsProceduralAnim(dt)
       this.mesh.updateMatrixWorld(true)

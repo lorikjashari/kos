@@ -53,12 +53,12 @@ export function markAutoPerfApplied(): void {
 
 /**
  * Mobile perf presets (applied by Renderer.applyMobilePerfProfile):
- * - smooth: ~0.76 backbuffer, no post, no particles, shadows off on Dust II
- * - balanced: ~0.92 backbuffer, no post/particles, shadows on
- * - quality: ~1.12 backbuffer, post + particles + shadows
+ * - smooth: low backbuffer, no post/particles; shadows off on Dust II
+ * - balanced: mid backbuffer, no post/particles; shadows off on Dust II
+ * - quality: high backbuffer + post; particles off on Dust II; shadows on
  */
 export const PERF_PRESET_DOCS = {
   smooth: 'Lowest cost — prefer on older phones / Dust II.',
-  balanced: 'Default — playable on most phones.',
+  balanced: 'Default — playable on most phones (no Dust II shadows).',
   quality: 'Highest fidelity — newer phones only.',
 } as const

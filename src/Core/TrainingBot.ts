@@ -14,6 +14,8 @@ import {
 } from './Dust2Tactics'
 import { NetPoseBuffer, type PoseSample } from '../Net/NetInterp'
 import { separatePair } from './PawnSeparation'
+import { botAiSkipFrames, botLodFromDistSq, flatDistSq, type BotLod } from './BotPerf'
+import { isTouchDevice } from '../UI/MobileDevice'
 
 /** World Y at or below this → fall through map / void death */
 const VOID_DEATH_Y = -30
@@ -193,6 +195,10 @@ export class TrainingBot implements IUpdatable {
   /** Soft body radius vs player / other bots (XZ). */
   private readonly pawnRadius = 0.95
   private readonly playerRadius = 0.85
+  /** Distance LOD vs local player — drives AI skip + renderer cheap path. */
+  public renderLod: BotLod = 'near'
+  private aiSkipCounter = 0
+  private pendingAiDt = 0
 
   constructor(position: Vector3D, yaw = 0, difficulty: BotDifficulty = 'medium', name = 'BOT') {
     this.position = position.clone()
@@ -414,6 +420,7 @@ export class TrainingBot implements IUpdatable {
     const player = game.currentPlayer?.player
     const physics = game.getPhysics()
     if (!player) {
+      this.renderLod = 'far'
       this.isMoving = false
       this.idlePatrol(dt, physics)
       this.followTerrain(physics, dt)
@@ -421,9 +428,45 @@ export class TrainingBot implements IUpdatable {
       return
     }
 
+    const distSq = flatDistSq(
+      this.position.x,
+      this.position.z,
+      player.position.x,
+      player.position.z
+    )
+    this.renderLod = botLodFromDistSq(distSq)
+    const skipN = botAiSkipFrames(this.renderLod, isTouchDevice())
+    this.pendingAiDt += dt
+    this.aiSkipCounter++
+    const runFull = skipN <= 0 || this.aiSkipCounter % (skipN + 1) === 0
+
+    if (!runFull) {
+      // Cheap frame: keep clocks ticking + ground stick; no LOS / retarget / nav rebuild
+      this.fireCooldown = Math.max(0, this.fireCooldown - dt)
+      this.strafeTimer -= dt
+      this.retargetTimer -= dt
+      if (this.lastKnownTarget && this.flatDist(this.position, this.lastKnownTarget) > 1.4) {
+        this.navigateToward(
+          this.lastKnownTarget,
+          TUNING[this.difficulty].moveSpeed * 0.85,
+          dt,
+          physics
+        )
+      } else if (this.tacticMode !== 'free') {
+        this.runTacticMove(dt, physics, TUNING[this.difficulty].moveSpeed * 0.7)
+      }
+      this.followTerrain(physics, dt)
+      this.checkVoidDeath()
+      if (this.shootFlash > 0) this.shootFlash = Math.max(0, this.shootFlash - dt)
+      this.trackAimAndGait(dt)
+      return
+    }
+
+    const thinkDt = this.pendingAiDt
+    this.pendingAiDt = 0
     // Keep fighting even if the player is dead (bot free-for-all)
     this.lockCombatFacing = false
-    this.combatThink(dt, player, physics)
+    this.combatThink(thinkDt, player, physics)
     this.applyPawnSeparation(player)
     this.followTerrain(physics, dt)
     this.checkVoidDeath()
@@ -739,8 +782,8 @@ export class TrainingBot implements IUpdatable {
       if (other.health < 50) score -= 6
       if (this.huntBias === 'any') score -= 3
       if (coop) score -= 12
-      // Prefer visible fights so they actually clash
-      if (d < 55 && this.hasLineOfSight(physics, myEye, eye)) score -= 14
+      // LOS raycasts are expensive — only score visibility for close fights
+      if (d < 32 && this.hasLineOfSight(physics, myEye, eye)) score -= 14
       cands.push({
         kind: 'bot',
         eye,
@@ -756,7 +799,7 @@ export class TrainingBot implements IUpdatable {
       const eye = player.position.clone().add(new Vector3D(0, player.eyeOffsetY, 0))
       const playerBias = this.huntBias === 'player' ? 18 : 9
       let score = d - playerBias
-      if (d < 60 && this.hasLineOfSight(physics, myEye, eye)) score -= 16
+      if (d < 36 && this.hasLineOfSight(physics, myEye, eye)) score -= 16
       cands.push({
         kind: 'player',
         eye,
