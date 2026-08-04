@@ -117,6 +117,8 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
   private registerAwpViewmodel(akSource: FPSMesh): void {
     const awpFps = akSource.clone()
     awpFps.key = 'AWP'
+    // Same screen nudge as the previous AWP-only seat tweak — hands move with the rifle
+    awpFps.viewmodelOffset = new Vector3D(0.13, -0.17, 0)
 
     const root = awpFps.mesh as unknown as THREE.Object3D
     root.traverse((c) => {

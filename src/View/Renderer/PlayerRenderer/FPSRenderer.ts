@@ -375,6 +375,8 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       c.visible = true
     })
 
+    // Keep the original seat relative to the Galil hands (grip alignment).
+    // Screen placement is handled by AWP viewmodelOffset instead.
     prop.position.set(0.39, -0.25, -1.62)
     prop.rotation.set(0, Math.PI, 0)
     prop.scale.setScalar(3.7 / 1.36)
