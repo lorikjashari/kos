@@ -4,6 +4,7 @@ import { bodyPartFromMeshName, MESH_HIT_COLORS } from '../../Core/BotMeshHit'
 import type { BodyPart } from '../../Core/BodyPart'
 import { Game } from '../../Game'
 import { ThirdPersonMesh } from '../Mesh/ThirdPersonMesh'
+import { LoadableMesh } from '../Mesh/LoadableMesh'
 import { IUpdatable } from '../../Interface/IUpdatable'
 import { isTouchDevice } from '../../UI/MobileDevice'
 
@@ -458,6 +459,19 @@ export class TrainingBotRenderer implements IUpdatable {
     for (const key of Object.keys(TrainingBotRenderer.GUN_DEFS)) {
       TrainingBotRenderer.buildGunPrototype(game, key)
     }
+  }
+
+  /** Drop baked third-person gun props (menu return). */
+  public static clearGunPrototypes(
+    seenGeo: Set<THREE.BufferGeometry> = new Set(),
+    seenMat: Set<THREE.Material> = new Set(),
+    seenTex: Set<THREE.Texture> = new Set()
+  ): void {
+    for (const proto of TrainingBotRenderer.gunPrototypes.values()) {
+      if (!proto) continue
+      LoadableMesh.disposeObject3D(proto, seenGeo, seenMat, seenTex)
+    }
+    TrainingBotRenderer.gunPrototypes.clear()
   }
 
   /**

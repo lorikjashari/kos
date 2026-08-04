@@ -51,6 +51,9 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     return GlobalLoadingManager.instance
   }
   async loadAllMeshs() {
+    // Idempotent — Start/Host/Join call this after menu dispose.
+    if (this.loadableMeshs.has('AK47') && this.loadableMeshs.has('CsTerrorist')) return
+
     // Good looking textures
     // https://opengameart.org/users/rubberduck
     // https://opengameart.org/content/2k-handpainted-style-textures
@@ -313,6 +316,37 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     if (meshKey === 'Map_pool_day' && this.loadableMeshs.get('Map') === prev) {
       this.loadableMeshs.delete('Map')
     }
+  }
+
+  private static readonly COMBAT_MESH_KEYS = [
+    'ThirdPersonMesh',
+    'AK47Hands',
+    'AK47',
+    'AkmRaw',
+    'Usp',
+    'Knife',
+    'Bullet',
+    'CsTerrorist',
+    'AwpRaw',
+    'AWP',
+  ] as const
+
+  /** Free guns / bots / bullets from the registry (menu return). Maps stay separate. */
+  public disposeCombatMeshes(
+    seenGeo: Set<THREE.BufferGeometry> = new Set(),
+    seenMat: Set<THREE.Material> = new Set(),
+    seenTex: Set<THREE.Texture> = new Set()
+  ): void {
+    for (const key of GlobalLoadingManager.COMBAT_MESH_KEYS) {
+      const mesh = this.loadableMeshs.get(key)
+      if (!mesh) continue
+      mesh.disposeGpu(seenGeo, seenMat, seenTex)
+      this.loadableMeshs.delete(key)
+    }
+  }
+
+  public hasCombatMeshes(): boolean {
+    return this.loadableMeshs.has('AK47') && this.loadableMeshs.has('CsTerrorist')
   }
 
   /** Load a generic GLB once and cache it (editor character packs, etc.). */

@@ -36,9 +36,10 @@ export class ParticleManager extends ParticleSystem implements IUpdatable {
     renderer.onParticleCreated = function (p) {
       const game = Game.getInstance();
       const bulletMesh =
-        game.globalLoadingManager.loadableMeshs.get("Bullet")!.mesh;
+        game.globalLoadingManager.loadableMeshs.get("Bullet")?.mesh;
       const fpsRenderer = game.currentPlayer.renderer as FPSRenderer;
       const fpsMesh = fpsRenderer.fpsMesh;
+      if (!bulletMesh || !fpsMesh?.mesh) return;
       p.target = this.targetPool.get(bulletMesh);
       // Local +X; mesh scale.x flips with left-hand so eject side follows the gun
       p.target.position.set(1, -1, -2);
@@ -48,6 +49,7 @@ export class ParticleManager extends ParticleSystem implements IUpdatable {
     };
 
     renderer.onParticleUpdate = function (p) {
+      if (!p.target) return;
       //p.target.position.copy(pos.add(player.lookingDirection.clone().multiplyScalar(4)).add(p.position));
       p.target.position.add(p.position);
       p.target.rotation.set(p.rotation.x, p.rotation.y, p.rotation.z);
@@ -55,10 +57,10 @@ export class ParticleManager extends ParticleSystem implements IUpdatable {
 
     renderer.onParticleDead = function (p) {
       const game = Game.getInstance();
-      this.targetPool.expire(p.target);
+      if (p.target) this.targetPool.expire(p.target);
       //scene.remove(p.target);
-      const mesh = (game.currentPlayer.renderer as FPSRenderer).fpsMesh.mesh;
-      mesh.remove(p.target);
+      const mesh = (game.currentPlayer.renderer as FPSRenderer).fpsMesh?.mesh;
+      if (mesh && p.target) mesh.remove(p.target);
       p.target = null;
     };
     super.addRenderer(renderer);

@@ -4,7 +4,6 @@ import {
   AnimationMarker,
   AnimationMarkerDelimiter,
 } from "../../Interface/utils";
-import { GlobalLoadingManager } from "./GlobalLoadingManager";
 import { LoadableMesh } from "./LoadableMesh";
 
 export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
@@ -40,7 +39,9 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
   public async loadAnimationMarkers(): Promise<void> {
     try {
       const fileName = this.path.replace(/\.glb$/i, '')
-      const json: any = await GlobalLoadingManager.loadJson(`${fileName}.json`)
+      const response = await fetch(`${fileName}.json`)
+      if (!response.ok) throw new Error(`Failed to load animation markers: ${fileName}.json`)
+      const json: any = await response.json()
       const markers: Array<AnimationMarker> = json.markers
       this.animations.clear()
       for (let i = 0; i < markers.length; i++) {

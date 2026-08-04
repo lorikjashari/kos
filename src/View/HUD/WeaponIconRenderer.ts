@@ -189,6 +189,10 @@ export class WeaponIconRenderer {
     return dataUrl
   }
 
+  public clearCache(): void {
+    this.cache.clear()
+  }
+
   public dispose(): void {
     this.renderer.dispose()
     this.cache.clear()

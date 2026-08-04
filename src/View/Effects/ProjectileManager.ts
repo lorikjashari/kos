@@ -4,6 +4,7 @@ import { Vector3D } from '../../Core/Vector'
 import { IUpdatable } from '../../Interface/IUpdatable'
 import { Physics } from '../../Physics/Physics'
 import { Game } from '../../Game'
+import { LoadableMesh } from '../Mesh/LoadableMesh'
 import { MuzzleFlashManager } from './MuzzleFlash'
 
 interface Projectile {
@@ -96,6 +97,28 @@ export class ProjectileManager implements IUpdatable {
     this.scene.add(mesh)
     if (renderer && camera) renderer.compile(this.scene, camera)
     this.releaseMesh(mesh)
+  }
+
+  /** Clear live tracers + pool before combat GLBs are disposed. */
+  public releaseBulletMeshes(
+    seenGeo: Set<THREE.BufferGeometry> = new Set(),
+    seenMat: Set<THREE.Material> = new Set(),
+    seenTex: Set<THREE.Texture> = new Set()
+  ): void {
+    for (const p of this.projectiles) {
+      this.scene.remove(p.mesh)
+      LoadableMesh.disposeObject3D(p.mesh, seenGeo, seenMat, seenTex)
+    }
+    this.projectiles = []
+    for (const mesh of this.meshPool) {
+      this.scene.remove(mesh)
+      LoadableMesh.disposeObject3D(mesh, seenGeo, seenMat, seenTex)
+    }
+    this.meshPool = []
+    if (this.bulletPrototype) {
+      LoadableMesh.disposeObject3D(this.bulletPrototype, seenGeo, seenMat, seenTex)
+      this.bulletPrototype = undefined
+    }
   }
 
   public update(dt: number): void {

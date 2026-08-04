@@ -50,14 +50,17 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     }
   }
   show(): void {
-    if (this.scopeLevel > 0) return
+    if (this.scopeLevel > 0 || !this.fpsMesh?.mesh) return
     this.fpsMesh.mesh.visible = true
   }
   hide(): void {
+    if (!this.fpsMesh?.mesh) return
     this.fpsMesh.mesh.visible = false
   }
   // Left click given by InputManager
   public handleShoot(hitscanResult: HitscanResult): void {
+    const fps = this.fpsMesh
+    if (!fps) return
     const scopedAwp = this.player.currentWeapon.key === 'AWP' && this.scopeLevel > 0
     const rezoomLevel = this.scopeLevel
     super.handleShoot(hitscanResult)
@@ -65,14 +68,14 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     const isMelee = this.player.currentWeapon.fireMode === 'melee'
     const akm = this.isAkmFps()
     if (key === 'AWP') {
-      this.fpsMesh.playAnimation('Shoot', false, true, 1.05)
+      fps.playAnimation('Shoot', false, true, 1.05)
       this.recoilEffect = 0.24
       this.recoilRecover = 1.35
       this.weaponBobbingAcc.x += 0.042
       this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.028
       this.weaponBobbingAcc.z += 0.012
     } else if (key === 'AK47') {
-      if (!akm) this.fpsMesh.playAnimation('Shoot', false, true, 1.85)
+      if (!akm) fps.playAnimation('Shoot', false, true, 1.85)
       if (akm) {
         // Soft punch that eases back — no pose snap
         this.akShootKick = 1
@@ -89,7 +92,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
         this.weaponBobbingAcc.z += 0.008
       }
     } else {
-      this.fpsMesh.playAnimation('Shoot', false, true, 1.55)
+      fps.playAnimation('Shoot', false, true, 1.55)
       this.recoilEffect = isMelee ? 0.06 : 0.11
       this.recoilRecover = 2.4
     }
@@ -112,11 +115,13 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   public handleReload(): void {
+    const fps = this.fpsMesh
+    if (!fps) return
     this.clearScope(false)
-    const meshKey = this.fpsMesh?.key
+    const meshKey = fps.key
     const akm = this.isAkmFps()
     const reloadTime = Math.max(0.4, this.player.currentWeapon.reloadTime || 2.4)
-    const rel = this.fpsMesh.animations.get('Reload')
+    const rel = fps.animations.get('Reload')
     let scale = this.player.currentWeapon.key === 'AWP' ? 1.35 : 1.55
     let durSec = 0.2
     if (akm && rel?.Start && rel?.End) {
@@ -127,7 +132,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     } else if (rel?.Start && rel?.End) {
       durSec = Math.max(0.2, (rel.End.time - Math.abs(rel.Start.time)) / scale)
     }
-    this.fpsMesh.playAnimation('Reload', false, true, scale)
+    fps.playAnimation('Reload', false, true, scale)
     this.locomotionBusyUntil = performance.now() + Math.max(reloadTime, durSec) * 1000 + 80
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
@@ -148,24 +153,26 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   public handleWeaponSwitch(): void {
+    const fps = this.fpsMesh
+    if (!fps) return
     this.clearScope(false)
     this.switchVelocity = 0.05
-    const meshKey = this.fpsMesh?.key
-    const key = this.fpsMesh?.key
+    const meshKey = fps.key
+    const key = fps.key
     if (this.isAkmFps()) {
-      this.fpsMesh.holdPoseAt(0)
+      fps.holdPoseAt(0)
       this.startAkDrawUp()
       return
     }
     const scale = key === 'AWP' ? 1.25 : key === 'AK47' ? 1.45 : 1.5
-    this.fpsMesh.playAnimation('Switch', false, true, scale)
+    fps.playAnimation('Switch', false, true, scale)
     this.weaponBobbingAcc.x += 0.02
     this.weaponBobbingAcc.y -= 0.03
     if (this.playerCameraManager instanceof FPSCameraManager) {
       this.playerCameraManager.resetRecoil()
     }
-    const sw = this.fpsMesh.animations.get('Switch')
-    if (sw?.Start && sw?.End && this.fpsMesh.animations.has('Idle')) {
+    const sw = fps.animations.get('Switch')
+    if (sw?.Start && sw?.End && fps.animations.has('Idle')) {
       const durSec = Math.max(0.2, (sw.End.time - Math.abs(sw.Start.time)) / scale)
       this.locomotionBusyUntil = performance.now() + durSec * 1000 + 80
       window.setTimeout(() => {
@@ -182,22 +189,25 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   private scheduleIdleReturn(fromAnim: string, timeScale: number): void {
-    const meshKey = this.fpsMesh?.key
-    const clip = this.fpsMesh.animations.get(fromAnim)
+    const fps = this.fpsMesh
+    if (!fps) return
+    const meshKey = fps.key
+    const clip = fps.animations.get(fromAnim)
     if (!clip?.Start || !clip?.End) return
     const durSec = Math.max(0.12, (clip.End.time - Math.abs(clip.Start.time)) / timeScale)
     this.locomotionBusyUntil = Math.max(this.locomotionBusyUntil, performance.now() + durSec * 1000)
     window.setTimeout(() => {
-      if (this.fpsMesh?.key !== meshKey) return
+      const live = this.fpsMesh
+      if (!live || live.key !== meshKey) return
       if (this.scopeLevel > 0) return
-      const cur = this.fpsMesh.getCurrentAnimName()
+      const cur = live.getCurrentAnimName()
       if (cur === 'Reload' || cur === 'Switch') return
       if (this.isAkmFps()) {
-        this.fpsMesh.holdPoseAt(0)
+        live.holdPoseAt(0)
         return
       }
-      if (!this.fpsMesh.animations.has('Idle')) return
-      this.fpsMesh.playAnimation('Idle', true, true, 1.0)
+      if (!live.animations.has('Idle')) return
+      live.playAnimation('Idle', true, true, 1.0)
     }, durSec * 1000 + 30)
   }
 
@@ -219,7 +229,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
   private switchVelocity = 0
   private viewmodelCamera: THREE.PerspectiveCamera
-  public fpsMesh!: FPSMesh
+  public fpsMesh: FPSMesh | null = null
   private recoilEffect = 0
   private recoilRecover = 2.5
   private idleSwayTime = 0
@@ -279,9 +289,13 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.viewmodelCamera = this.game.renderer.viewmodelRenderer.camera
     this.createViewmodelLights()
     this.initParticleEmitter()
-    this.equipWeaponMesh('AK47', false)
-    player.setWeapon('AK47')
-    this.fpsMesh?.holdPoseAt(0)
+    // Combat GLBs may not be loaded yet (menu idle) — equip on match prepare.
+    if (this.equipWeaponMesh('AK47', false)) {
+      player.setWeapon('AK47')
+      this.fpsMesh?.holdPoseAt(0)
+    } else {
+      player.setWeapon('AK47')
+    }
     this.setFov(this.baseFov)
     if (this.showDebug) {
       const debugUI: DebugUI = this.game.renderer.debugUI
@@ -454,6 +468,31 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     }
   }
 
+  /** Detach viewmodels before the loader disposes shared combat GLBs. */
+  public releaseCombatMeshes(
+    seenGeo: Set<THREE.BufferGeometry> = new Set(),
+    seenMat: Set<THREE.Material> = new Set(),
+    seenTex: Set<THREE.Texture> = new Set()
+  ): void {
+    this.clearScope(false)
+    this.removeMesh()
+    for (const mesh of this.weaponCache.values()) {
+      if (mesh?.mesh) LoadableMesh.disposeObject3D(mesh.mesh, seenGeo, seenMat, seenTex)
+    }
+    this.weaponCache.clear()
+    this.fpsMesh = null
+  }
+
+  /** Rebuild viewmodels after combat GLBs are reloaded for a new match. */
+  public rebuildAfterCombatReload(): void {
+    this.weaponCache.clear()
+    this.fpsMesh = null
+    if (!this.equipWeaponMesh('AK47', false)) return
+    this.player.setWeapon('AK47')
+    const live = this.fpsMesh as FPSMesh | null
+    live?.holdPoseAt(0)
+  }
+
   public async warmShellParticles(): Promise<void> {
     if (this.shellTextureReady) await this.shellTextureReady
     if (!this.fpsMesh?.mesh || !this.tempEmitter) return
@@ -547,6 +586,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   private initViewmodelPosition(): void {
+    if (!this.fpsMesh?.mesh) return
     this.fpsMesh.mesh.position.copy(this.weaponOffset)
   }
   update(dt: number): void {
@@ -557,6 +597,8 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.viewmodelCamera.fov =
       this.scopeLevel > 0 ? this.baseFov : (this.camera as THREE.PerspectiveCamera).fov
     this.viewmodelCamera.updateProjectionMatrix()
+
+    if (!this.fpsMesh?.mesh) return
 
     if (this.player.isDead) {
       this.clearScope(false)
@@ -898,6 +940,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   addToRenderer(): void {
+    if (!this.fpsMesh?.mesh) return
     this.viewmodelCamera.add(this.fpsMesh.mesh)
   }
 }

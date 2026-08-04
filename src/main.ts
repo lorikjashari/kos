@@ -26,9 +26,11 @@ async function main() {
         const mapId = config.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
         const mapLabel = mapId === 'de_dust2' ? 'Dust II' : 'Pool Day'
         try {
-          menu.showMatchLoading(`Loading ${mapLabel}…`, 18)
+          menu.showMatchLoading('Loading weapons…', 12)
           await game.audioManager.unlock()
-          menu.setLoadingProgress(`Loading ${mapLabel}…`, 45)
+          menu.setLoadingProgress('Loading weapons…', 28)
+          await game.reloadCombatMeshes()
+          menu.setLoadingProgress(`Loading ${mapLabel}…`, 52)
           await game.ensureMap(mapId)
           menu.setLoadingProgress('Preparing match…', 82)
           await game.prepareCombat()
@@ -59,11 +61,13 @@ async function main() {
         try {
           menu.showMatchLoading(
             config.mode === 'host' ? `Opening room on ${mapLabel}…` : `Connecting (${mapLabel})…`,
-            15
+            12
           )
           menu.setMultiplayerStatus(config.mode === 'host' ? 'Opening room…' : 'Connecting…')
           await game.audioManager.unlock()
-          menu.setLoadingProgress(`Loading ${mapLabel}…`, 48)
+          menu.setLoadingProgress('Loading weapons…', 30)
+          await game.reloadCombatMeshes()
+          menu.setLoadingProgress(`Loading ${mapLabel}…`, 55)
           await game.ensureMap(mapId)
           menu.setLoadingProgress('Preparing match…', 78)
           await game.prepareCombat()
@@ -148,10 +152,8 @@ async function main() {
     await game.audioManager.loadPriority()
     game.applyPersistedSettings(settings)
 
-    menu.setLoadingProgress('Loading weapons…', 70)
-    await game.globalLoadingManager.loadAllMeshs()
-
-    menu.setLoadingProgress('Preparing world…', 90)
+    // Weapons / bots / maps load on Start (or map prefetch) — keep boot light.
+    menu.setLoadingProgress('Preparing world…', 75)
     game.onLoad()
     if (isTouchDevice()) {
       game.applyMobileResMode(settings.mobile.resMode)
@@ -161,12 +163,7 @@ async function main() {
     }
     game.startUpdateLoop()
 
-    // Compile every shader and pre-allocate every effect while the loading bar is
-    // still up. Doing this lazily is what made the first 20-30s of a match hitch.
-    menu.setLoadingProgress('Compiling shaders…', 94)
-    await game.warmGraphics()
-
-    menu.setLoadingProgress('Finishing setup…', 96)
+    menu.setLoadingProgress('Finishing setup…', 92)
     // Never block boot on audio unlock — iOS often has no gesture yet
     await Promise.race([
       game.audioManager.unlock(),

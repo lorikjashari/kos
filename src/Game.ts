@@ -609,6 +609,7 @@ export class Game implements IUpdatable {
    */
   public async enterEditorMode(): Promise<void> {
     this.onHideMenu?.()
+    await this.reloadCombatMeshes()
     await this.ensureMap('pool_day')
     await this.prepareCombat()
     // CS Source T model for the frozen editor dummy
@@ -1367,13 +1368,39 @@ export class Game implements IUpdatable {
     }
   }
 
-  /** Detach + free the active map (menu return). Weapons/bots stay warm. */
+  /** Detach + free the active map (menu return). */
   public releaseMap(): void {
     this.mapPrefetchGen++
     this.unloadActiveMap(true)
     this.activeMapId = DEFAULT_MAP_ID
     this.mapName = DEFAULT_MAP_ID
     this.activeSpawns = []
+  }
+
+  /**
+   * Free guns / bots / bullets from GPU while the menu is up.
+   * Call before releaseMap. Reload via reloadCombatMeshes on Start.
+   */
+  public releaseCombatMeshes(): void {
+    this.clearBots()
+    const seenGeo = new Set<THREE.BufferGeometry>()
+    const seenMat = new Set<THREE.Material>()
+    const seenTex = new Set<THREE.Texture>()
+    const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+    fps?.releaseCombatMeshes(seenGeo, seenMat, seenTex)
+    this.renderer?.projectileManager?.releaseBulletMeshes(seenGeo, seenMat, seenTex)
+    TrainingBotRenderer.clearGunPrototypes(seenGeo, seenMat, seenTex)
+    this.renderer?.hud?.clearWeaponIconCache()
+    this.globalLoadingManager.disposeCombatMeshes(seenGeo, seenMat, seenTex)
+    this.graphicsWarmed = false
+    this.effectsWarmed = false
+  }
+
+  /** Download combat GLBs and rebuild the local player's viewmodels. */
+  public async reloadCombatMeshes(): Promise<void> {
+    await this.globalLoadingManager.loadAllMeshs()
+    const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+    fps?.rebuildAfterCombatReload()
   }
 
   private spawnDebugCubes(): void {
@@ -1418,9 +1445,9 @@ export class Game implements IUpdatable {
     this.lockdownTimer = 0
     this.matchOver = false
     this.matchElapsed = 0
-    this.clearBots()
     this.stats.reset()
-    // Free the arena GPU while the menu is up; weapons/character stay cached.
+    // Free guns + map GPU while the menu is up; reload on next Start.
+    this.releaseCombatMeshes()
     this.releaseMap()
     this.inputManager.gameplayEnabled = false
     this.inputManager.unlock()
@@ -1943,8 +1970,7 @@ export class Game implements IUpdatable {
 
   public clearBots(): void {
     for (const r of this.botRenderers) {
-      const root = r.getRoot()
-      root.parent?.remove(root)
+      r.dispose()
     }
     this.trainingBots = []
     this.botRenderers = []

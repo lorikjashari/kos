@@ -637,6 +637,11 @@ export class GameHUD {
     this.bakeIcons()
   }
 
+  public clearWeaponIconCache(): void {
+    this.iconRenderer.clearCache()
+    this.iconsReady = false
+  }
+
   private setWeaponIcon(weaponKey: string): void {
     const icon = this.iconRenderer.getIcon(weaponKey)
     if (icon) {

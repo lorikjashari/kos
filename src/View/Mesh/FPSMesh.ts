@@ -2,7 +2,6 @@ import * as THREE from 'three'
 import { Vector3D } from '../../Core/Vector'
 import { IUpdatable } from '../../Interface/IUpdatable'
 import { AnimatedLoadableMesh } from './AnimatedLoadableMesh'
-import { LoadableMesh } from './LoadableMesh'
 
 export class FPSMesh extends AnimatedLoadableMesh implements IUpdatable {
   private lights: THREE.Light[] = []
