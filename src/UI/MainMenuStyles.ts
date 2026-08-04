@@ -183,25 +183,25 @@ export const MAIN_MENU_CSS = `
         text-align: center;
       }
 
-      /* Brand above controls; art stays full-bleed on the right */
+      /* Brand + rail: lower-left on desktop; art stays full-bleed on the right */
       .kos-shell-main {
         width: 100%;
         height: 100%;
         min-height: 100%;
         display: flex;
-        align-items: center;
+        align-items: flex-end;
         justify-content: flex-start;
         padding:
           clamp(24px, 4vh, 48px)
           clamp(20px, 4vw, 48px)
-          clamp(24px, 4vh, 48px)
+          clamp(36px, 6vh, 72px)
           clamp(24px, 4vw, 64px);
       }
       .kos-main-col {
         display: flex;
         flex-direction: column;
         align-items: stretch;
-        justify-content: center;
+        justify-content: flex-end;
         gap: clamp(14px, 2.4vh, 22px);
         width: min(360px, 100%);
         max-width: 360px;
