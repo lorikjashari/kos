@@ -169,6 +169,20 @@ export class MainMenu {
     if (text) text.textContent = label
   }
 
+  /** Full-screen loading overlay used at boot and again when a match map loads. */
+  public showMatchLoading(label: string, pct = 12): void {
+    this.root.classList.remove('is-hidden')
+    this.root.setAttribute('aria-hidden', 'false')
+    document.getElementById('game-crosshair')?.classList.remove('is-on')
+    const err = this.root.querySelector('.kos-load-error') as HTMLElement | null
+    if (err) {
+      err.textContent = ''
+      err.hidden = true
+    }
+    this.showScreen('loading')
+    this.setLoadingProgress(label, pct)
+  }
+
   public showMain(): void {
     this.showScreen('main')
   }

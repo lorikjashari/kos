@@ -23,16 +23,24 @@ async function main() {
       const game = Game.getInstance()
       game.audioManager.stopMenuMusic()
       void (async () => {
+        const mapId = config.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
+        const mapLabel = mapId === 'de_dust2' ? 'Dust II' : 'Pool Day'
         try {
+          menu.showMatchLoading(`Loading ${mapLabel}…`, 18)
           await game.audioManager.unlock()
-          await game.ensureMap(config.mapId || 'pool_day')
+          menu.setLoadingProgress(`Loading ${mapLabel}…`, 45)
+          await game.ensureMap(mapId)
+          menu.setLoadingProgress('Preparing match…', 82)
           await game.prepareCombat()
+          menu.setLoadingProgress('Starting…', 100)
           menu.hide()
           game.startBotMatch(config)
         } catch (error) {
           console.error(error)
           game.audioManager.stopMenuMusic()
+          void game.audioManager.startMenuMusic()
           menu.show()
+          menu.showScreen('bots')
           const msg = error instanceof Error ? error.message : 'Failed to start match.'
           window.alert(msg)
         }
@@ -46,12 +54,20 @@ async function main() {
       const game = Game.getInstance()
       game.audioManager.stopMenuMusic()
       void (async () => {
+        const mapId = config.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
+        const mapLabel = mapId === 'de_dust2' ? 'Dust II' : 'Pool Day'
         try {
+          menu.showMatchLoading(
+            config.mode === 'host' ? `Opening room on ${mapLabel}…` : `Connecting (${mapLabel})…`,
+            15
+          )
           menu.setMultiplayerStatus(config.mode === 'host' ? 'Opening room…' : 'Connecting…')
           await game.audioManager.unlock()
-          const mapId = config.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
+          menu.setLoadingProgress(`Loading ${mapLabel}…`, 48)
           await game.ensureMap(mapId)
+          menu.setLoadingProgress('Preparing match…', 78)
           await game.prepareCombat()
+          menu.setLoadingProgress(config.mode === 'host' ? 'Creating room…' : 'Joining room…', 92)
           menu.hide()
           const code = await game.startMultiplayerMatch({
             mode: config.mode,
@@ -126,7 +142,7 @@ async function main() {
     await game.audioManager.loadPriority()
     game.applyPersistedSettings(settings)
 
-    menu.setLoadingProgress('Loading map & weapons…', 70)
+    menu.setLoadingProgress('Loading weapons…', 70)
     await game.globalLoadingManager.loadAllMeshs()
 
     menu.setLoadingProgress('Preparing world…', 90)

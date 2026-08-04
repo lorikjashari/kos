@@ -28,6 +28,34 @@ export class MapMesh extends LoadableMesh {
     super.init()
   }
 
+  /** Release GPU resources when swapping / force-reloading maps. */
+  public disposeGpu(): void {
+    if (!this.mesh) return
+    const seenMat = new Set<THREE.Material>()
+    const seenTex = new Set<THREE.Texture>()
+    this.mesh.traverse((child) => {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh) return
+      mesh.geometry?.dispose()
+      const mats = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+      for (const mat of mats) {
+        if (!mat || seenMat.has(mat)) continue
+        seenMat.add(mat)
+        const std = mat as THREE.MeshStandardMaterial
+        for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap'] as const) {
+          const tex = std[key] as THREE.Texture | null | undefined
+          if (tex && !seenTex.has(tex)) {
+            seenTex.add(tex)
+            tex.dispose()
+          }
+        }
+        mat.dispose()
+      }
+    })
+    this.materialsPrepared = false
+    this.normalized = false
+  }
+
   /** Fit CS / Sketchfab maps into playable scale and sit on y=0, centered XZ. */
   public normalizeForPlay(targetHorizontalSize: number): void {
     if (this.normalized || !this.mesh || !(targetHorizontalSize > 0)) return
@@ -144,17 +172,19 @@ export class MapMesh extends LoadableMesh {
                 mat.emissiveIntensity = Math.min(mat.emissiveIntensity ?? 0, 0.05)
               }
               mat.envMapIntensity = 0.85
-              mat.side = THREE.DoubleSide
+              // DoubleSide is expensive on phones; Dust II is closed enough for FrontSide
+              mat.side = mobile ? THREE.FrontSide : THREE.DoubleSide
             }
             mat.needsUpdate = true
           }
         }
-        // Pool Day's own shadowing is already baked into its textures, so on mobile
-        // the map only receives. That leaves characters alone in the shadow map,
-        // which makes the shadow pass cheap enough to refresh often.
-        mesh.castShadow = !(mobile && usePoolLights)
+        // On mobile the map only receives shadows — characters alone go into the
+        // shadow map (Pool Day baked, Dust II too big to cast 34 meshes every frame).
+        mesh.castShadow = !mobile
         mesh.receiveShadow = true
-        mesh.frustumCulled = false
+        // Pool Day is a small interior; Dust II is large — cull what the camera
+        // can't see so draw calls drop while looking around.
+        mesh.frustumCulled = !usePoolLights
         // Ensure indexed geometry for Ammo trimesh (CS maps often lack indices)
         const geo = mesh.geometry as THREE.BufferGeometry
         if (geo && !geo.index) {

@@ -60,12 +60,8 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     await tpsmesh.load()
     tpsmesh.register(this.loadableMeshs)
 
-    // Default boot map (Pool Day) — other maps load on demand
-    const mapmesh = new MapMesh('pool_day_baked.glb', 'Map_pool_day', true)
-    await mapmesh.load()
-    mapmesh.register(this.loadableMeshs)
-    // Back-compat alias used by older call sites
-    this.loadableMeshs.set('Map', mapmesh)
+    // Maps load on demand via loadMapMesh / Game.ensureMap after the player
+    // picks Pool Day or Dust II (keeps boot to weapons + character only).
 
     // Galil pack kept for AWP hands / armature seat
     const akHands = new FPSMesh('fps_mine_sketch_galil.glb', 'AK47Hands')
@@ -298,12 +294,18 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     usePoolLights: boolean,
     forceReload = false
   ): Promise<MapMesh> {
-    if (forceReload) this.loadableMeshs.delete(meshKey)
+    if (forceReload) {
+      const prev = this.loadableMeshs.get(meshKey)
+      if (prev instanceof MapMesh) prev.disposeGpu()
+      this.loadableMeshs.delete(meshKey)
+    }
     const existing = this.loadableMeshs.get(meshKey)
     if (existing instanceof MapMesh) return existing
     const mapmesh = new MapMesh(glbPath, meshKey, usePoolLights)
     await mapmesh.load()
     mapmesh.register(this.loadableMeshs)
+    // Older call sites still look up "Map"
+    if (meshKey === 'Map_pool_day') this.loadableMeshs.set('Map', mapmesh)
     return mapmesh
   }
 

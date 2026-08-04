@@ -1077,7 +1077,9 @@ export class Game implements IUpdatable {
 
     // Team play fills both sides to the chosen size; the player takes one slot.
     // A bot count of 0 still means "no bots" (pure PvP lobbies and joining clients).
-    const botCount = this.teamPlay && config.botCount > 0 ? this.teamSize * 2 - 1 : config.botCount
+    // Phones can't afford a full 5v5 of skinned bots on Dust II — hard-cap at 5.
+    let botCount = this.teamPlay && config.botCount > 0 ? this.teamSize * 2 - 1 : config.botCount
+    if (isTouchDevice() && botCount > 5) botCount = 5
 
     // Assign unique spawns: player first, then bots (never same point)
     const assignment = this.assignMatchSpawns(botCount)
@@ -1151,6 +1153,7 @@ export class Game implements IUpdatable {
   }
 
   public reconcileAiBotCount(desired: number): void {
+    if (isTouchDevice()) desired = Math.min(desired, 5)
     const live = this.trainingBots.filter((b) => !b.isNetworkPuppet)
     let have = live.length + this.pendingBotSpawns.length
     if (have > desired) {
@@ -1232,12 +1235,11 @@ export class Game implements IUpdatable {
     if (this.activeMapId === mapId && this.activeMapMesh) return
 
     const def = getMapDefinition(mapId)
-    // Force reload Dust II so earlier white-bleach materials aren't reused
     const mapMesh = await this.globalLoadingManager.loadMapMesh(
       def.meshKey,
       def.glbPath,
       def.usePoolLights,
-      def.id === 'de_dust2'
+      false
     )
 
     if (def.normalizeToSize) {
@@ -1333,6 +1335,8 @@ export class Game implements IUpdatable {
     if (this.activeMapMesh?.mesh) {
       this.renderer?.scene.remove(this.activeMapMesh.mesh)
     }
+    // Keep the MapMesh in the loader cache for fast re-entry; GPU dispose only
+    // happens on forceReload. Just detach from the scene here.
     this.activeMapMesh = null
   }
 
@@ -1925,26 +1929,12 @@ export class Game implements IUpdatable {
   }
 
   public setPhysicsObjects(): void {
+    // Maps install later via ensureMap after the player picks one
     this.actors = new Array<CubeCollider>()
-    // Pool Day is already loaded at boot — install it synchronously
-    const def = getMapDefinition('pool_day')
-    const mapMesh = this.globalLoadingManager.loadableMeshs.get(def.meshKey) as MapMesh | undefined
-    if (!mapMesh) {
-      throw new Error('Map mesh failed to load. Check that pool_day_baked.glb exists in public/.')
-    }
-    mapMesh.init()
-    const extras: THREE.Object3D[] = []
-    const actorStart = this.actors.length
-    mapMesh.addPhysics(this, { usePoolLights: true, extras })
-    this.mapColliders = this.actors.slice(actorStart)
-    this.mapExtras = extras
-    this.activeMapMesh = mapMesh
-    this.activeMapId = 'pool_day'
-    this.mapName = 'pool_day'
-    this.activeSpawns = def.spawns
-    this.addToRenderer(mapMesh.mesh)
-    this.spawnDebugCubes()
-    this.applyMapMoveSpeed('pool_day')
+    this.mapColliders = []
+    this.mapExtras = []
+    this.activeMapMesh = null
+    this.activeSpawns = []
   }
   public static getInstance(): Game {
     if (!Game.game) {
