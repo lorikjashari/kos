@@ -12,6 +12,7 @@ import {
   type Dust2Site,
   type TacticPoint,
 } from './Dust2Tactics'
+import { NetPoseBuffer, type PoseSample } from '../Net/NetInterp'
 
 /** World Y at or below this → fall through map / void death */
 const VOID_DEATH_Y = -30
@@ -105,6 +106,7 @@ export class TrainingBot implements IUpdatable {
   public netTYaw = 0
   public netTPitch = 0
   public hasNetTarget = false
+  private netPoseBuffer = new NetPoseBuffer()
   /** Where the body is aiming vertically (radians, + = up) — drives spine / gun tilt */
   public aimPitch = 0
   /** Move intent in the bot's own frame: +z forward, +x right. Smoothed for the gait. */
@@ -253,6 +255,11 @@ export class TrainingBot implements IUpdatable {
     const pos = this.aiFrozen
       ? this.spawnPosition.clone()
       : game.pickRespawnPosition(this.position, true, this.team)
+    this.forceRoundReset(pos)
+  }
+
+  /** Round reset / freeze: full HP at a spawn without waiting on death timer. */
+  public forceRoundReset(pos: Vector3D): void {
     this.health = 100
     this.isAlive = true
     this.deathAge = 0
@@ -279,7 +286,6 @@ export class TrainingBot implements IUpdatable {
     this.prevTargetEye = undefined
     this.escapeTimer = 0
     this.escapeDir = undefined
-    this.stuckTimer = 0
     this.navMem = []
     if (this.tacticRole) this.assignDust2Tactic(this.tacticRole)
   }
@@ -322,10 +328,26 @@ export class TrainingBot implements IUpdatable {
     this.waypoint = undefined
   }
 
+  public pushNetSample(sample: PoseSample): void {
+    this.netPoseBuffer.push(sample)
+    this.hasNetTarget = true
+  }
+
   public update(dt: number): void {
     if (this.isNetworkPuppet) {
       if (this.hasNetTarget) {
-        const k = Math.min(1, dt * 14)
+        const delay = Game.getInstance().getNetInterpDelay()
+        const renderT = performance.now() / 1000 - delay
+        const sample = this.netPoseBuffer.sampleAt(renderT)
+        if (sample) {
+          this.netTX = sample.x
+          this.netTY = sample.y
+          this.netTZ = sample.z
+          this.netTYaw = sample.yaw
+          this.netTPitch = sample.pitch
+        }
+        // Ease toward the delayed sample so 20 Hz packets don't stair-step
+        const k = Math.min(1, dt * 18)
         this.position.x += (this.netTX - this.position.x) * k
         this.position.y += (this.netTY - this.position.y) * k
         this.position.z += (this.netTZ - this.position.z) * k
@@ -350,7 +372,7 @@ export class TrainingBot implements IUpdatable {
 
     if (!this.isAlive) {
       this.deathAge += dt
-      if (this.deathAge >= this.deathDuration) {
+      if (!Game.getInstance().shouldHoldRespawn() && this.deathAge >= this.deathDuration) {
         this.respawn()
       }
       return

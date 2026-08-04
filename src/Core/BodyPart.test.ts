@@ -34,4 +34,18 @@ describe('damageAtRange', () => {
   it('always leaves at least one point of damage', () => {
     expect(damageAtRange('legs', 'Usp', 9999)).toBeGreaterThan(0)
   })
+
+  it('gives USP a stronger body shot than the AK baseline table', () => {
+    expect(damageForBodyPart('body', 'Usp')).toBe(55)
+    expect(damageForBodyPart('body', 'AK47')).toBe(51)
+    expect(damageForBodyPart('legs', 'Usp')).toBe(36)
+  })
+
+  it('keeps knife stronger than USP at melee range for body', () => {
+    expect(damageForBodyPart('body', 'Knife')).toBeGreaterThan(damageForBodyPart('body', 'Usp'))
+  })
+
+  it('keeps AWP body as a one-tap', () => {
+    expect(damageForBodyPart('body', 'AWP')).toBe(100)
+  })
 })

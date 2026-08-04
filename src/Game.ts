@@ -19,14 +19,35 @@ import {
   CareerStats,
   DEFAULT_MATCH_LENGTH,
   MatchStats,
+  matchShouldEnd,
   pickBotNames,
   rulesForLength,
+  sortScoreRows,
   type MatchEndReason,
   type MatchResult,
   type MatchRules,
   type ScoreRow,
   type TeamMode,
 } from './Core/MatchStats'
+import {
+  countAliveByTeam,
+  eliminationWinner,
+  matchWinnerFromRounds,
+  roundConfigForLength,
+  shouldScramble,
+  timedRoundWinner,
+  type RoundConfig,
+} from './Core/RoundRules'
+import { scrambleBotTeams } from './Core/TeamBalance'
+import { FPSCameraManager } from './View/CameraManager/FPSCameraManager'
+import { DemoRecorder } from './Demo/DemoRecorder'
+import { DemoPlayer } from './Demo/DemoPlayer'
+import {
+  DEMO_STORAGE_KEY,
+  parseDemoJson,
+  serializeDemo,
+  type DemoFile,
+} from './Demo/DemoFormat'
 import * as THREE from 'three'
 import {
   BOT_GROUND_Y,
@@ -40,20 +61,24 @@ import {
   type SpawnPoint,
 } from './Core/MapCatalog'
 import {
-  assignDust2Roles,
   ctRolesForRotate,
   DUST2_ROUTES,
+  nextDust2RoleForTeam,
+  planDust2RolesForTeams,
   pointInDust2Site,
   type Dust2Role,
   type Dust2Site,
 } from './Core/Dust2Tactics'
 import { clampTeamSize, DEFAULT_TEAM_SIZE, otherTeam, TEAM_COLOR, type Team } from './Core/Teams'
 import {
-  flatDistXZ,
-  shuffleInPlace,
-  spawnToBotVector,
+  assignFfaSpawns,
+  assignTeamSpawnsPure,
+  pickRespawnFromList,
   spawnToPlayerVector,
 } from './Core/SpawnPoints'
+import { shouldRenderFrame } from './Core/FramePacing'
+import { clampInterpDelay, DEFAULT_INTERP_DELAY } from './Net/NetInterp'
+import { clampFpsCap, CONSOLE_COMMANDS, consoleToNum, tokenizeConsoleLine } from './UI/ConsoleParse'
 import { CommandConsole } from './UI/CommandConsole'
 import { PerfOverlay } from './UI/PerfOverlay'
 import { EditorMenu, type EditorTool } from './UI/EditorMenu'
@@ -132,6 +157,16 @@ export class Game implements IUpdatable {
   private playerTeam: Team = 'CT'
   private teamSize = DEFAULT_TEAM_SIZE
   private teamScores: Record<Team, number> = { T: 0, CT: 0 }
+  /** TDM uses round wins in teamScores; FFA keeps kill race. */
+  private roundsEnabled = false
+  private roundConfig: RoundConfig = roundConfigForLength(DEFAULT_MATCH_LENGTH)
+  private roundNumber = 0
+  private roundElapsed = 0
+  private warmupTimer = 0
+  private roundEndTimer = 0
+  private roundEndWinner: Team | 'draw' | null = null
+  private spectating = false
+  private spectateIndex = 0
   private nameQueue: string[] = []
   private onReturnToMenu: (() => void) | null = null
   private onHideMenu: (() => void) | null = null
@@ -144,11 +179,13 @@ export class Game implements IUpdatable {
   private lastMatchConfig: BotMatchConfig | null = null
   public multiplayer: MultiplayerMatch | null = null
   private mpBanner: HTMLElement | null = null
+  /** Shown once when the main menu reopens after an MP disconnect/reject. */
+  private pendingMenuNotice: string | null = null
   /** Generic CS-style cvar store for values with no local system yet. */
   private cvars = new Map<string, string>()
   /** 0 = uncapped (follows display, including 120Hz ProMotion); else hard cap. */
   private fpsCap = 0
-  private lastFrameTS = 0
+  private lastFrameTS = -1
   /** Real time elapsed since the last drawn frame — kept so a capped frame rate
    * still animates at real speed instead of losing the skipped frames' time. */
   private renderAcc = 0
@@ -168,6 +205,10 @@ export class Game implements IUpdatable {
   private editorWeapon = 'Usp'
   /** '' = gizmo moves the whole bot; otherwise a bone key being posed */
   private editorBoneKey = ''
+  private readonly demoRecorder = new DemoRecorder()
+  private readonly demoPlayer = new DemoPlayer()
+  private lastDemo: DemoFile | null = null
+  private demoPlaybackActive = false
   private boundEditorKeys: ((e: KeyboardEvent) => void) | null = null
   private mobileControls: MobileControls | null = null
 
@@ -193,46 +234,7 @@ export class Game implements IUpdatable {
   }
 
   /** Known console commands for CS-style autocomplete. */
-  public static readonly CONSOLE_COMMANDS: string[] = [
-    'help',
-    'cmdlist',
-    'clear',
-    'cls',
-    'echo',
-    'toggleconsole',
-    'crosshair',
-    'cl_crosshair_size',
-    'cl_crosshair_color',
-    'cl_dynamiccrosshair',
-    'cl_observercrosshair',
-    'cl_showfps',
-    'net_graph',
-    'net_graphpos',
-    'net_graphwidth',
-    'volume',
-    'mp3volume',
-    'bgmvolume',
-    'sensitivity',
-    'sens',
-    'zoom_sensitivity',
-    'zoom_sensitivity_ratio',
-    'fps_max',
-    'fps_override',
-    'rate',
-    'cl_cmdrate',
-    'cl_updaterate',
-    'ex_interp',
-    'cl_lc',
-    'cl_lw',
-    'voice_enable',
-    'voice_scale',
-    'hisound',
-    'suitvolume',
-    'disconnect',
-    'retry',
-    'reconnect',
-    'connect',
-  ]
+  public static readonly CONSOLE_COMMANDS: string[] = CONSOLE_COMMANDS
 
   /** Press ` (backtick) in-game or on the menu to open the CS-style console. */
   public openCommandConsole(): void {
@@ -312,6 +314,17 @@ export class Game implements IUpdatable {
   public applyMobilePerfProfile(profile: MobilePerfProfile): void {
     if (!isTouchDevice()) return
     this.renderer?.applyMobilePerfProfile(profile)
+    this.renderer?.applyMapPerfBudget(this.activeMapId)
+  }
+
+  /** Style 4 or cl_dynamiccrosshair — open gap with weapon spread. */
+  public isDynamicCrosshairEnabled(): boolean {
+    if (this.crosshairSettings?.style === 4) return true
+    const v = this.cvars.get('cl_dynamiccrosshair')
+    if (v === undefined || v === '') return false
+    const n = Number(v)
+    if (!Number.isNaN(n)) return n !== 0
+    return v === 'on' || v === 'true' || v === '1'
   }
 
   /** Mobile render aspect: `normal` = the screen's own aspect, `4:3` = stretched 4:3. */
@@ -353,19 +366,12 @@ export class Game implements IUpdatable {
     this.commandConsole?.print(msg, kind)
   }
 
-  /** Split a command line into tokens, honouring "quoted strings". */
   private tokenize(line: string): string[] {
-    const out: string[] = []
-    const re = /"([^"]*)"|(\S+)/g
-    let m: RegExpExecArray | null
-    while ((m = re.exec(line)) !== null) out.push(m[1] ?? m[2] ?? '')
-    return out
+    return tokenizeConsoleLine(line)
   }
 
   private toNum(v: string | undefined, fallback = 0): number {
-    if (v === undefined) return fallback
-    const n = Number(v)
-    return Number.isFinite(n) ? n : fallback
+    return consoleToNum(v, fallback)
   }
 
   private ensurePerfOverlay(): PerfOverlay {
@@ -386,9 +392,7 @@ export class Game implements IUpdatable {
    * 1..24 clamp up to 24, 25..999 use that exact cap.
    */
   public setFpsCap(n: number): number {
-    if (n <= 0) this.fpsCap = 0
-    else if (n <= 24) this.fpsCap = 24
-    else this.fpsCap = Math.min(999, Math.floor(n))
+    this.fpsCap = clampFpsCap(n)
     return this.fpsCap
   }
 
@@ -428,9 +432,96 @@ export class Game implements IUpdatable {
         this.conPrint('Commands: crosshair, cl_crosshair_size, cl_crosshair_color,')
         this.conPrint('  cl_showfps, net_graph, volume, MP3Volume, bgmvolume, fps_max,')
         this.conPrint('  sensitivity, zoom_sensitivity, disconnect, retry, reconnect,')
-        this.conPrint('  connect, toggleconsole, clear')
+        this.conPrint('  connect, editormode, record, stop, playdemo, demolist,')
+        this.conPrint('  toggleconsole, clear')
         this.conPrint('Tip: type a few letters — matches show under the input. Tab / ↓ fills.')
         return
+      case 'record':
+        if (this.editorActive) {
+          this.conPrint('Cannot record in editormode.', 'warn')
+          return
+        }
+        if (!this.matchStarted) {
+          this.conPrint('Start a match first, then record.', 'warn')
+          return
+        }
+        if (this.demoRecorder.isRecording) {
+          this.conPrint('Already recording. Use stop.', 'warn')
+          return
+        }
+        if (this.demoPlaybackActive) {
+          this.conPrint('Stop playback before recording.', 'warn')
+          return
+        }
+        this.demoRecorder.start({
+          mapId: this.activeMapId,
+          teamMode: this.teamPlay ? 'tdm' : this.teamMode,
+          playerName: this.playerName,
+        })
+        this.conPrint('Recording POV demo… use stop when done.', 'ok')
+        return
+      case 'stop': {
+        if (this.demoPlaybackActive) {
+          this.demoPlayer.stop()
+          this.demoPlaybackActive = false
+          for (const bot of this.trainingBots) bot.aiFrozen = false
+          this.conPrint('Demo playback stopped.', 'ok')
+          return
+        }
+        if (!this.demoRecorder.isRecording) {
+          this.conPrint('Not recording. Use record first.', 'warn')
+          return
+        }
+        const demo = this.demoRecorder.stop()
+        if (!demo || !demo.ticks.length) {
+          this.conPrint('Recording empty — nothing saved.', 'warn')
+          return
+        }
+        this.persistDemo(demo)
+        this.conPrint(
+          `Demo saved (${demo.ticks.length} ticks, ${demo.header.duration.toFixed(1)}s). Downloaded + stored.`,
+          'ok'
+        )
+        return
+      }
+      case 'playdemo': {
+        if (this.demoRecorder.isRecording) {
+          this.conPrint('stop recording before playdemo.', 'warn')
+          return
+        }
+        const demo = this.loadStoredDemo()
+        if (!demo) {
+          this.conPrint('No demo. record → stop first (or load from localStorage).', 'warn')
+          return
+        }
+        if (!this.matchStarted) {
+          this.conPrint('Start a match on the same map, then playdemo.', 'warn')
+          return
+        }
+        this.demoPlayer.load(demo)
+        if (!this.demoPlayer.play()) {
+          this.conPrint('Demo has no ticks.', 'warn')
+          return
+        }
+        this.demoPlaybackActive = true
+        for (const bot of this.trainingBots) bot.aiFrozen = true
+        this.conPrint(
+          `Playing demo (${demo.header.duration.toFixed(1)}s, map ${demo.header.mapId})… stop to cancel.`,
+          'ok'
+        )
+        return
+      }
+      case 'demolist': {
+        const demo = this.loadStoredDemo()
+        if (!demo) {
+          this.conPrint('No stored demo.', 'warn')
+          return
+        }
+        this.conPrint(
+          `last: ${demo.header.mapId} · ${demo.header.duration.toFixed(1)}s · ${demo.ticks.length} ticks · ${demo.header.recordedAt}`
+        )
+        return
+      }
 
       // ---- FPS / perf ----
       case 'cl_showfps':
@@ -821,6 +912,8 @@ export class Game implements IUpdatable {
         this.editorMenu?.refresh()
       },
       getPoseText: () => this.botRenderers[0]?.getPoseEditsText() ?? '',
+      onSavePose: () => this.editorSavePose(),
+      onLoadPose: () => this.editorLoadPose(),
       onFpsLook: () => this.editorEnableFpsLook(),
       onEditCursor: () => this.editorEnableEditCursor(),
       onExit: () => this.returnToMenu(),
@@ -982,6 +1075,117 @@ export class Game implements IUpdatable {
     this.editorMenu?.refresh()
   }
 
+  private static readonly EDITOR_POSE_KEY = 'kos-editor-pose-v1'
+
+  private editorSavePose(): string {
+    const renderer = this.botRenderers[0]
+    if (!renderer) return 'No dummy to save.'
+    const pose = renderer.getPoseEditsJson()
+    const json = JSON.stringify(pose, null, 2)
+    try {
+      localStorage.setItem(Game.EDITOR_POSE_KEY, json)
+    } catch {
+      /* ignore quota */
+    }
+    this.downloadTextFile(`kos-pose-${Date.now()}.json`, json)
+    const n = Object.keys(pose.bones).length
+    return n ? `Saved ${n} joint(s) + downloaded JSON.` : 'Saved empty pose (no joint edits).'
+  }
+
+  private editorLoadPose(): string {
+    const renderer = this.botRenderers[0]
+    if (!renderer) return 'No dummy to load onto.'
+    let raw: string | null = null
+    try {
+      raw = localStorage.getItem(Game.EDITOR_POSE_KEY)
+    } catch {
+      raw = null
+    }
+    if (!raw) return 'No saved pose in localStorage. Use Save pose first.'
+    try {
+      const n = renderer.applyPoseEditsJson(JSON.parse(raw))
+      this.editorBoneKey = ''
+      return n ? `Loaded ${n} joint(s).` : 'Pose file had no joints.'
+    } catch {
+      return 'Saved pose JSON was invalid.'
+    }
+  }
+
+  private downloadTextFile(filename: string, text: string): void {
+    try {
+      const blob = new Blob([text], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private persistDemo(demo: DemoFile): void {
+    this.lastDemo = demo
+    try {
+      localStorage.setItem(DEMO_STORAGE_KEY, serializeDemo(demo))
+    } catch {
+      /* ignore */
+    }
+    this.downloadTextFile(`kos-demo-${Date.now()}.json`, serializeDemo(demo))
+  }
+
+  private loadStoredDemo(): DemoFile | null {
+    if (this.lastDemo) return this.lastDemo
+    try {
+      const raw = localStorage.getItem(DEMO_STORAGE_KEY)
+      if (!raw) return null
+      const demo = parseDemoJson(raw)
+      if (demo) this.lastDemo = demo
+      return demo
+    } catch {
+      return null
+    }
+  }
+
+  private sampleDemoPose(): {
+    x: number
+    y: number
+    z: number
+    yaw: number
+    pitch: number
+    hp: number
+  } | null {
+    const player = this.currentPlayer?.player
+    const cam = this.currentPlayer?.cameraManager
+    if (!player || !(cam instanceof FPSCameraManager)) return null
+    const aim = cam.getAimAngles()
+    return {
+      x: player.position.x,
+      y: player.position.y,
+      z: player.position.z,
+      yaw: aim.yaw,
+      pitch: aim.pitch,
+      hp: player.health,
+    }
+  }
+
+  private applyDemoPose(pose: {
+    x: number
+    y: number
+    z: number
+    yaw: number
+    pitch: number
+    hp: number
+  }): void {
+    const player = this.currentPlayer?.player
+    const cam = this.currentPlayer?.cameraManager
+    if (!player || !(cam instanceof FPSCameraManager)) return
+    player.teleportToSpawn(new Vector3D(pose.x, pose.y, pose.z))
+    player.health = pose.hp
+    cam.setAimAngles(pose.yaw, pose.pitch)
+  }
+
   private editorEnableFpsLook(): void {
     this.editorFpsLook = true
     // FPS look = roam and watch the dummy react, so make him track the player again.
@@ -1074,7 +1278,6 @@ export class Game implements IUpdatable {
     this.matchStarted = true
     this.matchPaused = false
     this.combatLive = false
-    this.awaitingLoadout = true
     this.lockdownTimer = 0
     this.matchRules = rulesForLength(config.matchLength)
     this.matchElapsed = 0
@@ -1087,6 +1290,16 @@ export class Game implements IUpdatable {
     this.teamSize = clampTeamSize(config.teamSize)
     this.teamPlay = !!config.teamPlay && mapSupportsTeams(this.activeMapId)
     if (this.teamPlay) this.playerTeam = config.playerTeam ?? 'CT'
+    this.roundsEnabled = this.teamPlay
+    this.roundConfig = roundConfigForLength(config.matchLength)
+    this.roundNumber = 0
+    this.roundElapsed = 0
+    this.roundEndTimer = 0
+    this.roundEndWinner = null
+    this.exitSpectator()
+    this.warmupTimer = this.roundsEnabled ? this.roundConfig.warmupSec : 0
+    // Warmup first on TDM; FFA goes straight to loadout
+    this.awaitingLoadout = this.warmupTimer <= 0
 
     // Team play fills both sides to the chosen size; the player takes one slot.
     // A bot count of 0 still means "no bots" (pure PvP lobbies and joining clients).
@@ -1124,10 +1337,147 @@ export class Game implements IUpdatable {
     this.renderer.hud?.setPauseMenuOpen(false)
     this.renderer.hud?.hideMatchResult()
     this.renderer.hud?.setMatchStatus(null)
-    this.renderer.hud?.showLoadoutPicker((primary) => this.confirmMatchLoadout(primary))
+    this.renderer.hud?.setRoundBanner(null)
+    if (this.awaitingLoadout) {
+      this.renderer.hud?.showLoadoutPicker((primary) => this.confirmMatchLoadout(primary))
+    } else if (this.warmupTimer > 0) {
+      this.renderer.hud?.setRoundBanner(`Warmup · ${Math.ceil(this.warmupTimer)}`)
+    }
 
     this.inputManager.unlock()
     void this.warmAudio()
+  }
+
+  /** Round TDM: dead players/bots wait for the next freeze instead of respawning. */
+  public shouldHoldRespawn(): boolean {
+    return this.roundsEnabled && this.matchStarted && !this.matchOver && this.combatLive
+  }
+
+  public isSpectating(): boolean {
+    return this.spectating
+  }
+
+  public enterSpectator(): void {
+    if (!this.roundsEnabled) return
+    this.spectating = true
+    this.spectateIndex = 0
+    this.cycleSpectate(0)
+  }
+
+  public exitSpectator(): void {
+    this.spectating = false
+    this.spectateIndex = 0
+    this.fpsCamera()?.clearSpectateTarget()
+  }
+
+  public cycleSpectate(delta = 1): void {
+    if (!this.spectating) return
+    const targets = this.spectateTargets()
+    const cam = this.fpsCamera()
+    if (targets.length === 0) {
+      cam?.setSpectateFreecam(true)
+      this.renderer.hud?.setSpectateLabel('Free cam · look around')
+      return
+    }
+    this.spectateIndex = (this.spectateIndex + delta + targets.length * 10) % targets.length
+    const bot = targets[this.spectateIndex]
+    cam?.setSpectateTarget(bot)
+    this.renderer.hud?.setSpectateLabel(`Spectating · ${bot.name}`)
+  }
+
+  private fpsCamera(): FPSCameraManager | null {
+    const cam = this.currentPlayer?.renderer?.playerCameraManager
+    return cam instanceof FPSCameraManager ? cam : null
+  }
+
+  private spectateTargets(): TrainingBot[] {
+    return this.trainingBots.filter(
+      (b) => b.isAlive && (!this.teamPlay || b.team === this.playerTeam)
+    )
+  }
+
+  private beginWarmupLoadout(): void {
+    this.warmupTimer = 0
+    this.awaitingLoadout = true
+    this.renderer.hud?.setRoundBanner(null)
+    this.renderer.hud?.showLoadoutPicker((primary) => this.confirmMatchLoadout(primary))
+  }
+
+  private beginRoundFreeze(): void {
+    this.roundNumber++
+    this.roundElapsed = 0
+    this.roundEndTimer = 0
+    this.roundEndWinner = null
+    this.combatLive = false
+    this.lockdownTimer = this.roundConfig.freezeSec
+    this.exitSpectator()
+    this.renderer.hud?.hideDeath()
+    this.renderer.hud?.setSpectateLabel(null)
+    this.renderer.hud?.setRoundBanner(`Round ${this.roundNumber}`)
+    this.resetRoundActors()
+    this.renderer.hud?.setLockdown(this.lockdownTimer)
+  }
+
+  private resetRoundActors(): void {
+    if (shouldScramble(this.roundNumber - 1, this.roundConfig.scrambleEveryRounds)) {
+      this.applyScramble()
+    }
+    const player = this.currentPlayer?.player
+    if (player) {
+      const pos = this.pickRespawnPosition(undefined, false, this.playerTeam)
+      player.teleportToSpawn(pos)
+      if (this.roundConfig.resetLoadoutEachRound) {
+        player.equipSpawnLoadout(player.primaryWeaponKey)
+      }
+    }
+    for (const bot of this.trainingBots) {
+      if (bot.isNetworkPuppet) continue
+      const pos = this.pickRespawnPosition(bot.position, true, bot.team)
+      bot.forceRoundReset(pos)
+    }
+  }
+
+  private applyScramble(): void {
+    const ai = this.trainingBots.filter((b) => !b.isNetworkPuppet)
+    const teams = scrambleBotTeams(ai.length, this.playerTeam)
+    for (let i = 0; i < ai.length; i++) {
+      ai[i].team = teams[i] ?? null
+      if (ai[i].team) {
+        const role = this.nextDust2RoleForTeam(ai[i].team!)
+        if (role) ai[i].assignDust2Tactic(role)
+      }
+    }
+    this.renderer.hud?.setRoundBanner('Teams scrambled')
+  }
+
+  private checkRoundEnd(): void {
+    if (!this.roundsEnabled || !this.combatLive || this.matchOver || this.roundEndTimer > 0) return
+    const counts = countAliveByTeam(
+      !!(this.currentPlayer?.player && !this.currentPlayer.player.isDead),
+      this.playerTeam,
+      this.trainingBots.filter((b) => !b.isNetworkPuppet)
+    )
+    let winner = eliminationWinner(counts)
+    if (!winner && this.roundConfig.roundTimeSec > 0 && this.roundElapsed >= this.roundConfig.roundTimeSec) {
+      winner = timedRoundWinner(counts)
+    }
+    if (!winner) return
+    this.finishRound(winner)
+  }
+
+  private finishRound(winner: Team | 'draw'): void {
+    this.combatLive = false
+    this.roundEndWinner = winner
+    this.roundEndTimer = 2.4
+    if (winner !== 'draw') this.creditTeam(winner)
+    const label =
+      winner === 'draw' ? 'Round draw' : winner === this.playerTeam ? 'Round won' : 'Round lost'
+    this.renderer.hud?.setRoundBanner(`${label} · ${this.teamScores.T}–${this.teamScores.CT}`)
+    const matchWin = matchWinnerFromRounds(this.teamScores, this.roundConfig.roundsToWin)
+    if (matchWin) {
+      this.roundEndTimer = 0
+      this.endMatch('roundLimit')
+    }
   }
 
   public async startMultiplayerMatch(config: MultiplayerStartConfig): Promise<string> {
@@ -1210,29 +1560,11 @@ export class Game implements IUpdatable {
 
   private nextDust2RoleForTeam(team: Team): Dust2Role | null {
     if (this.activeMapId !== 'de_dust2') return null
-    const pool = team === 'T'
-      ? (['t_long', 't_b', 't_mid_short', 't_mid_lower', 't_mid_peek'] as Dust2Role[])
-      : (['ct_a', 'ct_b', 'ct_mid', 'ct_a_depth', 'ct_b_depth', 'ct_cat'] as Dust2Role[])
-    const counts = new Map<Dust2Role, number>()
-    for (const r of pool) counts.set(r, 0)
-    for (const b of this.trainingBots) {
-      if (b.team !== team || !b.tacticRole) continue
-      counts.set(b.tacticRole, (counts.get(b.tacticRole) ?? 0) + 1)
-    }
-    for (const p of this.pendingBotSpawns) {
-      if (p.team !== team || !p.tacticRole) continue
-      counts.set(p.tacticRole, (counts.get(p.tacticRole) ?? 0) + 1)
-    }
-    let best = pool[0]
-    let bestN = Infinity
-    for (const r of pool) {
-      const n = counts.get(r) ?? 0
-      if (n < bestN) {
-        bestN = n
-        best = r
-      }
-    }
-    return best
+    const used = [
+      ...this.trainingBots.filter((b) => b.team === team).map((b) => b.tacticRole),
+      ...this.pendingBotSpawns.filter((p) => p.team === team).map((p) => p.tacticRole),
+    ]
+    return nextDust2RoleForTeam(team, used)
   }
 
   private showMpBanner(code: string, _isHost: boolean): void {
@@ -1264,8 +1596,12 @@ export class Game implements IUpdatable {
     if (!this.awaitingLoadout || !this.matchStarted) return
     this.awaitingLoadout = false
     this.currentPlayer?.player.equipSpawnLoadout(primary)
-    this.lockdownTimer = this.lockdownDuration
+    this.lockdownTimer = this.roundsEnabled ? this.roundConfig.freezeSec : this.lockdownDuration
     this.combatLive = false
+    if (this.roundsEnabled && this.roundNumber === 0) {
+      this.roundNumber = 1
+      this.renderer.hud?.setRoundBanner(`Round ${this.roundNumber}`)
+    }
     this.renderer.hud?.hideLoadoutPicker()
     this.renderer.hud?.setLockdown(this.lockdownTimer)
     this.crosshairRenderer?.resize()
@@ -1362,6 +1698,7 @@ export class Game implements IUpdatable {
     this.activeMapId = mapId
     this.mapName = mapId
     this.applyMapMoveSpeed(mapId)
+    this.renderer?.applyMapPerfBudget(mapId)
     this.warmMapRender()
   }
 
@@ -1482,11 +1819,34 @@ export class Game implements IUpdatable {
     setTimeout(() => this.inputManager.onLock(), 40)
   }
 
+  /** Seconds of remote pose delay (ex_interp). */
+  public getNetInterpDelay(): number {
+    const raw = this.cvars.get('ex_interp')
+    if (raw === undefined || raw === '') return DEFAULT_INTERP_DELAY
+    const n = Number(raw)
+    return clampInterpDelay(Number.isFinite(n) ? n : DEFAULT_INTERP_DELAY)
+  }
+
+  /** Host left / reject — leave the match and surface a menu notice. */
+  public notifyMultiplayerEnded(reason: string): void {
+    this.pendingMenuNotice = reason
+    this.returnToMenu()
+  }
+
+  public consumeMenuNotice(): string | null {
+    const m = this.pendingMenuNotice
+    this.pendingMenuNotice = null
+    return m
+  }
+
   public returnToMenu(): void {
     this.teardownEditorTools()
     this.multiplayer?.stop()
     this.multiplayer = null
     this.hideMpBanner()
+    if (this.demoRecorder.isRecording) this.demoRecorder.cancel()
+    this.demoPlayer.stop()
+    this.demoPlaybackActive = false
     this.matchPaused = false
     this.matchStarted = false
     this.combatLive = false
@@ -1494,6 +1854,14 @@ export class Game implements IUpdatable {
     this.lockdownTimer = 0
     this.matchOver = false
     this.matchElapsed = 0
+    this.roundsEnabled = false
+    this.roundNumber = 0
+    this.roundElapsed = 0
+    this.warmupTimer = 0
+    this.roundEndTimer = 0
+    this.exitSpectator()
+    this.renderer.hud?.setRoundBanner(null)
+    this.renderer.hud?.setSpectateLabel(null)
     this.stats.reset()
     // Free guns + map GPU while the menu is up; reload on next Start.
     this.releaseCombatMeshes()
@@ -1528,52 +1896,18 @@ export class Game implements IUpdatable {
     botTeams: Array<Team | null>
   } {
     if (this.teamPlay) return this.assignTeamSpawns(botCount)
-    const spawns = this.activeSpawns
-    const indices = shuffleInPlace([...spawns.keys()])
-    const playerIdx = indices[0] ?? 0
-    const playerPos = spawnToPlayerVector(spawns[playerIdx] ?? { x: 0, y: 2, z: 0 })
-
-    const used = new Set<number>([playerIdx])
-    const botPositions: Vector3D[] = []
-    const need = Math.min(botCount, Math.max(0, spawns.length - 1))
-
-    for (const idx of indices) {
-      if (botPositions.length >= need) break
-      if (used.has(idx)) continue
-      used.add(idx)
-      botPositions.push(spawnToBotVector(spawns[idx]))
-    }
-    return { playerPos, botPositions, botTeams: botPositions.map(() => null) }
+    return assignFfaSpawns(this.activeSpawns, botCount)
   }
 
-  /**
-   * Team deathmatch: each side starts in its own spawn pit. The player takes one
-   * slot on their chosen side, bots fill the rest of both sides.
-   */
   private assignTeamSpawns(botCount: number): {
     playerPos: Vector3D
     botPositions: Vector3D[]
     botTeams: Array<Team | null>
   } {
     const sides = this.teamSpawnLists()
-    const mine = shuffleInPlace([...(sides?.[this.playerTeam] ?? this.activeSpawns)])
-    const theirs = shuffleInPlace([...(sides?.[otherTeam(this.playerTeam)] ?? this.activeSpawns)])
-    const playerPos = spawnToPlayerVector(mine.shift() ?? { x: 0, y: 2, z: 0 })
-
-    const botPositions: Vector3D[] = []
-    const botTeams: Array<Team | null> = []
-    const friends = Math.min(this.teamSize - 1, mine.length)
-    const enemies = Math.min(botCount - friends, theirs.length)
-
-    for (let i = 0; i < friends; i++) {
-      botPositions.push(spawnToBotVector(mine[i]))
-      botTeams.push(this.playerTeam)
-    }
-    for (let i = 0; i < enemies; i++) {
-      botPositions.push(spawnToBotVector(theirs[i]))
-      botTeams.push(otherTeam(this.playerTeam))
-    }
-    return { playerPos, botPositions, botTeams }
+    const mine = [...(sides?.[this.playerTeam] ?? this.activeSpawns)]
+    const theirs = [...(sides?.[otherTeam(this.playerTeam)] ?? this.activeSpawns)]
+    return assignTeamSpawnsPure(mine, theirs, this.playerTeam, this.teamSize, botCount)
   }
 
   private teamSpawnLists(): Record<Team, ReadonlyArray<SpawnPoint>> | null {
@@ -1599,32 +1933,7 @@ export class Game implements IUpdatable {
       if (!bot.isAlive) continue
       occupied.push({ x: bot.position.x, z: bot.position.z })
     }
-
-    const minClear = 8
-    type Ranked = { idx: number; score: number }
-    const ranked: Ranked[] = []
-
-    for (let i = 0; i < spawnList.length; i++) {
-      const s = spawnList[i]
-      let nearest = Infinity
-      for (const o of occupied) {
-        nearest = Math.min(nearest, flatDistXZ(s.x, s.z, o.x, o.z))
-      }
-      let score = nearest
-      if (preferAwayFrom) {
-        score += flatDistXZ(s.x, s.z, preferAwayFrom.x, preferAwayFrom.z) * 0.15
-      }
-      ranked.push({ idx: i, score })
-    }
-
-    ranked.sort((a, b) => b.score - a.score)
-    const clear = ranked.find((r) => {
-      const s = spawnList[r.idx]
-      return occupied.every((o) => flatDistXZ(s.x, s.z, o.x, o.z) >= minClear)
-    })
-    const pick = clear ?? ranked[0]
-    const s = spawnList[pick?.idx ?? 0] ?? { x: 0, y: 2, z: 0 }
-    return forBot ? spawnToBotVector(s) : spawnToPlayerVector(s)
+    return pickRespawnFromList(spawnList, occupied, preferAwayFrom, forBot)
   }
 
   public getScoreboardRows(): ScoreRow[] {
@@ -1648,12 +1957,7 @@ export class Game implements IUpdatable {
         team: this.teamPlay ? (bot.team ?? undefined) : undefined,
       })
     }
-    rows.sort((a, b) => b.kills - a.kills || b.assists - a.assists || a.deaths - b.deaths)
-    if (this.teamPlay) {
-      // Your side first so the board reads as two teams, not one ladder
-      rows.sort((a, b) => Number(b.team === this.playerTeam) - Number(a.team === this.playerTeam))
-    }
-    return rows
+    return sortScoreRows(rows, this.teamPlay ? this.playerTeam : undefined)
   }
 
   public isCombatLive(): boolean {
@@ -1754,6 +2058,7 @@ export class Game implements IUpdatable {
 
   /** Highest kill count on the board, used for the "first to N" race. */
   private leadingKills(): number {
+    if (this.roundsEnabled) return Math.max(this.teamScores.T, this.teamScores.CT)
     if (this.teamPlay) return Math.max(this.teamScores.T, this.teamScores.CT)
     let best = this.stats.kills
     for (const bot of this.trainingBots) {
@@ -1764,19 +2069,21 @@ export class Game implements IUpdatable {
 
   /** Team play races to a shared team score instead of an individual one. */
   private raceScore(): number {
+    if (this.roundsEnabled) return this.teamScores[this.playerTeam]
     return this.teamPlay ? this.teamScores[this.playerTeam] : this.stats.kills
   }
 
   private checkMatchEnd(): void {
     if (!this.matchStarted || this.matchOver) return
-    const { killLimit, timeLimitSec } = this.matchRules
-    if (killLimit > 0 && this.leadingKills() >= killLimit) {
-      this.endMatch('killLimit')
+    if (this.roundsEnabled) {
+      // Round wins handled in finishRound; overall match clock still ends the series
+      if (this.matchRules.timeLimitSec > 0 && this.matchElapsed >= this.matchRules.timeLimitSec) {
+        this.endMatch('timeLimit')
+      }
       return
     }
-    if (timeLimitSec > 0 && this.matchElapsed >= timeLimitSec) {
-      this.endMatch('timeLimit')
-    }
+    const reason = matchShouldEnd(this.matchRules, this.leadingKills(), this.matchElapsed)
+    if (reason) this.endMatch(reason)
   }
 
   private endMatch(reason: MatchEndReason): void {
@@ -1787,7 +2094,7 @@ export class Game implements IUpdatable {
     const rows = this.getScoreboardRows()
     const placement = Math.max(1, rows.findIndex((r) => r.isYou) + 1)
     const won = this.teamPlay
-      ? this.teamScores[this.playerTeam] >= this.teamScores[otherTeam(this.playerTeam)]
+      ? this.teamScores[this.playerTeam] > this.teamScores[otherTeam(this.playerTeam)]
       : placement === 1
     const result: MatchResult = {
       reason,
@@ -1829,6 +2136,22 @@ export class Game implements IUpdatable {
   }
 
   private syncMatchStatus(): void {
+    if (this.roundsEnabled) {
+      const goal = this.roundConfig.roundsToWin
+      const roundLeft =
+        this.combatLive && this.roundConfig.roundTimeSec > 0
+          ? Math.max(0, this.roundConfig.roundTimeSec - this.roundElapsed)
+          : null
+      this.renderer.hud?.setMatchStatus({
+        kills: this.teamScores[this.playerTeam],
+        leaderKills: Math.max(this.teamScores.T, this.teamScores.CT),
+        killLimit: goal,
+        secondsLeft: roundLeft,
+        teams: { you: this.playerTeam, T: this.teamScores.T, CT: this.teamScores.CT },
+        mode: 'rounds',
+      })
+      return
+    }
     const { killLimit, timeLimitSec } = this.matchRules
     if (killLimit <= 0 && timeLimitSec <= 0) {
       this.renderer.hud?.setMatchStatus(null)
@@ -1850,6 +2173,7 @@ export class Game implements IUpdatable {
       teams: this.teamPlay
         ? { you: this.playerTeam, T: this.teamScores.T, CT: this.teamScores.CT }
         : null,
+      mode: 'kills',
     })
   }
 
@@ -1956,25 +2280,8 @@ export class Game implements IUpdatable {
     }
   }
 
-  /** Spread Long / B / Mid defaults across the actual T and CT bot counts. */
   private planDust2Roles(botTeams: Array<Team | null>): Array<Dust2Role | null> {
-    if (!this.teamPlay || this.activeMapId !== 'de_dust2') {
-      return botTeams.map(() => null)
-    }
-    let tCount = 0
-    let ctCount = 0
-    for (const t of botTeams) {
-      if (t === 'T') tCount++
-      else if (t === 'CT') ctCount++
-    }
-    const planned = assignDust2Roles(tCount, ctCount)
-    let ti = 0
-    let ci = 0
-    return botTeams.map((team) => {
-      if (team === 'T') return planned.T[ti++] ?? 't_mid_peek'
-      if (team === 'CT') return planned.CT[ci++] ?? 'ct_mid'
-      return null
-    })
+    return planDust2RolesForTeams(botTeams, this.teamPlay && this.activeMapId === 'de_dust2')
   }
 
   private countInSite(site: Dust2Site, team: Team | 'enemy-of-ct' | 'any'): number {
@@ -2049,7 +2356,7 @@ export class Game implements IUpdatable {
   /** Player got the kill */
   public onPlayerKill(victim: TrainingBot, weaponKey: string, headshot: boolean): void {
     this.stats.recordKill(headshot)
-    this.creditTeam(this.playerTeam)
+    if (!this.roundsEnabled) this.creditTeam(this.playerTeam)
     // Assist credit for bots that damaged the victim
     for (const name of victim.damagers) {
       if (name === this.playerName) continue
@@ -2063,6 +2370,7 @@ export class Game implements IUpdatable {
       headshot,
       isLocal: true,
     })
+    this.checkRoundEnd()
     this.checkMatchEnd()
   }
 
@@ -2072,7 +2380,7 @@ export class Game implements IUpdatable {
    */
   public onNetworkKill(victimName: string, weaponKey: string, headshot: boolean): void {
     this.stats.recordKill(headshot)
-    this.creditTeam(this.playerTeam)
+    if (!this.roundsEnabled) this.creditTeam(this.playerTeam)
     this.renderer.hud?.pushKillFeed({
       killer: this.playerName || 'Player',
       victim: victimName,
@@ -2080,12 +2388,13 @@ export class Game implements IUpdatable {
       headshot,
       isLocal: true,
     })
+    this.checkRoundEnd()
     this.checkMatchEnd()
   }
 
   /** Bot killed another bot — always track K; show feed only if you assisted */
   public onBotKilledByBot(killer: TrainingBot, victim: TrainingBot): void {
-    this.creditTeam(killer.team)
+    if (!this.roundsEnabled) this.creditTeam(killer.team)
     const playerName = this.playerName || 'Player'
     const assisted = victim.playerDamageDealt >= 20 || victim.damagers.has(playerName)
     if (assisted) {
@@ -2105,13 +2414,15 @@ export class Game implements IUpdatable {
       const helper = this.trainingBots.find((b) => b.name === name)
       if (helper) helper.assists++
     }
+    this.checkRoundEnd()
     this.checkMatchEnd()
   }
 
   public onPlayerDeath(): void {
     this.stats.recordDeath()
     // Friendly fire is off in team play, so the kill always belongs to the other side
-    this.creditTeam(this.teamPlay ? otherTeam(this.playerTeam) : null)
+    if (!this.roundsEnabled) this.creditTeam(this.teamPlay ? otherTeam(this.playerTeam) : null)
+    this.checkRoundEnd()
   }
 
   public clearBots(): void {
@@ -2199,18 +2510,35 @@ export class Game implements IUpdatable {
         this.flushPendingBots(Math.min(3, budget))
       }
 
+      if (this.warmupTimer > 0) {
+        this.warmupTimer = Math.max(0, this.warmupTimer - dt)
+        this.renderer.hud?.setRoundBanner(`Warmup · ${Math.ceil(this.warmupTimer)}`)
+        if (this.warmupTimer <= 0) this.beginWarmupLoadout()
+      }
+
+      if (this.roundEndTimer > 0) {
+        this.roundEndTimer = Math.max(0, this.roundEndTimer - dt)
+        if (this.roundEndTimer <= 0 && !this.matchOver) this.beginRoundFreeze()
+      }
+
       if (!this.awaitingLoadout && this.lockdownTimer > 0) {
         this.lockdownTimer = Math.max(0, this.lockdownTimer - dt)
         this.renderer.hud?.setLockdown(this.lockdownTimer > 0 ? this.lockdownTimer : null)
         if (this.lockdownTimer <= 0) {
           this.combatLive = true
+          this.roundElapsed = 0
           this.renderer.hud?.setLockdown(null)
+          this.renderer.hud?.setRoundBanner(
+            this.roundsEnabled ? `Round ${Math.max(1, this.roundNumber)}` : null
+          )
           this.flushPendingBots(8)
         }
       }
 
       if (this.combatLive && !this.matchOver) {
         this.matchElapsed += dt
+        if (this.roundsEnabled) this.roundElapsed += dt
+        this.checkRoundEnd()
         this.checkMatchEnd()
         this.updateDust2Rotates(dt)
       }
@@ -2225,7 +2553,7 @@ export class Game implements IUpdatable {
       this.multiplayer?.update(dt)
     }
 
-    this.inputManager.update(dt)
+    if (!this.demoPlaybackActive) this.inputManager.update(dt)
 
     if (this.editorActive) this.editorMenu?.refresh()
 
@@ -2233,10 +2561,26 @@ export class Game implements IUpdatable {
       this.actors[i].update(dt)
     }
 
-    this.currentPlayer.player.update(dt)
-    this.currentPlayer.player.updateDeath(dt)
-    this.physics.update(dt)
-    this.currentPlayer.player.postPhysics(dt)
+    if (this.demoPlaybackActive) {
+      const pose = this.demoPlayer.update(dt)
+      if (pose) this.applyDemoPose(pose)
+      if (!this.demoPlayer.isPlaying) {
+        this.demoPlaybackActive = false
+        for (const bot of this.trainingBots) bot.aiFrozen = false
+        this.conPrint('Demo finished.', 'ok')
+      }
+      // Skip sim — POV is driven by the demo journal
+    } else {
+      this.currentPlayer.player.update(dt)
+      this.currentPlayer.player.updateDeath(dt)
+      this.physics.update(dt)
+      this.currentPlayer.player.postPhysics(dt)
+
+      if (this.demoRecorder.isRecording) {
+        const sample = this.sampleDemoPose()
+        if (sample) this.demoRecorder.update(dt, sample)
+      }
+    }
 
     // Hand the renderer every second that passed since the last draw, not just this
     // frame's slice — otherwise a frame cap slows viewmodel / camera animation down to
@@ -2249,19 +2593,14 @@ export class Game implements IUpdatable {
   }
 
   private shouldRenderFrame(now: number): boolean {
-    if (this.fpsCap <= 0) {
-      this.lastFrameTS = now
-      return true
-    }
-    const minInterval = 1000 / this.fpsCap
-    if (now - this.lastFrameTS < minInterval - 0.5) return false
-    this.lastFrameTS = now
-    return true
+    const next = shouldRenderFrame(now, this.fpsCap, this.lastFrameTS)
+    this.lastFrameTS = next.lastFrameTS
+    return next.render
   }
 
   public startUpdateLoop() {
     this.lastUpdateTS = performance.now()
-    this.lastFrameTS = 0
+    this.lastFrameTS = -1
     this.renderAcc = 0
     this.update()
   }

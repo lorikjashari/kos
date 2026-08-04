@@ -28,12 +28,14 @@ export function damageForBodyPart(part: BodyPart, weaponKey: string): number {
   const base = BODY_PART_DAMAGE[part]
   if (weaponKey === 'Knife') {
     if (part === 'head') return 100
-    if (part === 'body') return 65
-    return 40
+    if (part === 'body') return 70
+    return 45
   }
   if (weaponKey === 'Usp') {
-    // Same 1/2/3 tap profile as AK for the training bot
-    return base
+    // Eco pistol: stronger body so mid-range fights stay relevant vs rifles
+    if (part === 'head') return 100
+    if (part === 'body') return 55
+    return 36
   }
   if (weaponKey === 'AWP') {
     if (part === 'head') return 100

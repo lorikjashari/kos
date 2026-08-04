@@ -1,10 +1,11 @@
-import { Peer, type DataConnection, type PeerJSOption } from 'peerjs'
+import { Peer, type DataConnection } from 'peerjs'
 import {
   makeRoomCode,
   peerIdForRoom,
   type NetMsg,
   type NetRole,
 } from './NetTypes'
+import { loadNetConfig } from './NetConfig'
 
 type SessionHandlers = {
   onReady: (info: { role: NetRole; code: string; peerId: string }) => void
@@ -14,30 +15,7 @@ type SessionHandlers = {
   onMessage: (fromId: string, msg: NetMsg) => void
 }
 
-const PEER_OPTS: PeerJSOption = {
-  debug: 0,
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      {
-        urls: 'turn:openrelay.metered.ca:80',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-    ],
-  },
-}
+const PEER_OPTS = loadNetConfig().peer
 
 const OPEN_TIMEOUT_MS = 20000
 const JOIN_TIMEOUT_MS = 18000
@@ -113,6 +91,19 @@ export class NetSession {
       }
     }
     throw lastErr
+  }
+
+  /** Drop a peer (full room / kick). Fires onPeerLeft. */
+  public disconnectPeer(peerId: string): void {
+    const conn = this.connections.get(peerId)
+    if (!conn) return
+    try {
+      conn.close()
+    } catch {
+      /* ignore */
+    }
+    this.connections.delete(peerId)
+    this.handlers.onPeerLeft(peerId)
   }
 
   public send(toId: string, msg: NetMsg): void {

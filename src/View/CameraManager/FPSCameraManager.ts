@@ -51,9 +51,26 @@ export class FPSCameraManager extends CameraManager {
   private deathStartRoll = 0
   private readonly deathFallDuration = 0.9
   private readonly deathGroundEye = 0.22
+  private spectateBot: import('../../Core/TrainingBot').TrainingBot | null = null
+  private spectateFreecam = false
 
   constructor(player: Player, camera: THREE.PerspectiveCamera) {
     super(player, camera)
+  }
+
+  public setSpectateTarget(bot: import('../../Core/TrainingBot').TrainingBot): void {
+    this.spectateBot = bot
+    this.spectateFreecam = false
+  }
+
+  public setSpectateFreecam(on: boolean): void {
+    this.spectateFreecam = on
+    if (on) this.spectateBot = null
+  }
+
+  public clearSpectateTarget(): void {
+    this.spectateBot = null
+    this.spectateFreecam = false
   }
 
   public setLeanDirection(direction: number): void {
@@ -158,6 +175,10 @@ export class FPSCameraManager extends CameraManager {
         this.beginDeathCam()
         this.wasDead = true
       }
+      if (this.spectateBot || this.spectateFreecam) {
+        this.applySpectateView(dt)
+        return
+      }
       this.applyDeathView(dt)
       return
     }
@@ -166,6 +187,7 @@ export class FPSCameraManager extends CameraManager {
       this.wasDead = false
       this.roll = 0
       this.resetRecoil()
+      this.clearSpectateTarget()
     }
 
     this.idlePhase += dt
@@ -198,8 +220,33 @@ export class FPSCameraManager extends CameraManager {
     this.applyView()
   }
 
+  private applySpectateView(_dt: number): void {
+    if (!this.aimInitialized) this.syncAimFromCamera()
+    const eyeY = 1.55
+    if (this.spectateBot) {
+      this.camera.position.set(
+        this.spectateBot.position.x,
+        this.spectateBot.position.y + eyeY,
+        this.spectateBot.position.z
+      )
+      // Follow the teammate's facing; mouse still nudges via onMouseMove
+      this.aimYaw = this.spectateBot.yaw
+      this.aimPitch = this.spectateBot.aimPitch * 0.85
+    } else if (this.spectateFreecam) {
+      // Stay near the corpse; look freely
+      this.camera.position.set(
+        this.player.position.x,
+        this.player.position.y + eyeY,
+        this.player.position.z
+      )
+    }
+    this.euler.set(this.aimPitch, this.aimYaw, 0, 'YXZ')
+    this.camera.quaternion.setFromEuler(this.euler)
+  }
+
   public onMouseMove(event) {
-    if (this.player.isDead) return
+    // Allow look while spectating; block only on classic death cam
+    if (this.player.isDead && !this.spectateBot && !this.spectateFreecam) return
     super.onMouseMove(event)
     if (!this.aimInitialized) this.syncAimFromCamera()
 
@@ -221,6 +268,23 @@ export class FPSCameraManager extends CameraManager {
 
   public getDirection(): Vector3D {
     return this.player.lookingDirection.clone()
+  }
+
+  /** Base aim (no punch/spray) — used by local demo record/replay. */
+  public getAimAngles(): { yaw: number; pitch: number } {
+    if (!this.aimInitialized) this.syncAimFromCamera()
+    return { yaw: this.aimYaw, pitch: this.aimPitch }
+  }
+
+  public setAimAngles(yaw: number, pitch: number): void {
+    this.aimYaw = yaw
+    this.aimPitch = Math.max(PI_2 - maxPolarAngle, Math.min(PI_2 - minPolarAngle, pitch))
+    this.punchPitch = 0
+    this.punchYaw = 0
+    this.sprayPitch = 0
+    this.sprayYaw = 0
+    this.aimInitialized = true
+    this.applyView()
   }
 
   /** CS kick: temporary punch + spray climb; punch recovers so view returns. */

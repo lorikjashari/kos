@@ -5,15 +5,20 @@ import { Game } from '../Game'
 import { NetSession } from './NetSession'
 import {
   botTargetForHumans,
+  isValidNetHit,
   MP_FILL_BOTS,
+  MP_MAX_HUMANS,
   MP_TICK_HZ,
   type NetMsg,
   type NetRole,
 } from './NetTypes'
+import { authorizeHit, isKnownWeapon, sanitizePlayerVitals, type HitPose } from './HitValidation'
+import { clampInterpDelay, DEFAULT_INTERP_DELAY } from './NetInterp'
 import { roomDirectory, RoomDirectory } from './RoomDirectory'
 import type { MatchLength, TeamMode } from '../Core/MatchStats'
 import type { MapId } from '../Core/MapCatalog'
 import { clampTeamSize, DEFAULT_TEAM_SIZE, otherTeam, type Team } from '../Core/Teams'
+import { recordTelemetry, showToast } from '../UI/Toast'
 
 export type MultiplayerStartConfig = {
   mode: 'host' | 'join'
@@ -36,7 +41,7 @@ type HumanRec = { id: string; name: string; team?: Team }
 
 /**
  * Friends multiplayer glue: PeerJS room + snapshot sync + bot fill replace.
- * Host simulates bots; everyone simulates their own player and shares pose/HP.
+ * Host validates hits and owns bot HP; humans still apply authorized damage locally.
  */
 export class MultiplayerMatch {
   private session: NetSession | null = null
@@ -46,7 +51,6 @@ export class MultiplayerMatch {
   private fillBots = MP_FILL_BOTS
   private humans = new Map<string, HumanRec>()
   private acc = 0
-  private lastShootSent = 0
   private enabled = false
   private pendingShoot = false
   /** Host's choice; clients adopt it from welcome/roster */
@@ -55,6 +59,12 @@ export class MultiplayerMatch {
   private teamPlay = false
   private teamSize = DEFAULT_TEAM_SIZE
   private localTeam: Team = 'CT'
+  /** Last known poses for host hit range / team checks */
+  private poses = new Map<string, HitPose>()
+  /** Host-tracked human vitals (authoritative until victim confirms death) */
+  private hostVitals = new Map<string, { hp: number; armor: number; alive: boolean }>()
+  private hitRateMs = new Map<string, number>()
+  private hostLeftHandled = false
 
   public get active(): boolean {
     return this.enabled && this.role !== 'offline'
@@ -90,7 +100,11 @@ export class MultiplayerMatch {
 
     const session = new NetSession({
       onReady: () => {},
-      onError: (message) => console.warn('[mp]', message),
+      onError: (message) => {
+        console.warn('[mp]', message)
+        showToast(message.slice(0, 160), 'warn')
+        recordTelemetry('mp_error', { message: message.slice(0, 200) })
+      },
       onPeerJoined: (peerId) => this.onPeerJoined(peerId),
       onPeerLeft: (peerId) => this.onPeerLeft(peerId),
       onMessage: (fromId, msg) => this.onMessage(fromId, msg),
@@ -132,7 +146,16 @@ export class MultiplayerMatch {
     this.session?.destroy()
     this.session = null
     this.humans.clear()
+    this.poses.clear()
+    this.hostVitals.clear()
+    this.hitRateMs.clear()
+    this.hostLeftHandled = false
     this.clearNetworkPuppets()
+  }
+
+  /** Render delay for remote pawns (seconds); Game wires ex_interp. */
+  public getInterpDelay(): number {
+    return Game.getInstance().getNetInterpDelay()
   }
 
   public noteLocalShot(): void {
@@ -180,14 +203,23 @@ export class MultiplayerMatch {
 
   private onPeerJoined(peerId: string): void {
     if (!this.isHost || !this.session) return
-    // Wait for hello to learn name; still reserve roster slot
+    // Capacity enforced on hello — reserve only when under the cap
+    if (this.humans.size >= MP_MAX_HUMANS) return
     if (!this.humans.has(peerId)) {
       this.humans.set(peerId, { id: peerId, name: 'Player' })
     }
   }
 
   private onPeerLeft(peerId: string): void {
+    // Client: losing the host peer ends the session
+    if (!this.isHost && this.session && peerId === this.session.hostPeerId) {
+      this.handleHostGone('Host disconnected — returned to menu')
+      return
+    }
     this.humans.delete(peerId)
+    this.poses.delete(`player:${peerId}`)
+    this.hostVitals.delete(peerId)
+    this.hitRateMs.delete(peerId)
     this.removePuppet(`player:${peerId}`)
     if (this.isHost) {
       this.broadcastRoster()
@@ -196,17 +228,31 @@ export class MultiplayerMatch {
     }
   }
 
+  private handleHostGone(reason: string): void {
+    if (this.hostLeftHandled) return
+    this.hostLeftHandled = true
+    this.enabled = false
+    Game.getInstance().notifyMultiplayerEnded(reason)
+  }
+
   private onMessage(fromId: string, msg: NetMsg): void {
     if (!this.session) return
     switch (msg.t) {
       case 'hello': {
         if (!this.isHost) return
+        if (this.humans.size >= MP_MAX_HUMANS && !this.humans.has(fromId)) {
+          this.session.send(fromId, { t: 'reject', reason: 'Room is full' })
+          this.session.disconnectPeer(fromId)
+          return
+        }
         const known = this.humans.get(fromId)
+        const name = (msg.name || 'Player').slice(0, 24)
         this.humans.set(fromId, {
           id: fromId,
-          name: msg.name || 'Player',
+          name,
           team: this.teamPlay ? (known?.team ?? this.balancedTeam()) : undefined,
         })
+        this.hostVitals.set(fromId, { hp: 100, armor: 100, alive: true })
         this.session.send(fromId, {
           t: 'welcome',
           hostName: this.localName,
@@ -220,6 +266,11 @@ export class MultiplayerMatch {
         this.broadcastRoster()
         this.reconcileBotCount()
         roomDirectory.updateHosting(this.humans.size)
+        break
+      }
+      case 'reject': {
+        if (this.isHost) return
+        this.handleHostGone(msg.reason || 'Could not join room')
         break
       }
       case 'welcome': {
@@ -280,11 +331,8 @@ export class MultiplayerMatch {
         break
       }
       case 'hit': {
-        if (this.isHost && fromId !== this.session.localPeerId) {
-          this.handleHit(fromId, msg)
-        } else if (!this.isHost) {
-          this.applyIncomingHit(msg)
-        }
+        if (this.isHost) this.handleHit(fromId, msg)
+        else this.applyIncomingHit(msg)
         break
       }
       case 'killfeed': {
@@ -311,49 +359,90 @@ export class MultiplayerMatch {
   }
 
   private handleHit(fromId: string, msg: Extract<NetMsg, { t: 'hit' }>): void {
-    if (!this.session) return
-    if (msg.targetId.startsWith('bot:')) {
-      const name = msg.targetId.slice(4)
+    if (!this.session || !this.isHost) return
+    if (!isValidNetHit(msg)) return
+
+    this.refreshLocalPose()
+    const attackerKey = `player:${fromId}`
+    const known = this.humans.get(fromId)
+    const authorized = authorizeHit({
+      fromId,
+      claimedAttackerName: msg.attackerName,
+      knownAttackerName: known?.name || (fromId === this.session.localPeerId ? this.localName : ''),
+      weapon: msg.weapon,
+      headshot: msg.headshot,
+      targetId: msg.targetId,
+      attacker: this.poses.get(attackerKey) ?? this.poseFromLiveTarget(attackerKey),
+      target: this.poses.get(msg.targetId) ?? this.poseFromLiveTarget(msg.targetId),
+      nowMs: performance.now(),
+      lastHitAtMs: this.hitRateMs.get(fromId) ?? 0,
+      teamPlay: this.teamPlay,
+    })
+    if (!authorized.ok) return
+    this.hitRateMs.set(fromId, performance.now())
+
+    const out: Extract<NetMsg, { t: 'hit' }> = {
+      t: 'hit',
+      targetId: msg.targetId,
+      damage: authorized.damage,
+      headshot: msg.headshot,
+      attackerName: authorized.attackerName,
+      weapon: authorized.weapon,
+    }
+
+    if (out.targetId.startsWith('bot:')) {
+      const name = out.targetId.slice(4)
       const game = Game.getInstance()
       const bot = game.trainingBots.find((b) => !b.isNetworkPuppet && b.name === name)
       if (!bot || !bot.isAlive) return
-      const part = msg.headshot ? 'head' : 'torso'
-      const result = bot.takeDamage(part as any, msg.weapon, true)
+      const result = bot.takeDamage(authorized.part, authorized.weapon, true, authorized.distance)
+      this.rememberPose(out.targetId, {
+        x: bot.position.x,
+        y: bot.position.y,
+        z: bot.position.z,
+        alive: bot.isAlive,
+        team: bot.team,
+        weapon: bot.weaponKey,
+      })
       if (result.killed) {
         const feed: NetMsg = {
           t: 'killfeed',
-          killer: msg.attackerName,
+          killer: out.attackerName,
           victim: bot.name,
-          weapon: msg.weapon,
-          headshot: msg.headshot,
+          weapon: out.weapon,
+          headshot: out.headshot,
         }
         this.session.broadcast(feed)
         game.renderer.hud?.pushKillFeed({
-          killer: msg.attackerName,
+          killer: out.attackerName,
           victim: bot.name,
-          weaponKey: msg.weapon,
-          headshot: msg.headshot,
-          isLocal: msg.attackerName === this.localName,
+          weaponKey: out.weapon,
+          headshot: out.headshot,
+          isLocal: out.attackerName === this.localName,
         })
       }
       return
     }
-    if (msg.targetId.startsWith('player:')) {
-      const peerId = msg.targetId.slice(7)
-      if (peerId === this.session.localPeerId) {
-        this.applyIncomingHit(msg)
-      } else {
-        this.session.send(peerId, msg)
-      }
+
+    if (out.targetId.startsWith('player:')) {
+      const peerId = out.targetId.slice(7)
+      const vitals = this.hostVitals.get(peerId)
+      if (vitals && !vitals.alive) return
+      // Victim applies armor locally; host damage is weapon-table only
+      if (peerId === this.session.localPeerId) this.applyIncomingHit(out)
+      else this.session.send(peerId, out)
     }
   }
 
   private applyIncomingHit(msg: Extract<NetMsg, { t: 'hit' }>): void {
     if (!this.session) return
+    if (!isValidNetHit(msg)) return
     if (msg.targetId !== `player:${this.session.localPeerId}`) return
+    if (!isKnownWeapon(msg.weapon)) return
     const player = Game.getInstance().currentPlayer?.player
     if (!player || player.isDead) return
-    const killed = player.takeDamage(msg.damage, msg.attackerName).killed
+    // Damage was recomputed by the host — do not re-derive from client tables here
+    const killed = player.takeDamage(msg.damage, msg.attackerName, { headshot: msg.headshot }).killed
     if (killed) {
       const feed: NetMsg = {
         t: 'killfeed',
@@ -375,6 +464,73 @@ export class MultiplayerMatch {
         this.session.sendToHost(feed)
       }
     }
+  }
+
+  private rememberPose(key: string, pose: HitPose): void {
+    this.poses.set(key, pose)
+  }
+
+  private refreshLocalPose(): void {
+    if (!this.session) return
+    const player = Game.getInstance().currentPlayer?.player
+    if (!player) return
+    this.rememberPose(`player:${this.session.localPeerId}`, {
+      x: player.position.x,
+      y: player.getFeetY(),
+      z: player.position.z,
+      alive: !player.isDead,
+      team: this.teamPlay ? this.localTeam : null,
+      weapon: player.currentWeapon.key,
+    })
+    if (this.isHost) {
+      this.hostVitals.set(this.session.localPeerId, {
+        hp: player.health,
+        armor: player.armor,
+        alive: !player.isDead,
+      })
+    }
+  }
+
+  private poseFromLiveTarget(targetId: string): HitPose | null {
+    const game = Game.getInstance()
+    if (targetId.startsWith('bot:')) {
+      const bot = game.trainingBots.find((b) => !b.isNetworkPuppet && b.name === targetId.slice(4))
+      if (!bot) return null
+      return {
+        x: bot.position.x,
+        y: bot.position.y,
+        z: bot.position.z,
+        alive: bot.isAlive,
+        team: bot.team,
+        weapon: bot.weaponKey,
+      }
+    }
+    if (targetId.startsWith('player:')) {
+      const peerId = targetId.slice(7)
+      if (peerId === this.session?.localPeerId) {
+        const player = game.currentPlayer?.player
+        if (!player) return null
+        return {
+          x: player.position.x,
+          y: player.getFeetY(),
+          z: player.position.z,
+          alive: !player.isDead,
+          team: this.teamPlay ? this.localTeam : null,
+          weapon: player.currentWeapon.key,
+        }
+      }
+      const puppet = game.trainingBots.find((b) => b.netPeerId === peerId)
+      if (!puppet) return null
+      return {
+        x: puppet.position.x,
+        y: puppet.position.y,
+        z: puppet.position.z,
+        alive: puppet.isAlive,
+        team: puppet.team,
+        weapon: puppet.weaponKey,
+      }
+    }
+    return null
   }
 
   private broadcastRoster(): void {
@@ -420,6 +576,7 @@ export class MultiplayerMatch {
     if (!this.session) return
     const player = Game.getInstance().currentPlayer?.player
     if (!player) return
+    this.refreshLocalPose()
     const look = player.lookingDirection
     const yaw = Math.atan2(look.x, look.z)
     const pitch = Math.asin(Math.max(-1, Math.min(1, look.y)))
@@ -462,27 +619,54 @@ export class MultiplayerMatch {
     const game = Game.getInstance()
     const list = game.trainingBots
       .filter((b) => !b.isNetworkPuppet)
-      .map((b) => ({
-        name: b.name,
-        x: b.position.x,
-        y: b.position.y,
-        z: b.position.z,
-        yaw: b.yaw,
-        hp: b.health,
-        alive: b.isAlive,
-        weapon: b.weaponKey,
-        moving: b.isMoving,
-        shoot: b.shootFlash > 0.05,
-        team: b.team ?? undefined,
-      }))
+      .map((b) => {
+        this.rememberPose(`bot:${b.name}`, {
+          x: b.position.x,
+          y: b.position.y,
+          z: b.position.z,
+          alive: b.isAlive,
+          team: b.team,
+          weapon: b.weaponKey,
+        })
+        return {
+          name: b.name,
+          x: b.position.x,
+          y: b.position.y,
+          z: b.position.z,
+          yaw: b.yaw,
+          hp: b.health,
+          alive: b.isAlive,
+          weapon: b.weaponKey,
+          moving: b.isMoving,
+          shoot: b.shootFlash > 0.05,
+          team: b.team ?? undefined,
+        }
+      })
     this.session.broadcast({ t: 'bots', list })
   }
 
   private applyRemotePlayer(msg: Extract<NetMsg, { t: 'player' }>): void {
     const known = this.humans.get(msg.id)
-    this.humans.set(msg.id, { id: msg.id, name: msg.name, team: known?.team })
-    const bot = this.ensurePuppet(`player:${msg.id}`, msg.name, msg.id)
+    this.humans.set(msg.id, { id: msg.id, name: msg.name.slice(0, 24), team: known?.team })
+    const vitals = sanitizePlayerVitals(msg.hp, msg.armor, msg.alive)
+    const weapon = isKnownWeapon(msg.weapon) ? msg.weapon : 'AK47'
+    if (!Number.isFinite(msg.x) || !Number.isFinite(msg.y) || !Number.isFinite(msg.z)) return
+    if (Math.abs(msg.x) > 2000 || Math.abs(msg.y) > 500 || Math.abs(msg.z) > 2000) return
+
+    this.rememberPose(`player:${msg.id}`, {
+      x: msg.x,
+      y: msg.y,
+      z: msg.z,
+      alive: vitals.alive,
+      team: known?.team ?? null,
+      weapon,
+    })
+    if (this.isHost) this.hostVitals.set(msg.id, vitals)
+
+    const bot = this.ensurePuppet(`player:${msg.id}`, msg.name.slice(0, 24), msg.id)
     bot.team = known?.team ?? null
+    const t = performance.now() / 1000
+    bot.pushNetSample({ t, x: msg.x, y: msg.y, z: msg.z, yaw: msg.yaw, pitch: msg.pitch })
     bot.netTX = msg.x
     bot.netTY = msg.y
     bot.netTZ = msg.z
@@ -490,9 +674,9 @@ export class MultiplayerMatch {
     bot.netTPitch = msg.pitch
     bot.hasNetTarget = true
     if (bot.position.y < -20) bot.position.set(msg.x, msg.y, msg.z)
-    bot.health = msg.hp
-    bot.isAlive = msg.alive
-    bot.weaponKey = msg.weapon
+    bot.health = vitals.hp
+    bot.isAlive = vitals.alive
+    bot.weaponKey = weapon
     bot.isMoving = msg.moving
     bot.isCrouching = !!msg.crouch
     bot.netMoveX = msg.mx ?? 0
@@ -501,7 +685,7 @@ export class MultiplayerMatch {
     bot.isReloadingNet = !!msg.reload
     if (msg.shoot) {
       bot.shootFlash = 0.14
-      void Game.getInstance().audioManager.playShot(msg.weapon, {
+      void Game.getInstance().audioManager.playShot(weapon, {
         x: msg.x,
         y: msg.y + 1.4,
         z: msg.z,
@@ -515,28 +699,41 @@ export class MultiplayerMatch {
     }
     const idx = Game.getInstance().trainingBots.indexOf(bot)
     const renderer = Game.getInstance().botRenderers[idx]
-    renderer?.setWeapon(TrainingBotRenderer.visualWeaponFor(msg.weapon))
+    renderer?.setWeapon(TrainingBotRenderer.visualWeaponFor(weapon))
   }
 
   private applyRemoteBots(msg: Extract<NetMsg, { t: 'bots' }>): void {
     const seen = new Set<string>()
     for (const b of msg.list) {
       seen.add(b.name)
+      const vitals = sanitizePlayerVitals(b.hp, 0, b.alive)
+      const weapon = isKnownWeapon(b.weapon) ? b.weapon : 'AK47'
+      if (!Number.isFinite(b.x) || !Number.isFinite(b.y) || !Number.isFinite(b.z)) continue
+      this.rememberPose(`bot:${b.name}`, {
+        x: b.x,
+        y: b.y,
+        z: b.z,
+        alive: vitals.alive,
+        team: b.team ?? null,
+        weapon,
+      })
       const bot = this.ensurePuppet(`bot:${b.name}`, b.name, undefined)
+      const t = performance.now() / 1000
+      bot.pushNetSample({ t, x: b.x, y: b.y, z: b.z, yaw: b.yaw, pitch: 0 })
       bot.netTX = b.x
       bot.netTY = b.y
       bot.netTZ = b.z
       bot.netTYaw = b.yaw
       bot.hasNetTarget = true
       if (bot.position.y < -20) bot.position.set(b.x, b.y, b.z)
-      bot.health = b.hp
-      bot.isAlive = b.alive
-      bot.weaponKey = b.weapon
+      bot.health = vitals.hp
+      bot.isAlive = vitals.alive
+      bot.weaponKey = weapon
       bot.isMoving = b.moving
       bot.team = b.team ?? null
       if (b.shoot) bot.shootFlash = 0.12
       const idx = Game.getInstance().trainingBots.indexOf(bot)
-      Game.getInstance().botRenderers[idx]?.setWeapon(TrainingBotRenderer.visualWeaponFor(b.weapon))
+      Game.getInstance().botRenderers[idx]?.setWeapon(TrainingBotRenderer.visualWeaponFor(weapon))
     }
     const game = Game.getInstance()
     for (const bot of [...game.trainingBots]) {

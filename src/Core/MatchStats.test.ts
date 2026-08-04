@@ -6,9 +6,14 @@ import {
   MatchStats,
   formatClock,
   formatPlaytime,
+  leadingKillsFrom,
+  matchShouldEnd,
+  ordinal,
   pickBotNames,
   ratio,
   rulesForLength,
+  sortScoreRows,
+  type ScoreRow,
 } from './MatchStats'
 
 function installMemoryStorage(): void {
@@ -149,5 +154,37 @@ describe('pickBotNames', () => {
   it('clamps to the size of the pool', () => {
     expect(pickBotNames(999).length).toBeLessThanOrEqual(BOT_NAME_POOL.length)
     expect(pickBotNames(-3)).toHaveLength(0)
+  })
+})
+
+describe('scoreboard helpers', () => {
+  const rows: ScoreRow[] = [
+    { name: 'b', kills: 2, deaths: 1, assists: 0, isYou: false },
+    { name: 'a', kills: 5, deaths: 0, assists: 0, isYou: true },
+    { name: 'c', kills: 5, deaths: 2, assists: 1, isYou: false },
+  ]
+
+  it('sorts by kills then assists then deaths', () => {
+    expect(sortScoreRows(rows).map((r) => r.name)).toEqual(['c', 'a', 'b'])
+  })
+
+  it('reads the leading kill count', () => {
+    expect(leadingKillsFrom(rows)).toBe(5)
+    expect(leadingKillsFrom([])).toBe(0)
+  })
+
+  it('ends the match on kill or time limit', () => {
+    expect(matchShouldEnd({ killLimit: 10, timeLimitSec: 0 }, 10, 60)).toBe('killLimit')
+    expect(matchShouldEnd({ killLimit: 10, timeLimitSec: 0 }, 9, 60)).toBeNull()
+    expect(matchShouldEnd({ killLimit: 0, timeLimitSec: 90 }, 99, 90)).toBe('timeLimit')
+    expect(matchShouldEnd({ killLimit: 0, timeLimitSec: 90 }, 99, 30)).toBeNull()
+  })
+
+  it('formats ordinals', () => {
+    expect(ordinal(1)).toBe('1st')
+    expect(ordinal(2)).toBe('2nd')
+    expect(ordinal(3)).toBe('3rd')
+    expect(ordinal(11)).toBe('11th')
+    expect(ordinal(22)).toBe('22nd')
   })
 })

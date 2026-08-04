@@ -412,6 +412,12 @@ export class AudioManager extends THREE.AudioListener {
     return ids[Math.floor(Math.random() * ids.length)]
   }
 
+  /** Armor/helmet ping when a headshot is partially absorbed */
+  public playHelmetHit(): Promise<void> {
+    this.playId('helmet_hit', 1)
+    return Promise.resolve()
+  }
+
   /** KoS flesh impact when a bullet hits a bot */
   public playFleshHit(isHead = false): Promise<void> {
     // Cap concurrent one-shots — overlapping decode/play caused first-hit freezes

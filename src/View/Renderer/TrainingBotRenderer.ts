@@ -263,6 +263,27 @@ export class TrainingBotRenderer implements IUpdatable {
    * equivalent, so they sank into black in any corner the sun couldn't reach. Give
    * them a matching floor of self-illumination from their own albedo.
    */
+  /** Recolor the T mesh for CT side when no CT GLB is available. */
+  private static applyCtTint(mesh: THREE.Mesh): void {
+    if (!mesh.material) return
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const mat of mats) {
+      const m = mat as THREE.MeshStandardMaterial & { color?: THREE.Color; emissive?: THREE.Color }
+      if (!m.color) continue
+      // Push warm camo toward navy/blue without nuking albedo maps
+      m.color.setRGB(
+        m.color.r * 0.52 + 0.06,
+        m.color.g * 0.58 + 0.1,
+        Math.min(1, m.color.b * 0.72 + 0.32)
+      )
+      if (m.emissive) {
+        m.emissive.r *= 0.7
+        m.emissive.g *= 0.85
+        m.emissive.b = Math.min(1, m.emissive.b * 0.9 + 0.05)
+      }
+    }
+  }
+
   private static applySkinLift(mat: THREE.MeshStandardMaterial): void {
     if (!mat || !('emissive' in mat) || !mat.emissive) return
     const lift = isTouchDevice() ? 0.3 : 0.18
@@ -304,6 +325,8 @@ export class TrainingBotRenderer implements IUpdatable {
       // per-pixel PCF taps buy nothing
       child.receiveShadow = !isTouchDevice()
       TrainingBotRenderer.prepareSkinMaterials(child)
+      // No CT GLB — cooler blue vest/clothes tint on the shared terrorist mesh
+      if (this.bot.team === 'CT') TrainingBotRenderer.applyCtTint(child)
     })
 
     root.add(model)
@@ -1632,6 +1655,43 @@ export class TrainingBotRenderer implements IUpdatable {
       'POSE EDIT (cs_terrorist) — local euler degrees, order XYZ, offset from bind pose:\n' +
       lines.join('\n')
     )
+  }
+
+  /** Machine-readable pose for localStorage / download (degrees, XYZ offsets). */
+  public getPoseEditsJson(): {
+    version: 1
+    model: 'cs_terrorist'
+    bones: Record<string, { x: number; y: number; z: number }>
+  } {
+    const bones: Record<string, { x: number; y: number; z: number }> = {}
+    for (const { key } of this.getEditableBones()) {
+      const o = this.getBoneOffsetDeg(key)
+      if (Math.abs(o.x) < 0.05 && Math.abs(o.y) < 0.05 && Math.abs(o.z) < 0.05) continue
+      bones[key] = {
+        x: Math.round(o.x * 10) / 10,
+        y: Math.round(o.y * 10) / 10,
+        z: Math.round(o.z * 10) / 10,
+      }
+    }
+    return { version: 1, model: 'cs_terrorist', bones }
+  }
+
+  public applyPoseEditsJson(raw: unknown): number {
+    if (!raw || typeof raw !== 'object') return 0
+    const data = raw as { bones?: Record<string, { x?: number; y?: number; z?: number }> }
+    if (!data.bones || typeof data.bones !== 'object') return 0
+    this.beginBoneEdit()
+    let n = 0
+    for (const [key, o] of Object.entries(data.bones)) {
+      if (!o || typeof o !== 'object') continue
+      const x = Number(o.x) || 0
+      const y = Number(o.y) || 0
+      const z = Number(o.z) || 0
+      if (!this.csAnimBones[key]) continue
+      this.setBoneOffsetDeg(key, x, y, z)
+      n++
+    }
+    return n
   }
 
   public setAxesVisible(visible: boolean): void {

@@ -66,7 +66,7 @@ export function rulesForLength(length: MatchLength | undefined): MatchRules {
 /** 'coop' puts every human on one side against the bots. */
 export type TeamMode = 'ffa' | 'coop'
 
-export type MatchEndReason = 'killLimit' | 'timeLimit'
+export type MatchEndReason = 'killLimit' | 'timeLimit' | 'roundLimit'
 
 export type MatchResult = {
   reason: MatchEndReason
@@ -233,4 +233,45 @@ export function formatPlaytime(totalSeconds: number): string {
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
   return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+export function ordinal(n: number): string {
+  const rem100 = n % 100
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`
+  switch (n % 10) {
+    case 1:
+      return `${n}st`
+    case 2:
+      return `${n}nd`
+    case 3:
+      return `${n}rd`
+    default:
+      return `${n}th`
+  }
+}
+
+/** FFA / TDM scoreboard order: kills, then assists, then fewer deaths. */
+export function sortScoreRows(rows: ScoreRow[], playerTeam?: 'T' | 'CT'): ScoreRow[] {
+  const next = [...rows]
+  next.sort((a, b) => b.kills - a.kills || b.assists - a.assists || a.deaths - b.deaths)
+  if (playerTeam) {
+    next.sort((a, b) => Number(b.team === playerTeam) - Number(a.team === playerTeam))
+  }
+  return next
+}
+
+export function leadingKillsFrom(rows: ScoreRow[]): number {
+  let best = 0
+  for (const r of rows) best = Math.max(best, r.kills)
+  return best
+}
+
+export function matchShouldEnd(
+  rules: MatchRules,
+  leadingKills: number,
+  matchElapsed: number
+): MatchEndReason | null {
+  if (rules.killLimit > 0 && leadingKills >= rules.killLimit) return 'killLimit'
+  if (rules.timeLimitSec > 0 && matchElapsed >= rules.timeLimitSec) return 'timeLimit'
+  return null
 }

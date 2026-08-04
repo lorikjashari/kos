@@ -132,6 +132,9 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
 
   private mobilePerfProfile: MobilePerfProfile = 'balanced'
   private mobileResMode: MobileResMode = 'normal'
+  /** Multiplies mobile backbuffer scale (Dust II is heavier than Pool Day). */
+  private mapPerfScale = 1
+  private dust2Mobile = false
 
   public applyMobilePerfProfile(profile: MobilePerfProfile): void {
     if (!this.mobileGameplay) return
@@ -140,7 +143,7 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
       this.renderingConfig.hasPostProcess = false
       this.renderingConfig.hasParticle = false
       // Shadows are the single biggest depth cue; keep a cheap 1024 map even here
-      this.renderingConfig.hasShadow = true
+      this.renderingConfig.hasShadow = !this.dust2Mobile
     } else if (profile === 'balanced') {
       this.renderingConfig.hasPostProcess = false
       // 2.5k alpha-blended sprites is pure fill rate for ambient dust nobody notices
@@ -159,6 +162,18 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
     }
   }
 
+  /** Dust II on phones: lower res scale and drop shadows on the smooth profile. */
+  public applyMapPerfBudget(mapId: string): void {
+    if (!this.mobileGameplay) {
+      this.mapPerfScale = 1
+      this.dust2Mobile = false
+      return
+    }
+    this.dust2Mobile = mapId === 'de_dust2'
+    this.mapPerfScale = this.dust2Mobile ? 0.82 : 1
+    this.applyMobilePerfProfile(this.mobilePerfProfile)
+  }
+
   public setMobileResMode(mode: MobileResMode): void {
     if (!this.mobileGameplay) return
     this.mobileResMode = mode
@@ -170,8 +185,9 @@ export class Renderer extends THREE.WebGLRenderer implements IUpdatable {
    * is predictable across very different device pixel ratios.
    */
   private applyMobileResolution(): void {
-    const scale =
+    const base =
       this.mobilePerfProfile === 'smooth' ? 0.76 : this.mobilePerfProfile === 'balanced' ? 0.92 : 1.12
+    const scale = base * this.mapPerfScale
     this.renderingConfig.resolution = 1
     this.setPixelRatio(1)
 

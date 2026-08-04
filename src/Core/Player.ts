@@ -22,6 +22,8 @@ export class Player extends Pawn implements IUpdatable {
   public velocity: Vector3D = new Vector3D(0, 0, 0)
   public lookingDirection: Vector3D = Vector3D.ZERO()
   public lastShootTimeStamp = new Date()
+  /** ms since last shot — advanced with dt so recoil reset is framerate-stable */
+  private recoilIdleMs = 0
   private jumpRechargeTime = 100 // ms — half previous delay
   private jumpRechargeTimer = 0
   /** After jumping, ignore ground ray briefly so sticky rays don't cancel the jump */
@@ -593,6 +595,7 @@ export class Player extends Pawn implements IUpdatable {
     this.updateJumpRechargeTime(dt)
     this.updateReload(dt)
     this.decayViewOffset(dt)
+    this.recoilIdleMs += dt * 1000
   }
 
   /** After the physics step: re-probe and re-seat on the ground so the frame the
@@ -789,6 +792,11 @@ export class Player extends Pawn implements IUpdatable {
     return base + moving * weapon.moveSpread + airborne * weapon.airSpread + spray * weapon.spraySpread
   }
 
+  /** Cone half-angle in radians — for dynamic crosshair / HUD. */
+  public getSpreadCone(): number {
+    return this.currentSpread()
+  }
+
   /** Random direction inside a cone around `dir`. */
   private applySpread(dir: Vector3D, spread: number): Vector3D {
     if (spread <= 0) return dir
@@ -817,6 +825,7 @@ export class Player extends Pawn implements IUpdatable {
     const hitScanResult: HitscanResult = {
       hasHit: false,
       hitPosition: undefined,
+      shotDirection: dir.clone(),
     }
 
     // Exact silhouette hit on robot meshes (head / torso / arms / legs triangles)
@@ -908,6 +917,7 @@ export class Player extends Pawn implements IUpdatable {
       this.refillCurrentMag()
     }
     this.lastShootTimeStamp = new Date()
+    this.recoilIdleMs = 0
     Game.getInstance().getMultiplayer()?.noteLocalShot()
     return hitScanResult
   }
@@ -957,8 +967,7 @@ export class Player extends Pawn implements IUpdatable {
   }
 
   public canResetRecoil(): boolean {
-    // TODO: do it with deltaTime.
-    return new Date().getTime() - this.lastShootTimeStamp.getTime() > this.rateOfFire * 2
+    return this.recoilIdleMs > this.rateOfFire * 2
   }
   public canJump(): boolean {
     if (!this.isOnGround) return false
@@ -1045,13 +1054,20 @@ export class Player extends Pawn implements IUpdatable {
     this.deathAge = 0
   }
 
-  public takeDamage(amount: number, _source = 'bot'): { killed: boolean } {
+  public takeDamage(
+    amount: number,
+    _source = 'bot',
+    opts?: { headshot?: boolean }
+  ): { killed: boolean } {
     if (this.isDead) return { killed: false }
     let dmg = amount
     if (this.armor > 0) {
       const armorAbsorb = Math.min(this.armor, dmg * 0.5)
       this.armor -= armorAbsorb
       dmg -= armorAbsorb
+      if (armorAbsorb > 0 && opts?.headshot) {
+        void Game.getInstance().audioManager.playHelmetHit()
+      }
     }
     this.health = Math.max(0, this.health - dmg)
     Game.getInstance().renderer?.hud?.flashDamage(dmg)
@@ -1067,7 +1083,12 @@ export class Player extends Pawn implements IUpdatable {
       // Never play kill VO outside an active match (menu / loading used to void-fall here).
       if (game.matchStarted) {
         void game.audioManager.playPlayerDeath()
-        game.renderer?.hud?.showDeath(this.deathRespawnDelay)
+        if (game.shouldHoldRespawn()) {
+          game.enterSpectator()
+          game.renderer?.hud?.showDeathSpectate()
+        } else {
+          game.renderer?.hud?.showDeath(this.deathRespawnDelay)
+        }
       }
       return { killed: true }
     }
@@ -1077,6 +1098,8 @@ export class Player extends Pawn implements IUpdatable {
   public updateDeath(dt: number): void {
     if (!this.isDead) return
     this.deathAge += dt
+    // Round TDM holds bodies until the next freeze — spectator takes over
+    if (Game.getInstance().shouldHoldRespawn()) return
     this.deathTimer = Math.max(0, this.deathTimer - dt)
     if (this.deathTimer <= 0) {
       this.respawn()

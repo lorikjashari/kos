@@ -1,20 +1,24 @@
-import Ammo from 'ammojs-typed';
-import { BufferGeometry, Material, Mesh } from 'three';
-import { Physics } from '../Physics/Physics';
-import { Actor } from './Actor';
-import { Vector3D } from './Vector';
-export class Pawn extends Actor {
-    protected createShape(size?: Vector3D, mesh?: Mesh<BufferGeometry, Material | Material[]>): Ammo.btCollisionShape {
-        throw new Error('Method not implemented.');
-    }
-    protected createBody(shape: Ammo.btCollisionShape, pos?: Vector3D, rotation?: Vector3D, mass?: number): Ammo.btRigidBody {
-        throw new Error('Method not implemented.');
-    }
+import Ammo from 'ammojs-typed'
+import { BufferGeometry, Material, Mesh } from 'three'
+import { Physics } from '../Physics/Physics'
+import { Actor } from './Actor'
+import { Vector3D } from './Vector'
 
-    public addToWorld(physics: Physics): void {
-        throw new Error('Method not implemented.');
-    }
-    constructor(position: Vector3D, rotation: Vector3D) {
-        super(position, rotation);
-    }
+/** Legacy abstract base — not used by the live player/bot path. Kept for Actor hierarchy. */
+export abstract class Pawn extends Actor {
+  protected abstract createShape(
+    size?: Vector3D,
+    mesh?: Mesh<BufferGeometry, Material | Material[]>
+  ): Ammo.btCollisionShape
+  protected abstract createBody(
+    shape: Ammo.btCollisionShape,
+    pos?: Vector3D,
+    rotation?: Vector3D,
+    mass?: number
+  ): Ammo.btRigidBody
+  public abstract addToWorld(physics: Physics): void
+
+  constructor(position: Vector3D, rotation: Vector3D) {
+    super(position, rotation)
+  }
 }

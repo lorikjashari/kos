@@ -9,6 +9,8 @@ export class CrosshairRenderer {
   private ctx: CanvasRenderingContext2D
   private settings: CrosshairSettings
   private logicalSize: number
+  /** Extra gap from weapon spread (radians mapped to px). */
+  private dynamicGap = 0
 
   constructor(canvas: HTMLCanvasElement, settings: CrosshairSettings, logicalSize = 120) {
     this.canvas = canvas
@@ -19,8 +21,20 @@ export class CrosshairRenderer {
     this.draw()
   }
 
+  public getSettings(): CrosshairSettings {
+    return this.settings
+  }
+
   public setSettings(settings: CrosshairSettings): void {
     this.settings = settings
+    this.draw()
+  }
+
+  /** Style 4 / cl_dynamiccrosshair — open the gap with current weapon cone. */
+  public setDynamicSpread(spreadRad: number): void {
+    const boost = Math.min(22, Math.max(0, spreadRad * 920))
+    if (Math.abs(boost - this.dynamicGap) < 0.2) return
+    this.dynamicGap = boost
     this.draw()
   }
 
@@ -52,8 +66,8 @@ export class CrosshairRenderer {
     const unit = this.logicalSize >= 100 ? 2.2 : 1.15
     const length = Math.max(0.5, s.size) * unit
     const thick = Math.max(0.5, s.thickness) * unit * 0.55
-    const gap = s.gap * unit * 0.55
-    const halfGap = gap / 2
+    const gap = s.gap * unit * 0.55 + this.dynamicGap
+    const halfGap = Math.max(0, gap / 2)
 
     const drawBar = (x: number, y: number, bw: number, bh: number) => {
       if (s.outline) {

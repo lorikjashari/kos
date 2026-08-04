@@ -157,10 +157,10 @@ export abstract class PlayerRenderer implements IUpdatable {
       }
     }
 
-    // Tracer follows the exact aim ray (crosshair), not a side-offset muzzle path
+    // Tracer follows the hitscan ray (includes spread), not the unspread look vector
     if (weapon.spawnsProjectile) {
-      const direction = this.player.lookingDirection.clone().normalize()
-      const origin = this.getShootOrigin()
+      const direction = (hitscanResult.shotDirection ?? this.player.lookingDirection).clone().normalize()
+      const origin = this.getShootOrigin(direction)
       const muzzleOrigin = this.getMuzzleOrigin()
       if (weapon.muzzleFlash) {
         this.game.renderer.muzzleFlashManager.spawn(muzzleOrigin, direction)
@@ -190,10 +190,10 @@ export abstract class PlayerRenderer implements IUpdatable {
   public abstract handleJump(): void
   protected abstract removeMesh(): void
 
-  protected getShootOrigin(): Vector3D {
-    // Same origin as hitscan so tracers match the crosshair
+  protected getShootOrigin(shotDir?: Vector3D): Vector3D {
+    // Same origin as hitscan so tracers match the shot ray
     const eye = this.player.position.clone().add(new Vector3D(0, this.player.eyeOffsetY, 0))
-    const direction = this.player.lookingDirection.clone().normalize()
+    const direction = (shotDir ?? this.player.lookingDirection).clone().normalize()
     return eye.add(direction.multiplyScalar(0.35))
   }
 

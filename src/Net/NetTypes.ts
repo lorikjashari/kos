@@ -82,9 +82,11 @@ export type NetMsg =
     }
   | { t: 'ping'; n: number }
   | { t: 'pong'; n: number }
+  | { t: 'reject'; reason: string }
 
 export const MP_FILL_BOTS = 10
-export const MP_MAX_HUMANS = 15
+/** Cap humans per room — kept in sync with the public room directory. */
+export const MP_MAX_HUMANS = 10
 export const MP_TICK_HZ = 20
 
 /** Host-chosen fill (0 = pure PvP). Extra humans replace bots: 2 players + fill 10 → 9 bots. */
@@ -103,4 +105,27 @@ export function makeRoomCode(): string {
 
 export function peerIdForRoom(code: string): string {
   return `kos-room-${code.trim().toUpperCase()}`
+}
+
+export type NetHitMsg = Extract<NetMsg, { t: 'hit' }>
+
+/** Host-side shape/sanity checks before applying a remote hit (Phase 3 will deepen this). */
+export function isValidNetHit(msg: unknown): msg is NetHitMsg {
+  if (!msg || typeof msg !== 'object') return false
+  const m = msg as Record<string, unknown>
+  if (m.t !== 'hit') return false
+  if (typeof m.targetId !== 'string' || !m.targetId) return false
+  if (typeof m.attackerName !== 'string' || !m.attackerName) return false
+  if (typeof m.weapon !== 'string' || !m.weapon) return false
+  if (typeof m.headshot !== 'boolean') return false
+  if (typeof m.damage !== 'number' || !Number.isFinite(m.damage)) return false
+  if (m.damage <= 0 || m.damage > 500) return false
+  return true
+}
+
+/** Clamp spoofable damage into a sane band until full server authority lands. */
+export function sanitizeHitDamage(damage: number, headshot: boolean): number {
+  const d = Math.max(1, Math.min(500, Math.floor(damage)))
+  if (headshot) return Math.min(500, Math.max(d, 1))
+  return d
 }

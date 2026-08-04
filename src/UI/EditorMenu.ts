@@ -26,6 +26,10 @@ export type EditorMenuHandlers = {
   onResetBone: () => void
   /** Returns a text summary of all joint edits (for copy/paste) */
   getPoseText: () => string
+  /** Persist JSON pose to localStorage + download */
+  onSavePose: () => string
+  /** Load last saved JSON pose from localStorage */
+  onLoadPose: () => string
   onFpsLook: () => void
   onEditCursor: () => void
   onExit: () => void
@@ -174,7 +178,11 @@ export class EditorMenu {
           <div class="kos-ed-row">
             <button type="button" id="kos-ed-copy" data-act="copyPose" class="kos-ed-copybtn">Copy my changes</button>
           </div>
-          <p class="kos-ed-hint">Copies every joint you rotated as text. Paste it back in chat and I’ll bake your pose into the game.</p>
+          <div class="kos-ed-row" style="margin-top:8px">
+            <button type="button" data-act="savePose">Save pose</button>
+            <button type="button" data-act="loadPose">Load pose</button>
+          </div>
+          <p class="kos-ed-hint" id="kos-ed-pose-status">Save stores JSON locally (+ download). Load restores the last save.</p>
         </section>
       </div>
     `
@@ -382,6 +390,19 @@ export class EditorMenu {
         if (act === 'resetBone') this.handlers.onResetBone()
         if (act === 'copyPose') {
           this.copyPose()
+          return
+        }
+        if (act === 'savePose') {
+          const msg = this.handlers.onSavePose()
+          const status = this.root.querySelector('#kos-ed-pose-status')
+          if (status) status.textContent = msg
+          return
+        }
+        if (act === 'loadPose') {
+          const msg = this.handlers.onLoadPose()
+          const status = this.root.querySelector('#kos-ed-pose-status')
+          if (status) status.textContent = msg
+          this.refresh()
           return
         }
         if (act === 'fpsLook') this.handlers.onFpsLook()

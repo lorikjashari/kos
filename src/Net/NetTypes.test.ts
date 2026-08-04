@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { MP_FILL_BOTS, botTargetForHumans, makeRoomCode, peerIdForRoom } from './NetTypes'
+import {
+  MP_FILL_BOTS,
+  botTargetForHumans,
+  isValidNetHit,
+  makeRoomCode,
+  peerIdForRoom,
+  sanitizeHitDamage,
+} from './NetTypes'
 
 describe('botTargetForHumans', () => {
   it('uses the full fill for a solo host', () => {
@@ -36,5 +43,35 @@ describe('room codes', () => {
 
   it('normalises case and whitespace when building the peer id', () => {
     expect(peerIdForRoom(' abc123 ')).toBe('kos-room-ABC123')
+  })
+})
+
+describe('hit contract', () => {
+  const ok = {
+    t: 'hit' as const,
+    targetId: 'bot:Ace',
+    damage: 34,
+    headshot: false,
+    attackerName: 'Host',
+    weapon: 'AK47',
+  }
+
+  it('accepts a well-formed hit', () => {
+    expect(isValidNetHit(ok)).toBe(true)
+  })
+
+  it('rejects missing fields, bad damage, and wrong type', () => {
+    expect(isValidNetHit(null)).toBe(false)
+    expect(isValidNetHit({ ...ok, t: 'player' })).toBe(false)
+    expect(isValidNetHit({ ...ok, damage: 0 })).toBe(false)
+    expect(isValidNetHit({ ...ok, damage: 501 })).toBe(false)
+    expect(isValidNetHit({ ...ok, attackerName: '' })).toBe(false)
+    expect(isValidNetHit({ ...ok, headshot: 'yes' })).toBe(false)
+  })
+
+  it('clamps spoofable damage into a sane band', () => {
+    expect(sanitizeHitDamage(34.9, false)).toBe(34)
+    expect(sanitizeHitDamage(-5, false)).toBe(1)
+    expect(sanitizeHitDamage(999, true)).toBe(500)
   })
 })

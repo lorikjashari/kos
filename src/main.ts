@@ -3,12 +3,21 @@ import { initializeAmmo } from './Physics/Ammo'
 import { MainMenu } from './UI/MainMenu'
 import { MobileControls } from './UI/MobileControls'
 import { PwaInstall } from './UI/PwaInstall'
-import { loadSettings } from './UI/SettingsStore'
+import { loadSettings, saveSettings } from './UI/SettingsStore'
 import { isTouchDevice, mountLandscapeHint } from './UI/MobileDevice'
 import { probeRefreshRate, supportsHighRefresh } from './UI/DisplayRefresh'
 import { installTouchGuard } from './Input/TouchGuard'
+import { installGlobalErrorHandlers, recordTelemetry, showToast } from './UI/Toast'
+import {
+  hasAutoPerfApplied,
+  markAutoPerfApplied,
+  PERF_PRESET_DOCS,
+  probeDevicePerf,
+} from './UI/DevicePerf'
+import { mountFirstRunTips } from './UI/FirstRunTips'
 
 async function main() {
+  installGlobalErrorHandlers()
   if (isTouchDevice()) installTouchGuard(document)
 
   const pwa = new PwaInstall()
@@ -44,7 +53,8 @@ async function main() {
           menu.show()
           menu.showScreen('bots')
           const msg = error instanceof Error ? error.message : 'Failed to start match.'
-          window.alert(msg)
+          showToast(msg, 'error')
+          recordTelemetry('match_start_fail', { message: msg.slice(0, 160) })
         }
       })()
     },
@@ -97,7 +107,8 @@ async function main() {
           menu.showScreen('mp')
           const msg = error instanceof Error ? error.message : 'Multiplayer failed.'
           menu.setMultiplayerStatus(msg)
-          window.alert(msg)
+          showToast(msg, 'error')
+          recordTelemetry('mp_start_fail', { message: msg.slice(0, 160) })
         }
       })()
     },
@@ -137,6 +148,11 @@ async function main() {
     game.setReturnToMenuHandler(() => {
       void game.audioManager.startMenuMusic()
       menu.show()
+      const notice = game.consumeMenuNotice()
+      if (notice) {
+        menu.showScreen('mp')
+        menu.setMultiplayerStatus(notice)
+      }
       // Warm the currently selected map again while they sit on the menu.
       game.prefetchMap(menu.getSelectedMapId())
     })
@@ -184,6 +200,24 @@ async function main() {
     menu.showMain()
     void game.audioManager.startMenuMusic()
     mountLandscapeHint()
+
+    if (isTouchDevice() && !hasAutoPerfApplied()) {
+      const probe = probeDevicePerf(true)
+      const next = loadSettings()
+      next.mobile.perfProfile = probe.suggested
+      saveSettings(next)
+      menu.getSettings().mobile.perfProfile = probe.suggested
+      game.applyMobilePerfProfile(probe.suggested)
+      markAutoPerfApplied()
+      recordTelemetry('perf_auto', {
+        suggested: probe.suggested,
+        reason: probe.reason,
+        docs: PERF_PRESET_DOCS[probe.suggested],
+      })
+      showToast(`Perf set to ${probe.suggested} for this device.`, 'info', 3600)
+    }
+
+    mountFirstRunTips()
 
     if (pwa.requiresInstall()) {
       pwa.mount()

@@ -1,19 +1,19 @@
 import mqtt, { type MqttClient } from 'mqtt'
+import { MP_MAX_HUMANS } from './NetTypes'
+import {
+  parseRoomDirectoryPayload,
+  ROOM_STALE_MS,
+  type PublicRoomInfo,
+} from './RoomSanitize'
+import { loadNetConfig } from './NetConfig'
 
-export type PublicRoomInfo = {
-  code: string
-  name: string
-  host: string
-  players: number
-  max: number
-  ts: number
-  mapId?: 'pool_day' | 'de_dust2'
-}
+export type { PublicRoomInfo }
 
-const TOPIC = 'kos/fps/rooms/v1'
-const BROKER = 'wss://broker.emqx.io:8084/mqtt'
-const STALE_MS = 10000
-const MAX_PLAYERS = 10
+const NET = loadNetConfig()
+const TOPIC = NET.mqttTopic
+const BROKER = NET.mqttBroker
+const STALE_MS = ROOM_STALE_MS
+const MAX_PLAYERS = MP_MAX_HUMANS
 
 /**
  * Free public room browser via MQTT (no paid server / API keys).
@@ -160,24 +160,14 @@ export class RoomDirectory {
   private onMessage(payload: Uint8Array | Buffer): void {
     try {
       const data = JSON.parse(payload.toString())
-      if (data?.op === 'close' && typeof data.code === 'string') {
-        this.rooms.delete(data.code.toUpperCase())
+      const parsed = parseRoomDirectoryPayload(data)
+      if (!parsed) return
+      if (parsed.op === 'close') {
+        this.rooms.delete(parsed.code)
         this.emit()
         return
       }
-      const room = data?.room as PublicRoomInfo | undefined
-      if (!room?.code || !room.name) return
-      const code = String(room.code).toUpperCase()
-      // Ignore our own echo for list (still show it — host may want to see)
-      this.rooms.set(code, {
-        code,
-        name: String(room.name).slice(0, 40),
-        host: String(room.host || 'Host').slice(0, 24),
-        players: Math.max(1, Number(room.players) || 1),
-        max: Math.max(2, Math.min(MAX_PLAYERS, Number(room.max) || MAX_PLAYERS)),
-        ts: Number(room.ts) || Date.now(),
-        mapId: room.mapId === 'de_dust2' ? 'de_dust2' : 'pool_day',
-      })
+      this.rooms.set(parsed.room.code, parsed.room)
       this.emit()
     } catch {
       /* ignore bad payloads */

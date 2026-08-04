@@ -497,12 +497,22 @@ export class InputManager implements IUpdatable {
   }
 
   private onWheel(event: WheelEvent): void {
+    if (event.deltaY === 0 && event.deltaX === 0) return
+    try {
+      const game = Game.getInstance()
+      if (game.isSpectating()) {
+        event.preventDefault()
+        game.cycleSpectate(event.deltaY > 0 ? 1 : -1)
+        return
+      }
+    } catch {
+      /* boot */
+    }
     if (!this.jumpWithScrollWheel) return
     if (!this.gameplayEnabled) return
     if (!this.playerWrapper?.player || this.playerWrapper.player.isDead) return
     if (Game.getInstance().matchStarted && !Game.getInstance().isCombatLive()) return
     // Any scroll tick (up or down) = one jump attempt
-    if (event.deltaY === 0 && event.deltaX === 0) return
     event.preventDefault()
     this.pendingScrollJumps = Math.min(this.pendingScrollJumps + 1, 3)
   }

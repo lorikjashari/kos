@@ -23,6 +23,8 @@ export interface HitscanResult {
   damageDealt?: number;
   /** Index into Game.trainingBots */
   botIndex?: number;
+  /** Actual aim ray after spread (tracers / debug). */
+  shotDirection?: Vector3D;
 }
 
 export interface RenderingConfig {
