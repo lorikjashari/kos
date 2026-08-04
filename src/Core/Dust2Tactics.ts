@@ -33,6 +33,8 @@ export type TacticRoute = {
   /** Waypoints from T/CT spawn toward the job */
   path: ReadonlyArray<TacticPoint>
   holdRadius: number
+  /** Where to aim while holding (choke / site entry) — CS-style angle */
+  lookAt?: TacticPoint
 }
 
 const T_ROLES: Dust2Role[] = ['t_long', 't_b', 't_mid_short', 't_mid_lower', 't_mid_peek']
@@ -47,6 +49,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'Long A',
     site: 'A',
     holdRadius: 12,
+    lookAt: { x: 88, y: 16, z: -95 },
     path: [
       { x: 55, y: 14, z: 100 },
       { x: 95, y: 12, z: 60 },
@@ -61,6 +64,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'B Tunnels',
     site: 'B',
     holdRadius: 12,
+    lookAt: { x: -110, y: 14, z: -90 },
     path: [
       { x: -35, y: 18, z: 108 },
       { x: -65, y: 16, z: 72 },
@@ -75,6 +79,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'Mid → Short',
     site: 'A',
     holdRadius: 11,
+    lookAt: { x: 70, y: 12, z: -70 },
     path: [
       { x: -15, y: 14, z: 72 },
       { x: -2, y: 10, z: 28 },
@@ -89,6 +94,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'Mid → Lower',
     site: 'B',
     holdRadius: 11,
+    lookAt: { x: -100, y: 14, z: -50 },
     path: [
       { x: -16, y: 14, z: 66 },
       { x: -38, y: 12, z: 32 },
@@ -102,6 +108,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'Mid Peek',
     site: 'MID',
     holdRadius: 10,
+    lookAt: { x: 8, y: 8, z: -55 },
     path: [
       { x: -10, y: 14, z: 72 },
       { x: 2, y: 10, z: 22 },
@@ -115,6 +122,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'A Site',
     site: 'A',
     holdRadius: 14,
+    lookAt: { x: 95, y: 14, z: -40 },
     path: [
       { x: 42, y: 6, z: -78 },
       { x: 68, y: 10, z: -80 },
@@ -127,6 +135,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'B Site',
     site: 'B',
     holdRadius: 14,
+    lookAt: { x: -95, y: 14, z: -20 },
     path: [
       { x: 18, y: 6, z: -58 },
       { x: -12, y: 8, z: -34 },
@@ -140,6 +149,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'Mid',
     site: 'MID',
     holdRadius: 12,
+    lookAt: { x: 0, y: 10, z: 40 },
     path: [
       { x: 28, y: 6, z: -72 },
       { x: 10, y: 8, z: -38 },
@@ -152,6 +162,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'A Long',
     site: 'A',
     holdRadius: 11,
+    lookAt: { x: 100, y: 14, z: 20 },
     path: [
       { x: 50, y: 8, z: -72 },
       { x: 72, y: 12, z: -58 },
@@ -164,6 +175,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'B Depth',
     site: 'B',
     holdRadius: 11,
+    lookAt: { x: -90, y: 14, z: 20 },
     path: [
       { x: 5, y: 8, z: -45 },
       { x: -42, y: 12, z: -38 },
@@ -176,6 +188,7 @@ export const DUST2_ROUTES: Record<Dust2Role, TacticRoute> = {
     label: 'Cat',
     site: 'A',
     holdRadius: 10,
+    lookAt: { x: 30, y: 10, z: -10 },
     path: [
       { x: 32, y: 6, z: -65 },
       { x: 44, y: 10, z: -48 },

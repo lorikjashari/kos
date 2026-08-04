@@ -48,6 +48,7 @@ import {
   serializeDemo,
   type DemoFile,
 } from './Demo/DemoFormat'
+import { separatePair } from './Core/PawnSeparation'
 import * as THREE from 'three'
 import {
   BOT_GROUND_Y,
@@ -2575,6 +2576,7 @@ export class Game implements IUpdatable {
       this.currentPlayer.player.updateDeath(dt)
       this.physics.update(dt)
       this.currentPlayer.player.postPhysics(dt)
+      if (this.matchStarted && this.combatLive) this.resolvePlayerBotOverlap()
 
       if (this.demoRecorder.isRecording) {
         const sample = this.sampleDemoPose()
@@ -2590,6 +2592,26 @@ export class Game implements IUpdatable {
     const renderDt = Math.min(0.05, this.renderAcc)
     this.renderAcc = 0
     this.renderer.update(renderDt)
+  }
+
+  /** Soft capsule: player cannot walk through bot bodies. */
+  private resolvePlayerBotOverlap(): void {
+    const player = this.currentPlayer?.player
+    if (!player || player.isDead) return
+    const minDist = 0.85 + 0.95
+    for (const bot of this.trainingBots) {
+      if (!bot.isAlive || bot.aiFrozen || bot.isNetworkPuppet) continue
+      const out = separatePair(
+        { x: bot.position.x, z: bot.position.z },
+        { x: player.position.x, z: player.position.z },
+        minDist,
+        0.45
+      )
+      if (!out) continue
+      bot.position.x = out.a.x
+      bot.position.z = out.a.z
+      player.nudgeHorizontal(out.b.x - player.position.x, out.b.z - player.position.z)
+    }
   }
 
   private shouldRenderFrame(now: number): boolean {

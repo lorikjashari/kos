@@ -13,6 +13,7 @@ import {
   type TacticPoint,
 } from './Dust2Tactics'
 import { NetPoseBuffer, type PoseSample } from '../Net/NetInterp'
+import { separatePair } from './PawnSeparation'
 
 /** World Y at or below this → fall through map / void death */
 const VOID_DEATH_Y = -30
@@ -178,10 +179,20 @@ export class TrainingBot implements IUpdatable {
   private tacticPath: Vector3D[] = []
   private tacticPathIndex = 0
   private holdCenter?: Vector3D
+  private holdLookAt?: Vector3D
   private holdRadius = 12
   private holdStrafeT = 0
-  /** Fight immediately inside this range; otherwise finish the default */
-  private readonly tacticFightRange = 34
+  /**
+   * Only abandon route/hold for a fight this close.
+   * Farther threats with LOS still wait unless they're near our site (CS-style).
+   */
+  private readonly tacticFightRange = 18
+  private readonly tacticEngageLosRange = 28
+  /** While true, movement must not overwrite yaw (keep gun on target). */
+  private lockCombatFacing = false
+  /** Soft body radius vs player / other bots (XZ). */
+  private readonly pawnRadius = 0.95
+  private readonly playerRadius = 0.85
 
   constructor(position: Vector3D, yaw = 0, difficulty: BotDifficulty = 'medium', name = 'BOT') {
     this.position = position.clone()
@@ -295,7 +306,7 @@ export class TrainingBot implements IUpdatable {
     const route = routeForRole(role)
     this.tacticRole = role
     this.tacticSite = route.site
-    this.applyTacticPath(route.path, route.holdRadius, 'execute')
+    this.applyTacticPath(route.path, route.holdRadius, 'execute', route.lookAt)
   }
 
   /** CT rotate to a threatened site (keeps role label for re-hold later). */
@@ -311,12 +322,14 @@ export class TrainingBot implements IUpdatable {
     this.tacticPath = []
     this.tacticPathIndex = 0
     this.holdCenter = undefined
+    this.holdLookAt = undefined
   }
 
   private applyTacticPath(
     path: ReadonlyArray<TacticPoint>,
     holdRadius: number,
-    mode: 'execute' | 'rotate'
+    mode: 'execute' | 'rotate',
+    lookAt?: TacticPoint
   ): void {
     this.tacticPath = pathToVectors(path)
     this.tacticPathIndex = 0
@@ -324,6 +337,9 @@ export class TrainingBot implements IUpdatable {
     this.holdCenter = this.tacticPath.length
       ? this.tacticPath[this.tacticPath.length - 1].clone()
       : undefined
+    this.holdLookAt = lookAt
+      ? new Vector3D(lookAt.x, lookAt.y, lookAt.z)
+      : this.holdCenter?.clone()
     this.tacticMode = this.tacticPath.length ? mode : 'hold'
     this.waypoint = undefined
   }
@@ -406,11 +422,49 @@ export class TrainingBot implements IUpdatable {
     }
 
     // Keep fighting even if the player is dead (bot free-for-all)
+    this.lockCombatFacing = false
     this.combatThink(dt, player, physics)
+    this.applyPawnSeparation(player)
     this.followTerrain(physics, dt)
     this.checkVoidDeath()
     if (this.shootFlash > 0) this.shootFlash = Math.max(0, this.shootFlash - dt)
     this.trackAimAndGait(dt)
+  }
+
+  /** Keep bots / player from stacking and orbiting inside each other. */
+  private applyPawnSeparation(player: Player): void {
+    const game = Game.getInstance()
+    const minBot = this.pawnRadius * 2
+
+    for (const other of game.trainingBots) {
+      if (other === this || !other.isAlive || other.aiFrozen) continue
+      // Only the lower-name bot applies the pair fix (avoid double push)
+      if (this.name > other.name) continue
+      const out = separatePair(
+        { x: this.position.x, z: this.position.z },
+        { x: other.position.x, z: other.position.z },
+        minBot,
+        0.5
+      )
+      if (!out) continue
+      this.position.x = out.a.x
+      this.position.z = out.a.z
+      other.position.x = out.b.x
+      other.position.z = out.b.z
+    }
+
+    if (player.isDead) return
+    const minPlayer = this.pawnRadius + this.playerRadius
+    const out = separatePair(
+      { x: this.position.x, z: this.position.z },
+      { x: player.position.x, z: player.position.z },
+      minPlayer,
+      0.55
+    )
+    if (!out) return
+    this.position.x = out.a.x
+    this.position.z = out.a.z
+    player.nudgeHorizontal(out.b.x - player.position.x, out.b.z - player.position.z)
   }
 
   /** AI bots walk where they look, so the gait is forward-only; aim follows the last shot. */
@@ -473,19 +527,23 @@ export class TrainingBot implements IUpdatable {
     if (this.tacticMode === 'hold' && this.holdCenter) {
       this.holdStrafeT += dt
       const anchor = this.holdCenter
+      const look = this.holdLookAt ?? anchor
       const d = this.flatDist(this.position, anchor)
       if (d > this.holdRadius) {
         this.navigateToward(anchor, speed * 0.85, dt, physics)
-        this.faceToward(anchor)
+        this.faceToward(look)
         return true
       }
-      // Jiggle on the angle so holds don't look AFK
-      const ang = this.holdStrafeT * 1.1 + this.patrolAngle
-      const r = Math.min(this.holdRadius * 0.55, 6)
+      // CS-style: mostly plant and watch the choke; tiny counter-strafe only
+      const ang = this.holdStrafeT * 0.35 + this.patrolAngle
+      const r = Math.min(this.holdRadius * 0.22, 2.2)
       const jig = new Vector3D(anchor.x + Math.cos(ang) * r, this.position.y, anchor.z + Math.sin(ang) * r)
-      this.navigateToward(jig, speed * 0.45, dt, physics)
-      // Face toward map center-ish so peeks read as watching the choke
-      this.faceToward(new Vector3D(anchor.x * 0.35, this.position.y, anchor.z * 0.35))
+      if (this.flatDist(this.position, jig) > 0.55) {
+        this.navigateToward(jig, speed * 0.22, dt, physics)
+      } else {
+        this.isMoving = false
+      }
+      this.faceToward(look)
       return true
     }
     return false
@@ -512,14 +570,20 @@ export class TrainingBot implements IUpdatable {
       this.retargetTimer = 1.4 + Math.random() * 1.2
     }
 
-    // Dust II defaults: keep executing / holding unless a fight is close
+    // Dust II: finish defaults / hold angles unless the fight is on us (CS-style)
     if (this.tacticMode !== 'free') {
       const threatDist = threat ? this.flatDist(this.position, threat.pos) : Infinity
+      const hasThreatLos =
+        !!threat &&
+        threatDist < this.tacticEngageLosRange &&
+        this.hasLineOfSight(physics, myEye, threat.eye)
+      const nearHold =
+        !!threat &&
+        !!this.holdCenter &&
+        this.flatDist(threat.pos, this.holdCenter) < this.holdRadius + 16
       const mustFight =
         !!threat &&
-        (threatDist < this.tacticFightRange ||
-          (threatDist < tune.engageRange * 0.75 &&
-            this.hasLineOfSight(physics, myEye, threat.eye)))
+        (threatDist < this.tacticFightRange || (hasThreatLos && (nearHold || this.tacticMode === 'rotate')))
       if (!mustFight) {
         if (!threat) this.seeTimer = 0
         if (this.runTacticMove(dt, physics, tune.moveSpeed)) return
@@ -566,28 +630,36 @@ export class TrainingBot implements IUpdatable {
     }
 
     this.faceToward(targetPos)
+    this.lockCombatFacing = hasLos
 
     const ideal = 8
     let goal = moveGoalBase.clone()
 
-    if (hasLos && dist < 3.2) {
-      // Stick and dump — tiny circle so they don't freeze
+    if (hasLos && dist < 4.2) {
+      // Stick and dump — backpedal / stand. Never orbit (that caused 360 spins).
       const forward = toTarget.clone().setY(0)
       if (forward.lengthSq() > 0.01) {
         forward.normalize()
-        const side = new Vector3D(-forward.z, 0, forward.x).multiplyScalar(this.strafeSign * 1.4)
-        goal = this.position.clone().add(side)
+        if (dist < 2.4) {
+          goal = this.position.clone().add(forward.clone().multiplyScalar(-2.2))
+        } else {
+          goal = this.position.clone()
+          this.isMoving = false
+        }
       } else {
         goal = this.position.clone()
+        this.isMoving = false
       }
     } else if (hasLos && dist > ideal - 2 && dist < ideal + 4) {
+      // Mid-range counter-strafe — longer holds, no frantic sign flips
       if (this.strafeTimer <= 0) {
-        this.strafeSign *= Math.random() < tune.strafeChance ? -1 : 1
-        this.strafeTimer = 0.28 + Math.random() * 0.45
+        const flipChance = this.tacticMode !== 'free' ? tune.strafeChance * 0.35 : tune.strafeChance
+        this.strafeSign *= Math.random() < flipChance ? -1 : 1
+        this.strafeTimer = 0.55 + Math.random() * 0.7
       }
       const forward = toTarget.clone().setY(0).normalize()
-      const side = new Vector3D(-forward.z, 0, forward.x).multiplyScalar(this.strafeSign * 3.2)
-      goal = this.position.clone().add(side).add(forward.multiplyScalar(2.0))
+      const side = new Vector3D(-forward.z, 0, forward.x).multiplyScalar(this.strafeSign * 2.4)
+      goal = this.position.clone().add(side).add(forward.multiplyScalar(1.2))
     } else {
       // Sprint to them — predict slightly toward their position
       goal = moveGoalBase.clone()
@@ -596,7 +668,10 @@ export class TrainingBot implements IUpdatable {
     // Faster when hunting / no LOS; still quick in gunfights
     const chaseSpeed =
       !hasLos || dist > 22 ? tune.moveSpeed * 1.35 : dist > 12 ? tune.moveSpeed * 1.15 : tune.moveSpeed
-    this.navigateToward(goal, chaseSpeed, dt, physics)
+    if (!(hasLos && dist >= 2.4 && dist < 4.2 && this.flatDist(this.position, goal) < 0.35)) {
+      this.navigateToward(goal, chaseSpeed, dt, physics)
+    }
+    if (this.lockCombatFacing) this.faceToward(targetPos)
 
     if (hasLos && dist < tune.engageRange) {
       // Hard still snaps up close; Easy/Medium keep a real delay so peeks aren't instant death
@@ -1354,6 +1429,7 @@ export class TrainingBot implements IUpdatable {
   }
 
   private faceDir(dir: Vector3D): void {
+    if (this.lockCombatFacing) return
     if (dir.lengthSq() < 0.0001) return
     this.yaw = Math.atan2(dir.x, dir.z)
   }

@@ -1035,6 +1035,16 @@ export class Player extends Pawn implements IUpdatable {
     game.renderer?.hud?.hideDeath()
   }
 
+  /** Soft XZ push (bot/player capsule separation) — keeps Ammo body in sync. */
+  public nudgeHorizontal(dx: number, dz: number): void {
+    if (!Number.isFinite(dx) || !Number.isFinite(dz)) return
+    if (Math.abs(dx) + Math.abs(dz) < 1e-8) return
+    const next = new Vector3D(this.position.x + dx, this.position.y, this.position.z + dz)
+    this.setPosition(next)
+    this.position.x = next.x
+    this.position.z = next.z
+  }
+
   /** Move player body to a spawn without full respawn logic */
   public teleportToSpawn(position: Vector3D): void {
     this.spawnPoint.copy(position)
