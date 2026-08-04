@@ -1377,6 +1377,14 @@ export class Game implements IUpdatable {
     this.activeSpawns = []
   }
 
+  /** Safe idle pose while no map colliders exist (avoids void-fall death SFX). */
+  private parkPlayerForMenu(): void {
+    const player = this.currentPlayer?.player
+    if (!player) return
+    player.teleportToSpawn(new Vector3D(0, 8, 0))
+    this.renderer?.hud?.hideDeath()
+  }
+
   /**
    * Free guns / bots / bullets from GPU while the menu is up.
    * Call before releaseMap. Reload via reloadCombatMeshes on Start.
@@ -1449,6 +1457,8 @@ export class Game implements IUpdatable {
     // Free guns + map GPU while the menu is up; reload on next Start.
     this.releaseCombatMeshes()
     this.releaseMap()
+    // Hold the player still above the void so physics idle on the menu is silent.
+    this.parkPlayerForMenu()
     this.inputManager.gameplayEnabled = false
     this.inputManager.unlock()
     this.syncMobileControls()
@@ -1607,6 +1617,10 @@ export class Game implements IUpdatable {
 
   public isCombatLive(): boolean {
     return this.matchStarted && this.combatLive && !this.matchOver && this.lockdownTimer <= 0
+  }
+
+  public hasActiveMap(): boolean {
+    return !!this.activeMapMesh
   }
 
   public isMatchOver(): boolean {

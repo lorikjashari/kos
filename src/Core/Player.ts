@@ -618,6 +618,9 @@ export class Player extends Pawn implements IUpdatable {
   /** Glitched under the map / fell off — die and let the normal respawn timer fire. */
   private checkVoidDeath(): void {
     if (this.isDead) return
+    // No arena installed (boot / menu / map swap) — falling is expected, not a kill.
+    const game = Game.getInstance()
+    if (!game.matchStarted || !game.hasActiveMap()) return
     if (this.position.y > VOID_DEATH_Y) return
     this.takeDamage(99999, 'void')
     this.setVelocity(Vector3D.ZERO())
@@ -1059,9 +1062,13 @@ export class Player extends Pawn implements IUpdatable {
       this.deathTimer = this.deathRespawnDelay
       this.deathAge = 0
       this.setVelocity(Vector3D.ZERO())
-      Game.getInstance().onPlayerDeath()
-      void Game.getInstance().audioManager.playPlayerDeath()
-      Game.getInstance().renderer?.hud?.showDeath(this.deathRespawnDelay)
+      const game = Game.getInstance()
+      game.onPlayerDeath()
+      // Never play kill VO outside an active match (menu / loading used to void-fall here).
+      if (game.matchStarted) {
+        void game.audioManager.playPlayerDeath()
+        game.renderer?.hud?.showDeath(this.deathRespawnDelay)
+      }
       return { killed: true }
     }
     return { killed: false }

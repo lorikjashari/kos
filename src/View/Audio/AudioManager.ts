@@ -312,10 +312,18 @@ export class AudioManager extends THREE.AudioListener {
     }
 
     this.warmPanners()
-    // Warm both graph shapes: bots play through a panner, the local player plays
-    // straight into master. Each buffer's first decode-to-output pass costs either
-    // way, so run every sound through both.
+    // Warm gun/foot graph shapes only. Death/pain/flesh are already decoded above —
+    // priming them into the speakers (even at tiny gain) was audible on load.
     for (const id of PRIORITY) {
+      if (
+        id.startsWith('death') ||
+        id.startsWith('pain') ||
+        id.startsWith('flesh_') ||
+        id.startsWith('headshot') ||
+        id === 'helmet_hit'
+      ) {
+        continue
+      }
       const buffer = this.buffers.get(id)
       if (!buffer) continue
       this.warmOneShot(ctx, buffer, { x: 0, y: -50, z: 0 })
@@ -332,7 +340,8 @@ export class AudioManager extends THREE.AudioListener {
       const src = ctx.createBufferSource()
       src.buffer = buffer
       const gain = ctx.createGain()
-      gain.gain.value = 0.0001
+      // Exact silence — some devices still leaked ~0.0001 as a click/whisper.
+      gain.gain.value = 0
       src.connect(gain)
       if (worldPos) gain.connect(this.takePanner(ctx, worldPos))
       else gain.connect(this.masterGain)
