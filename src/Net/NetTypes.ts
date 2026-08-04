@@ -43,6 +43,11 @@ export type NetMsg =
       moving: boolean
       crouch?: boolean
       shoot?: boolean
+      /** Local-space move intent: mx = right/left, mz = forward/back (-1..1) */
+      mx?: number
+      mz?: number
+      air?: boolean
+      reload?: boolean
     }
   | {
       t: 'bots'

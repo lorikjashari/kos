@@ -93,7 +93,17 @@ export class TrainingBot implements IUpdatable {
   public netTY = 0
   public netTZ = 0
   public netTYaw = 0
+  public netTPitch = 0
   public hasNetTarget = false
+  /** Where the body is aiming vertically (radians, + = up) — drives spine / gun tilt */
+  public aimPitch = 0
+  /** Move intent in the bot's own frame: +z forward, +x right. Smoothed for the gait. */
+  public moveX = 0
+  public moveZ = 0
+  public netMoveX = 0
+  public netMoveZ = 0
+  public isAirborne = false
+  public isReloadingNet = false
   public readonly fadeStart = 2.8
   public readonly fadeDuration = 0.7
 
@@ -253,6 +263,12 @@ export class TrainingBot implements IUpdatable {
         while (dy > Math.PI) dy -= Math.PI * 2
         while (dy < -Math.PI) dy += Math.PI * 2
         this.yaw += dy * k
+        this.aimPitch += (this.netTPitch - this.aimPitch) * k
+        // Snapshots arrive at 20 Hz, so easing the move axes keeps the gait from
+        // snapping between strafe and forward on every packet
+        const mk = Math.min(1, dt * 9)
+        this.moveX += (this.netMoveX - this.moveX) * mk
+        this.moveZ += (this.netMoveZ - this.moveZ) * mk
       }
       if (!this.isAlive) {
         this.deathAge += dt
@@ -302,6 +318,16 @@ export class TrainingBot implements IUpdatable {
     this.followTerrain(physics, dt)
     this.checkVoidDeath()
     if (this.shootFlash > 0) this.shootFlash = Math.max(0, this.shootFlash - dt)
+    this.trackAimAndGait(dt)
+  }
+
+  /** AI bots walk where they look, so the gait is forward-only; aim follows the last shot. */
+  private trackAimAndGait(dt: number): void {
+    const k = Math.min(1, dt * 9)
+    this.moveX += (0 - this.moveX) * k
+    this.moveZ += ((this.isMoving ? 1 : 0) - this.moveZ) * k
+    const want = Math.asin(Math.max(-1, Math.min(1, this.lastShotDir.y)))
+    this.aimPitch += (want - this.aimPitch) * Math.min(1, dt * 6)
   }
 
   /** Fell through the map — die and respawn on a real spawn after the death timer. */

@@ -104,6 +104,7 @@ async function main() {
 
     menu.setLoadingProgress('Starting engine…', 20)
     const game = Game.getInstance()
+    if (import.meta.env.DEV) (window as unknown as { __kos: Game }).__kos = game
     const settings = loadSettings()
     const mobileControls = new MobileControls(game.inputManager, settings.mobile)
     game.setMobileControls(mobileControls)

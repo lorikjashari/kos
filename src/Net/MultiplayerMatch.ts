@@ -425,6 +425,13 @@ export class MultiplayerMatch {
     const pitch = Math.asin(Math.max(-1, Math.min(1, look.y)))
     const shoot = this.pendingShoot
     this.pendingShoot = false
+    // Move intent in the player's own frame so remote clients can play the right
+    // strafe / backpedal gait instead of always walking forward.
+    const speed = Math.hypot(player.velocity.x, player.velocity.z)
+    const sin = Math.sin(yaw)
+    const cos = Math.cos(yaw)
+    const mz = speed > 0.4 ? (player.velocity.x * sin + player.velocity.z * cos) / speed : 0
+    const mx = speed > 0.4 ? (player.velocity.x * cos - player.velocity.z * sin) / speed : 0
     const msg: NetMsg = {
       t: 'player',
       id: this.session.localPeerId,
@@ -441,6 +448,10 @@ export class MultiplayerMatch {
       moving: player.velocity.length() > 0.4,
       crouch: player.isCrouching,
       shoot: shoot || undefined,
+      mx: Math.round(mx * 100) / 100,
+      mz: Math.round(mz * 100) / 100,
+      air: !player.isOnGround || undefined,
+      reload: player.isReloading || undefined,
     }
     if (this.isHost) this.session.broadcast(msg)
     else this.session.sendToHost(msg)
@@ -476,6 +487,7 @@ export class MultiplayerMatch {
     bot.netTY = msg.y
     bot.netTZ = msg.z
     bot.netTYaw = msg.yaw
+    bot.netTPitch = msg.pitch
     bot.hasNetTarget = true
     if (bot.position.y < -20) bot.position.set(msg.x, msg.y, msg.z)
     bot.health = msg.hp
@@ -483,6 +495,10 @@ export class MultiplayerMatch {
     bot.weaponKey = msg.weapon
     bot.isMoving = msg.moving
     bot.isCrouching = !!msg.crouch
+    bot.netMoveX = msg.mx ?? 0
+    bot.netMoveZ = msg.mz ?? (msg.moving ? 1 : 0)
+    bot.isAirborne = !!msg.air
+    bot.isReloadingNet = !!msg.reload
     if (msg.shoot) {
       bot.shootFlash = 0.14
       void Game.getInstance().audioManager.playShot(msg.weapon, {
@@ -490,7 +506,8 @@ export class MultiplayerMatch {
         y: msg.y + 1.4,
         z: msg.z,
       })
-      const dir = new Vector3D(Math.sin(msg.yaw), 0, Math.cos(msg.yaw))
+      const cosP = Math.cos(msg.pitch)
+      const dir = new Vector3D(Math.sin(msg.yaw) * cosP, Math.sin(msg.pitch), Math.cos(msg.yaw) * cosP)
       Game.getInstance().renderer?.muzzleFlashManager.spawn(
         new Vector3D(msg.x, msg.y + (msg.crouch ? 1.0 : 1.45), msg.z).add(dir.clone().multiplyScalar(0.45)),
         dir

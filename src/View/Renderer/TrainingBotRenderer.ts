@@ -93,17 +93,20 @@ export class TrainingBotRenderer implements IUpdatable {
     },
     AK: {
       mesh: 'AK47',
-      len: 1.5,
-      align: [3.1379, 0.0077, 3.0689],
-      rot: [0.05, Math.PI, Math.PI],
-      seat: [0.2, 0.05, 0.5],
+      // Bake only aligns the long axis; yaw 180° is what points the muzzle
+      // away from his chest (heuristics kept guessing wrong).
+      len: 1.55,
+      align: [0, 0, 0],
+      rot: [0.06, Math.PI, 0],
+      seat: [0.08, 0.0, 0.22],
     },
     Knife: {
       mesh: 'Knife',
-      len: 0.55,
-      align: [-3.0434, -0.0173, 3.1104],
-      rot: [0.05, Math.PI, Math.PI],
-      seat: [0.2, 0.04, 0.18],
+      // Blade-only bake (hands stripped). Tip along +Z after orient.
+      len: 0.48,
+      align: [0, 0, 0],
+      rot: [0.1, 0, Math.PI],
+      seat: [0.12, 0.03, 0.16],
     },
     AWP: {
       mesh: 'AwpRaw',
@@ -118,6 +121,7 @@ export class TrainingBotRenderer implements IUpdatable {
   public static visualWeaponFor(weaponKey: string): string {
     if (weaponKey === 'AK47') return 'AK'
     if (weaponKey === 'AWP') return 'AWP'
+    if (weaponKey === 'Knife') return 'Knife'
     return 'Usp'
   }
 
@@ -134,6 +138,8 @@ export class TrainingBotRenderer implements IUpdatable {
    * Baking a gun prop walks every vertex through bone + world transforms, which
    * is far too slow to redo per bot mid-match. Bake once, then hand out clones.
    */
+  /** Bump when bake/orient logic changes so HMR doesn't keep a bad prop. */
+  private static readonly GUN_PROTO_VER = 13
   private static readonly gunPrototypes = new Map<string, THREE.Group | null>()
 
   /** Third-person weapon prop seated in the CS terrorist's right hand */
@@ -143,6 +149,22 @@ export class TrainingBotRenderer implements IUpdatable {
   /** Currently held weapon in the editor */
   private csWeapon = 'Usp'
   private readonly _gunPos = new THREE.Vector3()
+  private readonly _gunQ = new THREE.Quaternion()
+  private readonly _gunPitchQ = new THREE.Quaternion()
+  private readonly _gunE = new THREE.Euler()
+  private static readonly _X_AXIS = new THREE.Vector3(1, 0, 0)
+  /**
+   * Boolean states (crouch / airborne / reloading) eased into pose weights —
+   * snapping straight to the target pose reads as a teleport at 20 Hz snapshots.
+   */
+  private crouch01 = 0
+  private air01 = 0
+  private reload01 = 0
+  /**
+   * Root drop at full crouch. Matched to the −X thigh squat so boots sit on
+   * the floor without burying the hips.
+   */
+  private static readonly CROUCH_DROP = 0.55
   /** True for AI match bots using the CS model (auto walk/idle from movement) */
   private matchBot = false
   private readonly _matchPrevPos = new THREE.Vector3()
@@ -399,6 +421,16 @@ export class TrainingBotRenderer implements IUpdatable {
    * SkinnedMesh found. Falls back to a simple prop if the model is absent.
    */
   private buildCsGun(key: string): THREE.Group | undefined {
+    // Drop stale clones when the bake/orient version changes (HMR / hot fix)
+    const ver = TrainingBotRenderer.GUN_PROTO_VER
+    if ((this as { _gunProtoVer?: number })._gunProtoVer !== ver) {
+      for (const g of Object.values(this.csGuns)) {
+        g?.removeFromParent()
+      }
+      this.csGuns = {}
+      this.csGun = undefined
+      ;(this as { _gunProtoVer?: number })._gunProtoVer = ver
+    }
     const existing = this.csGuns[key]
     if (existing) return existing
     const prototype = TrainingBotRenderer.buildGunPrototype(this.game, key)
@@ -450,7 +482,9 @@ export class TrainingBotRenderer implements IUpdatable {
       stage.add(model)
     }
     for (const key of Object.keys(TrainingBotRenderer.GUN_DEFS)) {
-      const prototype = TrainingBotRenderer.gunPrototypes.get(key)
+      const prototype = TrainingBotRenderer.gunPrototypes.get(
+        `${TrainingBotRenderer.GUN_PROTO_VER}:${key}`
+      )
       if (!prototype) continue
       const clone = prototype.clone(true)
       clone.visible = true
@@ -494,8 +528,90 @@ export class TrainingBotRenderer implements IUpdatable {
     }
   }
 
+  /**
+   * Put the longest axis on +Z and the magazine under (−Y). Yaw (muzzle
+   * forward vs into his chest) is owned by GUN_DEFS.rot — not guessed here.
+   */
+  private static orientPropBarrelPlusZ(gunGroup: THREE.Object3D): void {
+    gunGroup.position.set(0, 0, 0)
+    gunGroup.rotation.set(0, 0, 0)
+    gunGroup.scale.set(1, 1, 1)
+    gunGroup.updateMatrixWorld(true)
+    const box = new THREE.Box3().setFromObject(gunGroup)
+    const size = box.getSize(new THREE.Vector3())
+    gunGroup.position.copy(box.getCenter(new THREE.Vector3()).multiplyScalar(-1))
+
+    if (size.x >= size.y && size.x >= size.z) gunGroup.rotation.y = Math.PI / 2
+    else if (size.y >= size.x && size.y >= size.z) gunGroup.rotation.x = -Math.PI / 2
+    gunGroup.quaternion.setFromEuler(gunGroup.rotation)
+    gunGroup.updateMatrixWorld(true)
+
+    // Mag under the receiver only — do NOT yaw-flip here
+    const magPos = new THREE.Vector3()
+    let found = false
+    gunGroup.traverse((c) => {
+      if (found) return
+      const m = c as THREE.Mesh
+      if (!m.isMesh || !/magazine/i.test(m.name || '')) return
+      m.getWorldPosition(magPos)
+      gunGroup.worldToLocal(magPos)
+      found = true
+    })
+    if (found && magPos.y > 0) {
+      const corr = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI)
+      gunGroup.quaternion.multiply(corr)
+      gunGroup.rotation.setFromQuaternion(gunGroup.quaternion)
+      gunGroup.updateMatrixWorld(true)
+    }
+
+    const box2 = new THREE.Box3().setFromObject(gunGroup)
+    gunGroup.position.sub(box2.getCenter(new THREE.Vector3()))
+    gunGroup.updateMatrixWorld(true)
+  }
+
+  /** FPS viewmodel packs share the knife/USP with hand meshes — skip those. */
+  private static isHandMesh(mesh: THREE.Mesh): boolean {
+    const name = (mesh.name || '').toLowerCase()
+    if (
+      name.includes('finger') ||
+      name.includes('glove') ||
+      name.includes('sleeve') ||
+      name.includes('phoenix') ||
+      name === 'object_67'
+    ) {
+      return true
+    }
+    if (!mesh.material) return false
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    const matName = mats.map((m) => m?.name || '').join(' ').toLowerCase()
+    return /v_hands|phoenix|arms\.001/.test(matName)
+  }
+
+  /**
+   * Textures are often missing on the FPS packs (they bake out white), so keep
+   * the source materials only when a map is present and fall back to gunmetal.
+   */
+  private static bakeGunMaterial(
+    src: THREE.Material | THREE.Material[] | undefined,
+    fallback?: THREE.Material
+  ): THREE.Material | THREE.Material[] {
+    const gunmetal =
+      fallback ?? new THREE.MeshStandardMaterial({ color: 0x14171b, roughness: 0.45, metalness: 0.6 })
+    if (!src) return gunmetal
+    const list = Array.isArray(src) ? src : [src]
+    if (!list.some((m) => !!(m as THREE.MeshStandardMaterial).map)) return gunmetal
+    const cloned = list.map((m) => {
+      const c = m.clone()
+      const mm = c as THREE.MeshStandardMaterial
+      if (mm.map) mm.map.colorSpace = THREE.SRGBColorSpace
+      return c
+    })
+    return Array.isArray(src) ? cloned : cloned[0]
+  }
+
   private static buildGunPrototype(game: Game, key: string): THREE.Group | undefined {
-    const cached = TrainingBotRenderer.gunPrototypes.get(key)
+    const cacheKey = `${TrainingBotRenderer.GUN_PROTO_VER}:${key}`
+    const cached = TrainingBotRenderer.gunPrototypes.get(cacheKey)
     if (cached !== undefined) return cached ?? undefined
     const def = TrainingBotRenderer.GUN_DEFS[key]
     if (!def) return undefined
@@ -518,36 +634,44 @@ export class TrainingBotRenderer implements IUpdatable {
         const align = new THREE.Quaternion().setFromEuler(
           new THREE.Euler(def.align[0], def.align[1], def.align[2], 'XYZ')
         )
+        const v = new THREE.Vector3()
         full.traverse((c) => {
           const m = c as THREE.Mesh
           if (!m.isMesh || !/^akm_/i.test(m.name)) return
           m.updateWorldMatrix(true, false)
-          const cloned = m.clone(true)
-          cloned.geometry = m.geometry.clone()
-          const pos = cloned.geometry.attributes.position
-          const v = new THREE.Vector3()
-          for (let i = 0; i < pos.count; i++) {
-            v.fromBufferAttribute(pos, i)
+          // The AKM pack is rigged, so a clone would keep pointing at a skeleton
+          // that no longer exists under the prop and render nowhere. Bake the
+          // posed vertices into a plain mesh instead.
+          const sm = m as THREE.SkinnedMesh
+          const srcPos = m.geometry.attributes.position
+          const arr = new Float32Array(srcPos.count * 3)
+          for (let i = 0; i < srcPos.count; i++) {
+            v.fromBufferAttribute(srcPos, i)
+            if (sm.isSkinnedMesh) sm.applyBoneTransform(i, v)
             v.applyMatrix4(m.matrixWorld)
             v.applyQuaternion(align)
-            pos.setXYZ(i, v.x, v.y, v.z)
+            arr[i * 3] = v.x
+            arr[i * 3 + 1] = v.y
+            arr[i * 3 + 2] = v.z
           }
-          pos.needsUpdate = true
-          cloned.geometry.computeVertexNormals()
-          cloned.position.set(0, 0, 0)
-          cloned.rotation.set(0, 0, 0)
-          cloned.scale.set(1, 1, 1)
-          cloned.castShadow = false
-          cloned.receiveShadow = false
-          gunGroup.add(cloned)
+          const baked = new THREE.BufferGeometry()
+          baked.setAttribute('position', new THREE.BufferAttribute(arr, 3))
+          if (m.geometry.index) baked.setIndex(m.geometry.index.clone())
+          if (m.geometry.attributes.uv) baked.setAttribute('uv', m.geometry.attributes.uv.clone())
+          baked.computeVertexNormals()
+
+          const part = new THREE.Mesh(baked, TrainingBotRenderer.bakeGunMaterial(m.material))
+          part.name = m.name
+          part.castShadow = false
+          part.receiveShadow = false
+          part.frustumCulled = false
+          gunGroup.add(part)
         })
         if (gunGroup.children.length > 0) {
           container.add(gunGroup)
-          container.updateMatrixWorld(true)
+          TrainingBotRenderer.orientPropBarrelPlusZ(gunGroup)
           const box = new THREE.Box3().setFromObject(gunGroup)
           const size = box.getSize(new THREE.Vector3())
-          const center = box.getCenter(new THREE.Vector3())
-          gunGroup.position.sub(center)
           const longest = Math.max(size.x, size.y, size.z) || 1
           container.scale.setScalar(def.len / longest)
           gun = gunGroup
@@ -577,6 +701,9 @@ export class TrainingBotRenderer implements IUpdatable {
           new THREE.Euler(def.align[0], def.align[1], def.align[2], 'XYZ')
         )
         for (const sm of skinned) {
+          // Knife / USP packs bake the FPS hands into the prop otherwise —
+          // that's the floating mini-arm + blade at his waist.
+          if (TrainingBotRenderer.isHandMesh(sm)) continue
           sm.updateWorldMatrix(true, false)
           const srcPos = sm.geometry.attributes.position
           const arr = new Float32Array(srcPos.count * 3)
@@ -595,28 +722,7 @@ export class TrainingBotRenderer implements IUpdatable {
           if (sm.geometry.attributes.uv) baked.setAttribute('uv', sm.geometry.attributes.uv.clone())
           baked.computeVertexNormals()
 
-          let mat: THREE.Material | THREE.Material[] = fallbackMat
-          if (sm.material) {
-            const srcMats = Array.isArray(sm.material) ? sm.material : [sm.material]
-            const hasMap = srcMats.some((m) => !!(m as THREE.MeshStandardMaterial).map)
-            if (hasMap) {
-              mat = Array.isArray(sm.material)
-                ? sm.material.map((m) => {
-                    const c = m.clone()
-                    const mm = c as THREE.MeshStandardMaterial
-                    if (mm.map) mm.map.colorSpace = THREE.SRGBColorSpace
-                    return c
-                  })
-                : (() => {
-                    const c = sm.material.clone()
-                    const mm = c as THREE.MeshStandardMaterial
-                    if (mm.map) mm.map.colorSpace = THREE.SRGBColorSpace
-                    return c
-                  })()
-            }
-          }
-
-          const m = new THREE.Mesh(baked, mat)
+          const m = new THREE.Mesh(baked, TrainingBotRenderer.bakeGunMaterial(sm.material, fallbackMat))
           m.castShadow = false
           m.receiveShadow = false
           m.frustumCulled = false
@@ -624,11 +730,17 @@ export class TrainingBotRenderer implements IUpdatable {
         }
         if (gunGroup.children.length > 0) {
           container.add(gunGroup)
-          container.updateMatrixWorld(true)
+          // USP seating is already tuned to its PCA align — only re-axis Knife
+          // (and AK above) so we don't break the one prop that already worked.
+          if (key === 'Knife') TrainingBotRenderer.orientPropBarrelPlusZ(gunGroup)
+          else {
+            container.updateMatrixWorld(true)
+            const box = new THREE.Box3().setFromObject(gunGroup)
+            const center = box.getCenter(new THREE.Vector3())
+            gunGroup.position.sub(center)
+          }
           const box = new THREE.Box3().setFromObject(gunGroup)
           const size = box.getSize(new THREE.Vector3())
-          const center = box.getCenter(new THREE.Vector3())
-          gunGroup.position.sub(center)
           const longest = Math.max(size.x, size.y, size.z) || 1
           container.scale.setScalar(def.len / longest)
           gun = gunGroup
@@ -662,7 +774,7 @@ export class TrainingBotRenderer implements IUpdatable {
       c.userData.isGun = true
     })
     // Only cache a real bake — a fallback box built before the GLB landed would stick
-    if (source?.mesh) TrainingBotRenderer.gunPrototypes.set(key, container)
+    if (source?.mesh) TrainingBotRenderer.gunPrototypes.set(cacheKey, container)
     return container
   }
 
@@ -704,13 +816,19 @@ export class TrainingBotRenderer implements IUpdatable {
     void this.game.audioManager.playFootstepAt({ x: p.x, y: p.y + 0.1, z: p.z }, run ? 1 : 0.75)
   }
 
-  /** Switch which weapon the dummy holds ('Usp' | 'AK'). */
+  /** Switch which weapon the dummy holds ('Usp' | 'AK' | 'AWP' | 'Knife'). */
   public setWeapon(key: string): void {
     if (!TrainingBotRenderer.GUN_DEFS[key]) return
-    this.csWeapon = key
+    // Rebuild if bake version changed even when the slot is unchanged
+    const ver = TrainingBotRenderer.GUN_PROTO_VER
+    const stale = (this as { _gunProtoVer?: number })._gunProtoVer !== ver
+    if (key === this.csWeapon && this.csGun && !stale) return
     const gun = this.buildCsGun(key)
+    // A failed bake would otherwise leave empty hands — keep the last prop.
+    if (!gun) return
+    this.csWeapon = key
     for (const g of Object.values(this.csGuns)) if (g) g.visible = false
-    if (gun) gun.visible = true
+    gun.visible = this.bot.isAlive
     this.csGun = gun
   }
 
@@ -726,9 +844,16 @@ export class TrainingBotRenderer implements IUpdatable {
     this.mesh.worldToLocal(this._gunPos)
     // Gun is centered on its bbox — offset so the grip ends up in the palm.
     gun.position.set(this._gunPos.x + def.seat[0], this._gunPos.y + def.seat[1], this._gunPos.z + def.seat[2])
-    // Models bake out upside-down and facing his body: roll 180° (Z) so the slide
-    // is up, yaw 180° (Y) so the muzzle points away from him, + slight aim tilt.
-    gun.rotation.set(def.rot[0], def.rot[1], def.rot[2])
+    // Models bake out upside-down: roll 180° (Z) so the slide is up, yaw 180°
+    // (Y) so the muzzle points away from him. Aim pitch is applied in the gun's
+    // own frame after that so a bad body-frame multiply can't bury the barrel
+    // in his chest.
+    this._gunE.set(def.rot[0], def.rot[1], def.rot[2], 'XYZ')
+    this._gunQ.setFromEuler(this._gunE)
+    const kick = Math.min(1, this.bot.shootFlash / 0.14) * 0.14
+    const pitch = Math.max(-1, Math.min(1, this.bot.aimPitch)) + kick
+    this._gunPitchQ.setFromAxisAngle(TrainingBotRenderer._X_AXIS, -pitch)
+    gun.quaternion.copy(this._gunQ).multiply(this._gunPitchQ)
   }
 
   /** Smooth 0..1 curve for gait accents */
@@ -755,6 +880,14 @@ export class TrainingBotRenderer implements IUpdatable {
       this.offsetBone(b.elbowL, -0.9, -0.9, -0.1)
       this.offsetBone(b.wristR, 0.05, -0.1, 0)
       this.offsetBone(b.wristL, 0.1, -0.1, 0)
+    } else if (this.csWeapon === 'Knife') {
+      // Blade ready: right arm forward, left hand guarding near the chest
+      this.offsetBone(b.shoulderR, -0.35 + bob, 0.55, 0.15)
+      this.offsetBone(b.elbowR, -0.55, 0.35, 0.25)
+      this.offsetBone(b.wristR, 0.2, 0.15, 0.1)
+      this.offsetBone(b.shoulderL, -0.25 + bob, -0.55, -0.1)
+      this.offsetBone(b.elbowL, -0.7, -0.35, 0)
+      this.offsetBone(b.wristL, 0.1, -0.1, 0)
     } else {
       // Pistol: both hands together at the chest centerline
       this.offsetBone(b.shoulderL, -0.6 + bob, -1.2, 0)
@@ -764,6 +897,81 @@ export class TrainingBotRenderer implements IUpdatable {
       this.offsetBone(b.wristL, 0.05, -0.15, 0)
       this.offsetBone(b.wristR, 0.05, 0.15, 0)
     }
+  }
+
+  /** Ease the on/off states into pose weights so transitions animate. */
+  private updatePoseBlends(dt: number): void {
+    const ease = (cur: number, target: number, rate: number) => cur + (target - cur) * Math.min(1, dt * rate)
+    this.crouch01 = ease(this.crouch01, this.bot.isCrouching ? 1 : 0, 11)
+    this.air01 = ease(this.air01, this.bot.isAirborne ? 1 : 0, 9)
+    this.reload01 = ease(this.reload01, this.bot.isReloadingNet ? 1 : 0, 7)
+  }
+
+  /**
+   * CS-style crouch squat. Screenshots showed +X thigh trails the legs
+   * behind him on this rig, so the squat uses −X to bring the knees forward.
+   * Knee keeps the same fold sign as the walk cycle (+X = heel toward butt).
+   */
+  private applyCrouchPose(): void {
+    const w = this.crouch01
+    if (w < 0.01) return
+    const b = this.csAnimBones
+    // −X = knees forward under the muzzle on this skeleton
+    this.offsetBone(b.thighL, -0.68 * w, 0.05 * w, 0.05 * w)
+    this.offsetBone(b.thighR, -0.68 * w, -0.05 * w, -0.05 * w)
+    // Same fold direction as walk lift — shin drops so the boot plants
+    this.offsetBone(b.kneeL, 1.0 * w, 0, 0)
+    this.offsetBone(b.kneeR, 1.0 * w, 0, 0)
+    this.offsetBone(b.ankleL, -0.28 * w, 0, 0)
+    this.offsetBone(b.ankleR, -0.28 * w, 0, 0)
+    // No hip/spine pitch — that was reading as a dive
+    this.offsetBone(b.spineL, 0.03 * w, 0, 0)
+    this.offsetBone(b.spineU, -0.05 * w, 0, 0)
+    this.offsetBone(b.neck, -0.02 * w, 0, 0)
+  }
+
+  /** Airborne: soft tuck with the same leg-axis signs as crouch. */
+  private applyAirPose(): void {
+    const w = this.air01
+    if (w < 0.01) return
+    const b = this.csAnimBones
+    this.offsetBone(b.thighL, -0.22 * w, 0, 0.04 * w)
+    this.offsetBone(b.thighR, -0.16 * w, 0, -0.04 * w)
+    this.offsetBone(b.kneeL, 0.4 * w, 0, 0)
+    this.offsetBone(b.kneeR, 0.3 * w, 0, 0)
+    this.offsetBone(b.ankleL, -0.1 * w, 0, 0)
+    this.offsetBone(b.ankleR, -0.08 * w, 0, 0)
+  }
+
+  /** Bend the spine and neck toward where the player is actually aiming. */
+  private applyAimPitch(): void {
+    const p = Math.max(-1, Math.min(1, this.bot.aimPitch))
+    if (Math.abs(p) < 0.01) return
+    const b = this.csAnimBones
+    this.offsetBone(b.spineU, -p * 0.35, 0, 0)
+    this.offsetBone(b.neck, -p * 0.45, 0, 0)
+  }
+
+  /** Shot kick: shoulder and chest snap back for the length of the muzzle flash. */
+  private applyRecoilPose(): void {
+    const k = Math.min(1, this.bot.shootFlash / 0.14)
+    if (k < 0.01) return
+    const b = this.csAnimBones
+    this.offsetBone(b.spineU, -0.09 * k, 0, 0)
+    this.offsetBone(b.shoulderR, -0.16 * k, 0.06 * k, 0)
+    this.offsetBone(b.elbowR, 0.12 * k, 0, 0)
+  }
+
+  /** Reload: the support hand leaves the handguard and works the magazine. */
+  private applyReloadPose(): void {
+    const w = this.reload01
+    if (w < 0.01) return
+    const b = this.csAnimBones
+    const pump = Math.sin(this.animPreviewTime * 9) * 0.18 * w
+    this.offsetBone(b.shoulderL, (0.45 + pump) * w, -0.3 * w, 0)
+    this.offsetBone(b.elbowL, (0.85 - pump) * w, 0, 0)
+    this.offsetBone(b.wristL, 0.35 * w, 0, 0)
+    this.offsetBone(b.spineU, 0.06 * w, -0.1 * w, 0)
   }
 
   /**
@@ -806,18 +1014,28 @@ export class TrainingBotRenderer implements IUpdatable {
       this.applyGunHoldArms(Math.sin(t * 1.8) * 0.012)
     } else {
       const run = clip === 'Running'
-      // Cadence + amplitudes tuned like real gait (run = bigger pump, more lean)
-      const speed = run ? 10.5 : 5.4
-      const legAmp = run ? 0.7 : 0.44
-      const kneeAmp = run ? 0.85 : 0.5
+      // Backpedalling reverses the leg phase and side-stepping shortens the
+      // stride, so a strafing enemy no longer moonwalks forward
+      const back = this.bot.moveZ < -0.25 ? -1 : 1
+      const strafe = Math.max(-1, Math.min(1, this.bot.moveX))
+      // Crouch owns the legs — leave only a tiny shuffle so walk +X doesn't
+      // cancel the squat's −X thighs back into the trailing-U pose.
+      const crouchMute = 1 - this.crouch01 * 0.92
+      const stride = (1 - Math.abs(strafe) * 0.3) * crouchMute
+      const speed = (run ? 10.5 : 5.4) * (1 - this.crouch01 * 0.35)
+      const legAmp = (run ? 0.7 : 0.44) * stride
+      const kneeAmp = (run ? 0.85 : 0.5) * stride
       const phase = t * speed
       const s1 = Math.sin(phase)
       const s2 = Math.sin(phase * 2) // double for hip bob / arm accents
       const c1 = Math.cos(phase)
 
       // Leg phase: +1 = left forward
-      const swing = s1
-      const swingOpp = -s1
+      const swing = s1 * back
+      const swingOpp = -swing
+      // Lead with the hips when side-stepping
+      this.offsetBone(b.hips, 0, strafe * 0.22, 0)
+      this.offsetBone(b.spineL, 0, -strafe * 0.12, 0)
       const liftL = this.smooth01(-swing)
       const liftR = this.smooth01(swing)
       const thighL = swing * legAmp
@@ -847,6 +1065,13 @@ export class TrainingBotRenderer implements IUpdatable {
       // Small vertical bob so it reads alive without leaving the aim.
       this.applyGunHoldArms(s2 * (run ? 0.05 : 0.03))
     }
+
+    // Layered on top of whatever gait is playing, weakest first
+    this.applyCrouchPose()
+    this.applyAirPose()
+    this.applyAimPitch()
+    this.applyRecoilPose()
+    this.applyReloadPose()
 
     if (this.csSkinned) {
       this.csSkinned.skeleton.bones.forEach((bone) => bone.updateMatrixWorld(true))
@@ -1652,21 +1877,25 @@ export class TrainingBotRenderer implements IUpdatable {
     }
 
     this.mesh.visible = true
+    this.updatePoseBlends(dt)
     // While editor gizmo is dragging, Game owns the mesh transform
     if (!this.game.isEditorTransformDragging()) {
       this.mesh.position.set(
         this.bot.position.x,
-        this.bot.position.y - (this.bot.isCrouching ? 0.95 : 0),
+        this.bot.position.y - TrainingBotRenderer.CROUCH_DROP * this.crouch01,
         this.bot.position.z
       )
       this.mesh.rotation.order = 'YXZ'
       this.mesh.rotation.y = this.bot.yaw
-      this.mesh.rotation.x = this.bot.isCrouching ? 0.12 : 0
-      this.mesh.rotation.z = 0
+      this.mesh.rotation.x = 0
+      // Bank into a side-step so strafing reads from a distance
+      this.mesh.rotation.z = this.staticModel ? -Math.max(-1, Math.min(1, this.bot.moveX)) * 0.06 : 0
       const vs = this.bot.visualScale || 1
       if (this.staticModel) {
-        const crouchScale = this.bot.isCrouching ? 0.82 : 1
-        this.mesh.scale.set(vs, vs * crouchScale, vs)
+        this.mesh.scale.set(vs, vs, vs)
+      } else {
+        // The legacy robot mesh has no crouch rig, so it still squashes
+        this.mesh.scale.set(0.55, 1.32 * (1 - 0.18 * this.crouch01), 0.55)
       }
     }
 
