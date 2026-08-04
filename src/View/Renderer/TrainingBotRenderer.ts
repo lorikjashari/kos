@@ -844,15 +844,14 @@ export class TrainingBotRenderer implements IUpdatable {
     this.mesh.worldToLocal(this._gunPos)
     // Gun is centered on its bbox — offset so the grip ends up in the palm.
     gun.position.set(this._gunPos.x + def.seat[0], this._gunPos.y + def.seat[1], this._gunPos.z + def.seat[2])
-    // Models bake out upside-down: roll 180° (Z) so the slide is up, yaw 180°
-    // (Y) so the muzzle points away from him. Aim pitch is applied in the gun's
-    // own frame after that so a bad body-frame multiply can't bury the barrel
-    // in his chest.
+    // Base seat from GUN_DEFS, then tip the muzzle with aim pitch in the gun's
+    // local frame. AK seating uses yaw 180°, which flips local +X — so pitch
+    // must be +aimPitch (not −) or look-up aims the barrel into the floor.
     this._gunE.set(def.rot[0], def.rot[1], def.rot[2], 'XYZ')
     this._gunQ.setFromEuler(this._gunE)
     const kick = Math.min(1, this.bot.shootFlash / 0.14) * 0.14
     const pitch = Math.max(-1, Math.min(1, this.bot.aimPitch)) + kick
-    this._gunPitchQ.setFromAxisAngle(TrainingBotRenderer._X_AXIS, -pitch)
+    this._gunPitchQ.setFromAxisAngle(TrainingBotRenderer._X_AXIS, pitch)
     gun.quaternion.copy(this._gunQ).multiply(this._gunPitchQ)
   }
 
