@@ -76,6 +76,8 @@ type MenuCallbacks = {
     teamSize: number
   }) => void
   onSettingsChanged: (settings: PlayerSettings) => void
+  /** Warm the selected map GLB in the background while browsing bots/MP. */
+  onMapSelected?: (mapId: MapId) => void
 }
 
 /**
@@ -185,6 +187,10 @@ export class MainMenu {
 
   public showMain(): void {
     this.showScreen('main')
+  }
+
+  public getSelectedMapId(): MapId {
+    return this.selectedMapId
   }
 
   public showError(message: string): void {
@@ -1198,6 +1204,7 @@ export class MainMenu {
       el.classList.toggle('is-on', el.getAttribute('data-mp-map') === mapId)
     })
     this.syncTeamControls()
+    this.callbacks.onMapSelected?.(mapId)
   }
 
   private readBotCount(): number {

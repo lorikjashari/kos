@@ -112,6 +112,10 @@ async function main() {
         game.applyMobilePerfProfile(settings.mobile.perfProfile)
       }
     },
+    onMapSelected: (mapId) => {
+      if (!Game.game) return
+      Game.game.prefetchMap(mapId)
+    },
   })
 
   try {
@@ -129,6 +133,8 @@ async function main() {
     game.setReturnToMenuHandler(() => {
       void game.audioManager.startMenuMusic()
       menu.show()
+      // Warm the currently selected map again while they sit on the menu.
+      game.prefetchMap(menu.getSelectedMapId())
     })
     game.setHideMenuHandler(() => {
       game.audioManager.stopMenuMusic()

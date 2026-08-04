@@ -294,11 +294,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     usePoolLights: boolean,
     forceReload = false
   ): Promise<MapMesh> {
-    if (forceReload) {
-      const prev = this.loadableMeshs.get(meshKey)
-      if (prev instanceof MapMesh) prev.disposeGpu()
-      this.loadableMeshs.delete(meshKey)
-    }
+    if (forceReload) this.disposeMapMesh(meshKey)
     const existing = this.loadableMeshs.get(meshKey)
     if (existing instanceof MapMesh) return existing
     const mapmesh = new MapMesh(glbPath, meshKey, usePoolLights)
@@ -307,6 +303,16 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     // Older call sites still look up "Map"
     if (meshKey === 'Map_pool_day') this.loadableMeshs.set('Map', mapmesh)
     return mapmesh
+  }
+
+  /** Free a cached map's GPU resources (used on menu return / map swap). */
+  public disposeMapMesh(meshKey: string): void {
+    const prev = this.loadableMeshs.get(meshKey)
+    if (prev instanceof MapMesh) prev.disposeGpu()
+    this.loadableMeshs.delete(meshKey)
+    if (meshKey === 'Map_pool_day' && this.loadableMeshs.get('Map') === prev) {
+      this.loadableMeshs.delete('Map')
+    }
   }
 
   /** Load a generic GLB once and cache it (editor character packs, etc.). */

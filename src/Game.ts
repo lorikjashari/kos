@@ -84,6 +84,8 @@ export class Game implements IUpdatable {
   private mapExtras: THREE.Object3D[] = []
   private mapColliders: Actor[] = []
   private activeMapMesh: MapMesh | null = null
+  /** Bumps to cancel stale menu prefetches when the selection changes. */
+  private mapPrefetchGen = 0
   private debugPropMeshes: THREE.Object3D[] = []
   public trainingBots: TrainingBot[] = []
   public botRenderers: TrainingBotRenderer[] = []
@@ -1230,6 +1232,28 @@ export class Game implements IUpdatable {
     setTimeout(() => this.inputManager.onLock(), 40)
   }
 
+  /** Download + parse a map GLB into the cache without installing it in the scene. */
+  public prefetchMap(mapId: MapId): void {
+    const id = mapId === 'de_dust2' ? 'de_dust2' : 'pool_day'
+    const gen = ++this.mapPrefetchGen
+    void (async () => {
+      try {
+        // Keep only the selected map cached while browsing the menu.
+        for (const other of ['pool_day', 'de_dust2'] as MapId[]) {
+          if (other === id) continue
+          const otherDef = getMapDefinition(other)
+          if (this.activeMapMesh?.key === otherDef.meshKey) continue
+          this.globalLoadingManager.disposeMapMesh(otherDef.meshKey)
+        }
+        if (gen !== this.mapPrefetchGen) return
+        const def = getMapDefinition(id)
+        await this.globalLoadingManager.loadMapMesh(def.meshKey, def.glbPath, def.usePoolLights, false)
+      } catch (e) {
+        console.warn('[map:prefetch]', id, e)
+      }
+    })()
+  }
+
   /** Load / swap map before match start (Pool Day or Dust II). */
   public async ensureMap(mapId: MapId): Promise<void> {
     if (this.activeMapId === mapId && this.activeMapMesh) return
@@ -1246,7 +1270,8 @@ export class Game implements IUpdatable {
       mapMesh.normalizeForPlay(def.normalizeToSize)
     }
 
-    this.unloadActiveMap()
+    // Drop the previous map's GPU resources — phones can't hold both.
+    this.unloadActiveMap(true)
 
     mapMesh.init()
     const extras: THREE.Object3D[] = []
@@ -1315,7 +1340,7 @@ export class Game implements IUpdatable {
     this.currentPlayer?.player.setMapSpeedScale(scale)
   }
 
-  private unloadActiveMap(): void {
+  private unloadActiveMap(disposeGpu = false): void {
     for (const actor of this.mapColliders) {
       if (actor.body) this.physics.remove(actor.body)
       this.actors = this.actors.filter((a) => a !== actor)
@@ -1335,9 +1360,20 @@ export class Game implements IUpdatable {
     if (this.activeMapMesh?.mesh) {
       this.renderer?.scene.remove(this.activeMapMesh.mesh)
     }
-    // Keep the MapMesh in the loader cache for fast re-entry; GPU dispose only
-    // happens on forceReload. Just detach from the scene here.
+    const key = this.activeMapMesh?.key
     this.activeMapMesh = null
+    if (disposeGpu && key) {
+      this.globalLoadingManager.disposeMapMesh(key)
+    }
+  }
+
+  /** Detach + free the active map (menu return). Weapons/bots stay warm. */
+  public releaseMap(): void {
+    this.mapPrefetchGen++
+    this.unloadActiveMap(true)
+    this.activeMapId = DEFAULT_MAP_ID
+    this.mapName = DEFAULT_MAP_ID
+    this.activeSpawns = []
   }
 
   private spawnDebugCubes(): void {
@@ -1384,6 +1420,8 @@ export class Game implements IUpdatable {
     this.matchElapsed = 0
     this.clearBots()
     this.stats.reset()
+    // Free the arena GPU while the menu is up; weapons/character stay cached.
+    this.releaseMap()
     this.inputManager.gameplayEnabled = false
     this.inputManager.unlock()
     this.syncMobileControls()
