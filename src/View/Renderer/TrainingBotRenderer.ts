@@ -62,9 +62,14 @@ export class TrainingBotRenderer implements IUpdatable {
   private readonly _hzWorld = new THREE.Vector3()
   private readonly _hzNeck = new THREE.Vector3()
   private readonly _hzHips = new THREE.Vector3()
+  private readonly _hzA = new THREE.Vector3()
+  private readonly _hzB = new THREE.Vector3()
+  private readonly _hzC = new THREE.Vector3()
+  private readonly _hzD = new THREE.Vector3()
+  private static readonly _HZ_UP = new THREE.Vector3(0, 1, 0)
   private targetHitHeight = 3.8
   /** Neck bone → top of the skull, measured off the bind pose at build time */
-  private headSpan = 3.8 * 0.18
+  private headSpan = 3.8 * 0.14
   private readonly _animQ = new THREE.Quaternion()
   private readonly _animE = new THREE.Euler()
   /** When true, procedural anim is paused so manual bone edits (editor rig) persist */
@@ -850,17 +855,16 @@ export class TrainingBotRenderer implements IUpdatable {
   }
 
   /**
-   * Hit volumes for the CS terrorist.
+   * Hit volumes for the CS terrorist — bone-measured boxes that hug the
+   * silhouette (not oversized Minecraft slabs).
    *
-   * Boxes, not capsules: a capsule's hemispherical caps bulge past the bone span
-   * you size it from, so the torso always swallowed the neck and jaw, and because
-   * it was also wider than the skull its front face sat nearer the muzzle than
-   * the head behind it — clean headshots scored as body hits. Boxes have exact
-   * bounds, so the zones can meet at seams with no overlap at all.
+   * - Head: skull-sized cube on the neck
+   * - Body: chest/torso between hips and chin
+   * - Arms: thin boxes shoulder→wrist (still body damage)
+   * - Legs: separate left/right thigh→ankle boxes
    *
-   * Geometry is a unit cube; `spanZone` scales/positions it from live bone
-   * positions each frame (skinned meshes raycast bind-pose verts, so the zones
-   * have to follow the skeleton themselves).
+   * Decorative skin is not raycastable (bind-pose verts ≠ animated pose), so
+   * these zones are the real hit surfaces and must track the skeleton.
    */
   private attachHeightHitZones(root: THREE.Object3D, height: number): void {
     this.hitZoneByPart = {}
@@ -879,16 +883,21 @@ export class TrainingBotRenderer implements IUpdatable {
       return mesh
     }
 
-    mk('legs', 'legs')
+    mk('legsL', 'legs')
+    mk('legsR', 'legs')
     mk('body', 'body')
+    mk('armL', 'body')
+    mk('armR', 'body')
     mk('head', 'head')
 
-    // Height-fraction fallback until the first bone sync (or if the rig is missing)
-    this.spanZone('legs', 0, height * 0.46, height * 0.26, height * 0.17)
-    this.spanZone('body', height * 0.46, height * 0.82, height * 0.34, height * 0.19)
-    this.spanZone('head', height * 0.82, height, height * 0.16, height * 0.16)
+    // Height-fraction fallback until the first bone sync
+    this.spanZone('legsL', 0, height * 0.46, height * 0.09, height * 0.1, -height * 0.06, 0)
+    this.spanZone('legsR', 0, height * 0.46, height * 0.09, height * 0.1, height * 0.06, 0)
+    this.spanZone('body', height * 0.46, height * 0.82, height * 0.18, height * 0.12)
+    this.spanZone('armL', height * 0.55, height * 0.8, height * 0.07, height * 0.07, -height * 0.16, 0)
+    this.spanZone('armR', height * 0.55, height * 0.8, height * 0.07, height * 0.07, height * 0.16, 0)
+    this.spanZone('head', height * 0.82, height, height * 0.115, height * 0.12)
 
-    // Decorative skin is not raycastable (bind-pose verts ≠ animated pose)
     root.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return
       if (String(child.name).startsWith('HitZone_')) return
@@ -901,8 +910,37 @@ export class TrainingBotRenderer implements IUpdatable {
     const zone = this.hitZoneByPart[id]
     if (!zone) return
     const h = Math.max(0.05, top - bottom)
-    zone.scale.set(width, h, depth)
+    zone.scale.set(Math.max(0.04, width), h, Math.max(0.04, depth))
     zone.position.set(x, bottom + h * 0.5, z)
+    zone.rotation.set(0, 0, 0)
+    zone.visible = true
+  }
+
+  /**
+   * Place a zone between two points (bone-local), with a given cross-section.
+   * Aligns the box Y axis along the bone segment.
+   */
+  private spanZoneBetween(
+    id: string,
+    a: THREE.Vector3,
+    b: THREE.Vector3,
+    thicknessX: number,
+    thicknessZ: number
+  ): void {
+    const zone = this.hitZoneByPart[id]
+    if (!zone) return
+    const mid = this._hzC.copy(a).add(b).multiplyScalar(0.5)
+    const len = Math.max(0.06, a.distanceTo(b))
+    zone.position.copy(mid)
+    zone.scale.set(Math.max(0.04, thicknessX), len, Math.max(0.04, thicknessZ))
+    const dir = this._hzWorld.copy(b).sub(a)
+    if (dir.lengthSq() < 1e-8) {
+      zone.quaternion.identity()
+    } else {
+      dir.normalize()
+      zone.quaternion.setFromUnitVectors(TrainingBotRenderer._HZ_UP, dir)
+    }
+    zone.visible = true
   }
 
   /**
@@ -913,8 +951,8 @@ export class TrainingBotRenderer implements IUpdatable {
   private measureHeadSpan(height: number): void {
     const neckY = this.boneLocalY(this.csAnimBones.neck || this.csAnimBones.spineU)
     if (neckY === undefined) return
-    // Guard against a rig whose arms reach above the head in bind pose
-    this.headSpan = Math.min(height * 0.26, Math.max(height * 0.11, height - neckY))
+    // Keep the skull snug — oversized head boxes ate into helmet + air above
+    this.headSpan = Math.min(height * 0.155, Math.max(height * 0.1, (height - neckY) * 0.92))
   }
 
   /** Root-local position of a bone. False when the rig doesn't have it. */
@@ -942,19 +980,69 @@ export class TrainingBotRenderer implements IUpdatable {
     if (!this.boneLocalInto(b.hips || b.spineL, this._hzHips)) return
     const neckY = this._hzNeck.y
 
-    // Chin/jaw hangs below the neck bone, so the head starts a little under it.
-    const headBottom = neckY - h * 0.03
+    // —— Head: tight skull on the neck ——
+    const headBottom = neckY - h * 0.018
     const headTop = neckY + this.headSpan
-    // Seams, not overlaps: every world point belongs to exactly one zone.
-    const hipSeam = this._hzHips.y - h * 0.03
-    // Lean/turn moves the head off the root axis — track it rather than assume centre
-    const leanX = (this._hzNeck.x + this._hzHips.x) * 0.5
-    const leanZ = (this._hzNeck.z + this._hzHips.z) * 0.5
+    const headW = h * 0.112
+    const headD = h * 0.12
+    this.spanZone('head', headBottom, headTop, headW, headD, this._hzNeck.x, this._hzNeck.z)
 
-    this.spanZone('head', headBottom, headTop, h * 0.17, h * 0.17, this._hzNeck.x, this._hzNeck.z)
-    // Torso is wide enough to include the upper arms — arm hits are body damage
-    this.spanZone('body', hipSeam, headBottom, h * 0.35, h * 0.19, leanX, leanZ)
-    this.spanZone('legs', 0, hipSeam, h * 0.26, h * 0.17, this._hzHips.x, this._hzHips.z)
+    // —— Torso: hips → chin, width from shoulders (not Minecraft slab) ——
+    const hipSeam = this._hzHips.y - h * 0.015
+    let torsoW = h * 0.175
+    let torsoD = h * 0.115
+    let torsoX = (this._hzNeck.x + this._hzHips.x) * 0.5
+    let torsoZ = (this._hzNeck.z + this._hzHips.z) * 0.5
+    const hasSL = this.boneLocalInto(b.shoulderL || b.clavL, this._hzA)
+    const hasSR = this.boneLocalInto(b.shoulderR || b.clavR, this._hzB)
+    if (hasSL && hasSR) {
+      const sw = this._hzA.distanceTo(this._hzB)
+      // Cover chest + delts, not full outstretched arms
+      torsoW = THREE.MathUtils.clamp(sw * 0.78, h * 0.14, h * 0.22)
+      torsoX = (this._hzA.x + this._hzB.x) * 0.5
+      torsoZ = (this._hzA.z + this._hzB.z) * 0.5
+      torsoD = THREE.MathUtils.clamp(sw * 0.42, h * 0.1, h * 0.14)
+    }
+    this.spanZone('body', hipSeam, headBottom, torsoW, torsoD, torsoX, torsoZ)
+
+    // —— Arms: thin segments (body damage) so torso can stay chest-sized ——
+    const armThick = h * 0.065
+    if (this.boneLocalInto(b.shoulderL || b.clavL, this._hzA)) {
+      if (!this.boneLocalInto(b.wristL || b.elbowL, this._hzB)) {
+        this._hzB.copy(this._hzA).add(this._hzD.set(-h * 0.12, -h * 0.2, 0))
+      }
+      this.spanZoneBetween('armL', this._hzA, this._hzB, armThick, armThick)
+    }
+    if (this.boneLocalInto(b.shoulderR || b.clavR, this._hzA)) {
+      if (!this.boneLocalInto(b.wristR || b.elbowR, this._hzB)) {
+        this._hzB.copy(this._hzA).add(this._hzD.set(h * 0.12, -h * 0.2, 0))
+      }
+      this.spanZoneBetween('armR', this._hzA, this._hzB, armThick, armThick)
+    }
+
+    // —— Legs: one box per leg ——
+    this.syncLegZone('legsL', b.thighL, b.ankleL || b.kneeL, hipSeam, h, -1)
+    this.syncLegZone('legsR', b.thighR, b.ankleR || b.kneeR, hipSeam, h, 1)
+  }
+
+  private syncLegZone(
+    id: string,
+    thigh: THREE.Bone | undefined,
+    ankle: THREE.Bone | undefined,
+    hipSeam: number,
+    h: number,
+    side: -1 | 1
+  ): void {
+    const thick = h * 0.088
+    if (this.boneLocalInto(thigh, this._hzA) && this.boneLocalInto(ankle, this._hzB)) {
+      // Extend slightly past ankle toward the sole
+      this._hzB.y = Math.min(this._hzB.y, 0.04)
+      this._hzA.y = Math.max(this._hzA.y, hipSeam - h * 0.02)
+      this.spanZoneBetween(id, this._hzA, this._hzB, thick, thick * 1.05)
+      return
+    }
+    // Fallback: vertical box on that side
+    this.spanZone(id, 0, hipSeam, thick, thick * 1.05, side * h * 0.065, this._hzHips.z)
   }
 
   /** Clone materials so opacity/emissive edits never leak to other bots */

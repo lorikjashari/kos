@@ -233,8 +233,19 @@ export class InputManager implements IUpdatable {
       return
     }
 
+    const game = Game.getInstance()
+
+    // Loadout pick must run BEFORE the pre-combat lockdown return — otherwise
+    // 1/2 never confirm and combatLive stays false (connected but frozen).
+    if (game.isAwaitingLoadout()) {
+      if (this.keys.get(Key.One)?.justReleased) game.confirmMatchLoadout('AWP')
+      else if (this.keys.get(Key.Two)?.justReleased) game.confirmMatchLoadout('AK47')
+      this.resetAllEdges()
+      return
+    }
+
     // Pre-round lockdown: look around only — no move / shoot
-    if (Game.getInstance().matchStarted && !Game.getInstance().isCombatLive()) {
+    if (game.matchStarted && !game.isCombatLive()) {
       this.resetAllEdges()
       return
     }
@@ -283,7 +294,6 @@ export class InputManager implements IUpdatable {
     }
 
     // 1 = match primary (AK or AWP), 2 = USP, 3 = knife
-    const game = Game.getInstance()
     const fps = playerRenderer as FPSRenderer | undefined
     const equip = (viewKey: string, logicKey: string) => {
       if (game.editorActive) {
@@ -304,17 +314,14 @@ export class InputManager implements IUpdatable {
       }
     }
 
-    if (game.isAwaitingLoadout()) {
-      if (this.keys.get(Key.One)?.justReleased) game.confirmMatchLoadout('AWP')
-      else if (this.keys.get(Key.Two)?.justReleased) game.confirmMatchLoadout('AK47')
-    } else if (this.keys.get(Key.One)?.justReleased) {
+    if (this.keys.get(Key.One)?.justReleased) {
       const primary = player.primaryWeaponKey
       equip(primary, primary)
     } else if (this.keys.get(Key.Two)?.justReleased) {
       equip('Usp', 'Usp')
     }
 
-    if (!game.isAwaitingLoadout() && this.keys.get(Key.Three)?.justReleased) {
+    if (this.keys.get(Key.Three)?.justReleased) {
       equip('Knife', 'Knife')
     }
 
