@@ -167,10 +167,13 @@ export class MainMenu {
   }
 
   public setLoadingProgress(label: string, pct: number): void {
+    const clamped = Math.max(0, Math.min(100, pct))
     const bar = this.root.querySelector('.kos-load-fill') as HTMLElement | null
     const text = this.root.querySelector('.kos-load-label') as HTMLElement | null
-    if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`
+    const pctEl = this.root.querySelector('#kos-load-pct') as HTMLElement | null
+    if (bar) bar.style.width = `${clamped}%`
     if (text) text.textContent = label
+    if (pctEl) pctEl.textContent = `${Math.round(clamped)}%`
   }
 
   /** Full-screen loading overlay used at boot and again when a match map loads. */

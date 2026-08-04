@@ -11,10 +11,14 @@ export function buildMainMenuHtml(): string {
 
       <section class="kos-screen is-active" data-screen="loading">
         <div class="kos-load">
+          <div class="kos-load-mark" aria-hidden="true"></div>
           <img class="kos-logo kos-logo-load" src="/logo.png" alt="KoS FPS Shooting" width="420" height="420" />
           <div class="kos-load-wrap">
             <div class="kos-load-track" aria-hidden="true"><div class="kos-load-fill"></div></div>
-            <p class="kos-load-label">Loading…</p>
+            <div class="kos-load-meta">
+              <p class="kos-load-label">Loading…</p>
+              <p class="kos-load-pct" id="kos-load-pct">0%</p>
+            </div>
             <p class="kos-load-error" hidden></p>
           </div>
         </div>
@@ -22,11 +26,12 @@ export function buildMainMenuHtml(): string {
 
       <section class="kos-screen" data-screen="main">
         <div class="kos-shell kos-shell-main">
-          <div class="kos-hero">
-            <img class="kos-logo kos-logo-hero" src="/logo.png" alt="KoS FPS Shooting" width="640" height="640" />
-          </div>
-
           <div class="kos-menu-rail">
+            <header class="kos-brand">
+              <img class="kos-logo kos-logo-hero" src="/logo.png" alt="KoS FPS Shooting" width="640" height="640" />
+              <p class="kos-tagline">Browser FPS · bots &amp; friends</p>
+            </header>
+
             <label class="kos-field">
               <span>Your Name</span>
               <input id="kos-name" type="text" maxlength="24" placeholder="Enter name" autocomplete="off" spellcheck="false" />
@@ -45,6 +50,7 @@ export function buildMainMenuHtml(): string {
             </nav>
 
             <div class="kos-career" id="kos-career" hidden></div>
+
             <p class="kos-legal">
               Independent prototype — not affiliated with Valve.
               <a href="/LEGAL.md" target="_blank" rel="noopener noreferrer">Legal notes</a>

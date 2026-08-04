@@ -59,19 +59,19 @@ export const MAIN_MENU_CSS = `
       }
       #kos-menu.is-bg-blur .kos-bg-veil {
         background:
-          linear-gradient(90deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0.55) 45%, rgba(255,255,255,0.35) 100%),
+          linear-gradient(105deg, rgba(245,247,251,0.92) 0%, rgba(245,247,251,0.72) 40%, rgba(245,247,251,0.45) 70%, rgba(245,247,251,0.35) 100%),
           linear-gradient(180deg, rgba(255,255,255,0.25) 0%, transparent 30%, transparent 70%, rgba(245,247,251,0.45) 100%);
       }
       .kos-bg-veil {
         position: absolute; inset: 0;
         pointer-events: none;
         background:
-          linear-gradient(90deg, rgba(255,255,255,0.72) 0%, rgba(255,255,255,0.28) 42%, transparent 68%),
-          linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 28%, transparent 72%, rgba(245,247,251,0.35) 100%);
+          linear-gradient(105deg, rgba(245,247,251,0.94) 0%, rgba(245,247,251,0.78) 28%, rgba(245,247,251,0.22) 52%, transparent 68%),
+          linear-gradient(180deg, rgba(255,255,255,0.22) 0%, transparent 32%, transparent 70%, rgba(245,247,251,0.4) 100%);
       }
       .kos-bg-vignette {
         position: absolute; inset: 0; pointer-events: none;
-        background: radial-gradient(ellipse 90% 80% at 55% 45%, transparent 45%, rgba(10, 30, 80, 0.06) 100%);
+        background: radial-gradient(ellipse 85% 75% at 72% 48%, transparent 40%, rgba(10, 30, 80, 0.08) 100%);
       }
 
       .kos-screen {
@@ -80,141 +80,219 @@ export const MAIN_MENU_CSS = `
         animation: kos-fade-in 400ms var(--kos-ease) both;
       }
       .kos-screen.is-active { display: flex; }
+      .kos-screen[data-screen="loading"].is-active {
+        align-items: center;
+        justify-content: center;
+      }
+      .kos-screen[data-screen="main"].is-active {
+        align-items: stretch;
+      }
       @keyframes kos-fade-in {
         from { opacity: 0; }
         to { opacity: 1; }
       }
 
       .kos-load {
+        position: relative;
         margin: auto;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        width: min(420px, 100%);
-        padding: 24px 20px;
+        width: min(440px, 92vw);
+        padding: clamp(20px, 4vh, 36px) 20px;
         gap: 0;
+        text-align: center;
+      }
+      .kos-load-mark {
+        position: absolute;
+        width: min(340px, 78vw);
+        height: min(340px, 78vw);
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(26,95,255,0.14) 0%, rgba(224,185,58,0.08) 42%, transparent 70%);
+        animation: kos-load-pulse 2.4s ease-in-out infinite;
+        pointer-events: none;
+        z-index: 0;
       }
       .kos-logo-load {
-        width: min(260px, 58vw, 34vh);
+        position: relative;
+        z-index: 1;
+        width: min(280px, 62vw, 38vh);
         height: auto;
         display: block;
-        filter: drop-shadow(0 16px 40px rgba(26, 95, 255, 0.18));
-        animation: kos-logo-in 0.8s var(--kos-ease) both;
+        filter: drop-shadow(0 18px 44px rgba(26, 95, 255, 0.2));
+        animation: kos-logo-in 0.85s var(--kos-ease) both;
       }
       .kos-load-wrap {
-        width: min(240px, 72vw);
-        margin-top: 18px;
-        text-align: center;
+        position: relative;
+        z-index: 1;
+        width: min(280px, 78vw);
+        margin-top: 22px;
         flex-shrink: 0;
+        animation: kos-slide-up 560ms var(--kos-ease) 120ms both;
       }
       .kos-load-track {
-        height: 5px;
+        height: 4px;
         border-radius: 99px;
-        background: rgba(26, 95, 255, 0.12);
+        background: rgba(10, 18, 32, 0.08);
         overflow: hidden;
-        box-shadow: inset 0 0 0 1px rgba(26, 95, 255, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(26, 95, 255, 0.08);
       }
       .kos-load-fill {
         height: 100%; width: 0%;
         border-radius: inherit;
-        background: linear-gradient(90deg, var(--kos-blue), var(--kos-gold-bright));
-        transition: width 240ms var(--kos-ease);
+        background: linear-gradient(90deg, var(--kos-blue-deep), var(--kos-blue), var(--kos-gold-bright));
+        transition: width 280ms var(--kos-ease);
+        box-shadow: 0 0 16px rgba(26, 95, 255, 0.35);
+      }
+      .kos-load-meta {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 12px;
       }
       .kos-load-label {
-        margin: 10px 0 0; font-size: 11px; font-weight: 700;
-        letter-spacing: 0.22em; text-transform: uppercase; color: var(--kos-muted);
+        margin: 0;
+        font-size: 11px; font-weight: 700;
+        letter-spacing: 0.2em; text-transform: uppercase;
+        color: var(--kos-muted);
+        text-align: left;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      .kos-load-error { color: #dc2626; font-size: 13px; font-weight: 600; margin-top: 10px; }
+      .kos-load-pct {
+        margin: 0;
+        flex-shrink: 0;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        font-variant-numeric: tabular-nums;
+        color: var(--kos-blue-deep);
+      }
+      .kos-load-error {
+        color: #dc2626;
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 12px;
+        text-align: center;
+      }
 
+      /* One left-rail composition; art stays full-bleed on the right */
       .kos-shell-main {
-        width: 100%; height: 100%;
-        display: grid;
-        grid-template-columns: minmax(280px, 420px) 1fr;
-        grid-template-rows: 1fr auto;
-        grid-template-areas:
-          "hero hero"
-          "rail .";
-        padding: clamp(28px, 5vh, 56px) clamp(28px, 5vw, 72px) clamp(32px, 6vh, 64px);
-        align-content: end;
+        width: 100%;
+        height: 100%;
+        min-height: 100%;
+        display: flex;
+        align-items: stretch;
+        justify-content: flex-start;
+        padding:
+          clamp(28px, 5vh, 56px)
+          clamp(24px, 4vw, 48px)
+          clamp(28px, 5vh, 48px)
+          clamp(28px, 5vw, 72px);
       }
-      .kos-hero {
-        grid-area: hero;
-        display: flex; align-items: flex-end;
-        padding-bottom: clamp(12px, 2vh, 28px);
+      .kos-menu-rail {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: clamp(14px, 2.2vh, 22px);
+        width: min(380px, 100%);
+        max-width: 380px;
+        margin: 0;
+        padding: clamp(18px, 2.5vh, 28px) clamp(18px, 2vw, 26px);
+        border-radius: 0;
+        background: linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.28) 100%);
+        border: 1px solid rgba(255,255,255,0.65);
+        border-left: 3px solid var(--kos-blue);
+        box-shadow: 0 20px 50px rgba(10, 30, 80, 0.08);
+        backdrop-filter: blur(10px) saturate(1.05);
+        -webkit-backdrop-filter: blur(10px) saturate(1.05);
         animation: kos-slide-up 560ms var(--kos-ease) both;
       }
+      .kos-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        margin: 0 0 4px;
+      }
       .kos-logo-hero {
-        width: min(420px, 48vw, 55vh);
+        width: min(300px, 100%, 42vh);
         height: auto;
         display: block;
         object-fit: contain;
-        filter: drop-shadow(0 20px 48px rgba(26, 95, 255, 0.16));
+        filter: drop-shadow(0 16px 36px rgba(26, 95, 255, 0.16));
         pointer-events: none;
         user-select: none;
+        animation: kos-logo-in 0.8s var(--kos-ease) both;
       }
-      .kos-menu-rail {
-        grid-area: rail;
-        display: flex; flex-direction: column;
-        gap: 20px;
-        width: 100%;
-        max-width: 380px;
-        animation: kos-slide-up 560ms var(--kos-ease) 80ms both;
+      .kos-tagline {
+        margin: 0;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--kos-muted);
       }
 
       .kos-career {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        padding: 13px 15px;
-        border-radius: 14px;
-        background: rgba(10,14,22,0.42);
-        border: 1px solid rgba(255,255,255,0.08);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        animation: kos-slide-up 560ms var(--kos-ease) 160ms both;
+        gap: 10px;
+        padding: 12px 0 0;
+        margin-top: 2px;
+        border-top: 1px solid var(--kos-line);
+        background: transparent;
+        animation: kos-slide-up 560ms var(--kos-ease) 140ms both;
       }
       .kos-career-title {
         font-size: 10px;
-        letter-spacing: 0.16em;
+        font-weight: 700;
+        letter-spacing: 0.18em;
         text-transform: uppercase;
-        opacity: 0.5;
+        color: var(--kos-muted);
       }
       .kos-career-grid {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 9px 6px;
+        gap: 10px 8px;
       }
-      .kos-career-bit { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+      .kos-career-bit { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       .kos-career-bit b {
-        font-size: 16px;
-        font-weight: 700;
+        font-size: 15px;
+        font-weight: 800;
         font-variant-numeric: tabular-nums;
         line-height: 1.1;
+        color: var(--kos-ink);
       }
       .kos-career-bit span {
         font-size: 9px;
-        letter-spacing: 0.05em;
+        font-weight: 650;
+        letter-spacing: 0.06em;
         text-transform: uppercase;
-        opacity: 0.5;
+        color: var(--kos-muted);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      #kos-menu.is-mobile-ui .kos-career { padding: 10px 12px; gap: 6px; }
+      #kos-menu.is-mobile-ui .kos-career { padding-top: 10px; gap: 8px; }
       #kos-menu.is-mobile-ui .kos-career-bit b { font-size: 14px; }
 
       .kos-legal {
-        margin: 10px 2px 0;
+        margin: 4px 0 0;
         font-size: 10px;
-        line-height: 1.4;
-        color: rgba(255,255,255,0.45);
-        letter-spacing: 0.02em;
+        line-height: 1.45;
+        color: rgba(10, 18, 32, 0.48);
+        letter-spacing: 0.01em;
       }
       .kos-legal a {
-        color: rgba(160,190,255,0.85);
+        color: var(--kos-blue-deep);
         text-decoration: underline;
         text-underline-offset: 2px;
+        font-weight: 650;
       }
 
       @keyframes kos-logo-in {
@@ -224,6 +302,10 @@ export const MAIN_MENU_CSS = `
       @keyframes kos-slide-up {
         from { opacity: 0; transform: translateY(28px); }
         to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes kos-load-pulse {
+        0%, 100% { transform: scale(0.92); opacity: 0.7; }
+        50% { transform: scale(1.05); opacity: 1; }
       }
 
       .kos-shell-sub {
@@ -996,31 +1078,30 @@ export const MAIN_MENU_CSS = `
 
       @media (max-width: 900px) {
         .kos-shell-main {
-          grid-template-columns: 1fr;
-          grid-template-areas: "hero" "rail";
-          align-content: center;
-          justify-items: start;
-          padding: 32px 28px 40px;
+          align-items: center;
+          padding: 32px 24px 36px;
         }
-        .kos-logo-hero { width: min(300px, 70vw); }
-        .kos-menu-rail { max-width: 360px; }
+        .kos-menu-rail { max-width: 360px; width: min(360px, 100%); }
+        .kos-logo-hero { width: min(260px, 70vw); }
       }
       @media (max-width: 520px) {
-        .kos-shell-main { padding: 24px 20px 32px; }
-        .kos-logo-hero { width: min(240px, 78vw); }
-        .kos-menu-rail { max-width: 100%; }
+        .kos-shell-main { padding: 20px 16px 28px; }
+        .kos-menu-rail {
+          max-width: 100%;
+          width: 100%;
+          padding: 16px 14px;
+        }
+        .kos-logo-hero { width: min(220px, 72vw); }
+        .kos-career-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .kos-btn { font-size: 15px; min-height: 50px; padding: 14px 14px; }
         .kos-btn-primary { font-size: 15px; }
         .kos-shell-sub { padding: 20px 16px 24px; width: min(440px, 94vw); }
         .kos-heading { font-size: 24px; }
       }
       @media (min-width: 1400px) {
-        .kos-shell-main {
-          grid-template-columns: minmax(340px, 460px) 1fr;
-          padding: 64px 96px 72px;
-        }
-        .kos-logo-hero { width: min(480px, 36vw); }
-        .kos-menu-rail { max-width: 400px; }
+        .kos-shell-main { padding: 64px 96px 72px; }
+        .kos-menu-rail { max-width: 420px; width: min(420px, 100%); }
+        .kos-logo-hero { width: min(340px, 28vw); }
       }
 
       /* Mobile: always keep menu buttons reachable (esp. iPhone landscape) */
@@ -1041,18 +1122,20 @@ export const MAIN_MENU_CSS = `
           max(16px, env(safe-area-inset-bottom))
           max(16px, env(safe-area-inset-left));
       }
+      #kos-menu.is-mobile-ui .kos-load-mark {
+        width: min(240px, 70vw);
+        height: min(240px, 70vw);
+      }
       #kos-menu.is-mobile-ui .kos-logo-load {
-        width: min(156px, 42vw, 20vh);
+        width: min(168px, 46vw, 26vh);
       }
       #kos-menu.is-mobile-ui .kos-load-wrap {
-        width: min(220px, 78vw);
-        margin-top: 14px;
+        width: min(240px, 78vw);
+        margin-top: 16px;
       }
-      #kos-menu.is-mobile-ui .kos-load-track { height: 6px; }
-      #kos-menu.is-mobile-ui .kos-load-label {
-        margin-top: 8px;
-        font-size: 10px;
-      }
+      #kos-menu.is-mobile-ui .kos-load-track { height: 4px; }
+      #kos-menu.is-mobile-ui .kos-load-label { font-size: 10px; }
+      #kos-menu.is-mobile-ui .kos-load-pct { font-size: 11px; }
       #kos-menu.is-mobile-ui .kos-screen[data-screen="settings"].is-active,
       #kos-menu.is-mobile-ui .kos-screen[data-screen="bots"].is-active,
       #kos-menu.is-mobile-ui .kos-screen[data-screen="mp"].is-active {
@@ -1064,20 +1147,26 @@ export const MAIN_MENU_CSS = `
         min-height: 100%;
         min-height: 100dvh;
         box-sizing: border-box;
-        align-content: start;
+        align-items: center;
         overflow: visible;
         padding:
           max(16px, env(safe-area-inset-top))
-          max(18px, env(safe-area-inset-right))
-          max(18px, env(safe-area-inset-bottom))
-          max(18px, env(safe-area-inset-left));
+          max(16px, env(safe-area-inset-right))
+          max(16px, env(safe-area-inset-bottom))
+          max(16px, env(safe-area-inset-left));
       }
       #kos-menu.is-mobile-ui .kos-logo-hero {
-        width: min(220px, 56vw, 36vh);
+        width: min(200px, 58vw, 28vh);
       }
       #kos-menu.is-mobile-ui .kos-menu-rail {
-        max-width: min(420px, 100%);
+        max-width: min(400px, 100%);
+        width: min(400px, 100%);
         gap: 12px;
+        padding: 14px 14px 16px;
+      }
+      #kos-menu.is-mobile-ui .kos-tagline {
+        font-size: 10px;
+        letter-spacing: 0.14em;
       }
       #kos-menu.is-mobile-ui .kos-nav { gap: 4px; }
       #kos-menu.is-mobile-ui .kos-btn {
@@ -1334,52 +1423,59 @@ export const MAIN_MENU_CSS = `
         height: 22px;
       }
 
-      /* Wide / short phones (iPhone 11 landscape): logo beside buttons */
+      /* Wide / short phones: compact single rail, keep art readable on the right */
       @media (orientation: landscape) and (max-height: 520px) {
         #kos-menu.is-mobile-ui .kos-shell-main {
-          grid-template-columns: minmax(120px, 30vw) minmax(240px, 1fr);
-          grid-template-areas: "hero rail";
           align-items: center;
-          align-content: center;
-          justify-items: stretch;
-          gap: 8px 20px;
+          justify-content: flex-start;
           padding:
-            max(10px, env(safe-area-inset-top))
-            max(16px, env(safe-area-inset-right))
-            max(10px, env(safe-area-inset-bottom))
-            max(16px, env(safe-area-inset-left));
-        }
-        #kos-menu.is-mobile-ui .kos-hero {
-          align-items: center;
-          justify-content: center;
-          padding-bottom: 0;
-        }
-        #kos-menu.is-mobile-ui .kos-logo-hero {
-          width: min(180px, 28vw, 72vh);
+            max(8px, env(safe-area-inset-top))
+            max(14px, env(safe-area-inset-right))
+            max(8px, env(safe-area-inset-bottom))
+            max(14px, env(safe-area-inset-left));
         }
         #kos-menu.is-mobile-ui .kos-menu-rail {
-          max-width: 460px;
-          gap: 8px;
+          max-width: min(420px, 52vw);
+          width: min(420px, 52vw);
+          gap: 6px;
+          padding: 10px 12px;
+          justify-content: center;
         }
-        #kos-menu.is-mobile-ui .kos-btn {
-          min-height: 42px;
-          padding: 9px 12px;
-          font-size: 14px;
+        #kos-menu.is-mobile-ui .kos-brand { gap: 2px; margin: 0; }
+        #kos-menu.is-mobile-ui .kos-logo-hero {
+          width: min(140px, 22vw, 42vh);
         }
-        #kos-menu.is-mobile-ui .kos-btn-primary { font-size: 14px; }
-        #kos-menu.is-mobile-ui .kos-field span {
+        #kos-menu.is-mobile-ui .kos-tagline {
           font-size: 9px;
+          letter-spacing: 0.12em;
         }
-        #kos-menu.is-mobile-ui .kos-field input {
-          padding: 7px 2px 6px;
+        #kos-menu.is-mobile-ui .kos-career-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 6px 6px;
+        }
+        #kos-menu.is-mobile-ui .kos-career-bit b { font-size: 12px; }
+        #kos-menu.is-mobile-ui .kos-btn {
+          min-height: 40px;
+          padding: 8px 12px;
           font-size: 14px;
         }
+        #kos-menu.is-mobile-ui .kos-btn-primary { font-size: 13px; }
+        #kos-menu.is-mobile-ui .kos-field span { font-size: 9px; }
+        #kos-menu.is-mobile-ui .kos-field input {
+          padding: 6px 2px 5px;
+          font-size: 14px;
+        }
+        #kos-menu.is-mobile-ui .kos-legal { font-size: 9px; }
         #kos-menu.is-mobile-ui .kos-logo-load {
-          width: min(110px, 22vw, 36vh);
+          width: min(120px, 24vw, 40vh);
+        }
+        #kos-menu.is-mobile-ui .kos-load-mark {
+          width: min(180px, 36vw);
+          height: min(180px, 36vw);
         }
         #kos-menu.is-mobile-ui .kos-load-wrap {
           margin-top: 10px;
-          width: min(200px, 40vw);
+          width: min(220px, 42vw);
         }
         #kos-menu.is-mobile-ui .kos-shell-panel {
           padding:
@@ -1401,7 +1497,8 @@ export const MAIN_MENU_CSS = `
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .kos-screen, .kos-logo-load, .kos-hero, .kos-menu-rail, .kos-shell-sub, .kos-tab-panel {
+        .kos-screen, .kos-logo-load, .kos-logo-hero, .kos-menu-rail, .kos-load-mark,
+        .kos-load-wrap, .kos-career, .kos-shell-sub, .kos-tab-panel {
           animation: none !important;
         }
       }
