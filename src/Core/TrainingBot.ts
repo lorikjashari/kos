@@ -300,6 +300,7 @@ export class TrainingBot implements IUpdatable {
     this.velocityY = 0
     this.isOnGround = true
     this.needsGroundSettle = true
+    this.groundCacheT = 0
     if (!this.aiFrozen) {
       this.yaw = Math.random() * Math.PI * 2
     }
@@ -461,15 +462,15 @@ export class TrainingBot implements IUpdatable {
     const runFull = this.preferFullThink && lodAllowsFull
 
     if (!runFull) {
-      // Cheap frame: no LOS / retarget / wall rings — just glide + ground stick
+      // Cheap frame: no LOS / retarget / wall rings — glide with ground check + stick
       this.fireCooldown = Math.max(0, this.fireCooldown - dt)
       this.strafeTimer -= dt
       this.retargetTimer -= dt
       const cheapSpeed = TUNING[this.difficulty].moveSpeed * 0.85
       if (this.lastKnownTarget && this.flatDist(this.position, this.lastKnownTarget) > 1.4) {
-        this.glideToward(this.lastKnownTarget, cheapSpeed, dt)
+        this.glideToward(this.lastKnownTarget, cheapSpeed, dt, physics)
       } else if (this.tacticMode !== 'free' && this.waypoint) {
-        this.glideToward(this.waypoint, cheapSpeed * 0.85, dt)
+        this.glideToward(this.waypoint, cheapSpeed * 0.85, dt, physics)
       } else {
         this.isMoving = false
       }
@@ -492,8 +493,11 @@ export class TrainingBot implements IUpdatable {
     this.trackAimAndGait(dt)
   }
 
-  /** Ray-free slide used on budget frames — full think corrects wall clips. */
-  private glideToward(goal: Vector3D, speed: number, dt: number): void {
+  /**
+   * Budget-frame slide: still refuse steps with no floor under them so bots
+   * cannot XZ-glide off ledges while a stale ground cache freezes Y.
+   */
+  private glideToward(goal: Vector3D, speed: number, dt: number, physics: Physics): void {
     const dx = goal.x - this.position.x
     const dz = goal.z - this.position.z
     const len = Math.hypot(dx, dz)
@@ -502,8 +506,16 @@ export class TrainingBot implements IUpdatable {
       return
     }
     const step = Math.min(speed * dt, len)
-    this.position.x += (dx / len) * step
-    this.position.z += (dz / len) * step
+    const nx = this.position.x + (dx / len) * step
+    const nz = this.position.z + (dz / len) * step
+    if (!this.hasGroundNear(physics, nx, nz)) {
+      this.isMoving = false
+      this.groundCacheT = 0
+      return
+    }
+    this.position.x = nx
+    this.position.z = nz
+    this.groundCacheT = 0
     this.isMoving = true
     if (!this.lockCombatFacing) this.faceToward(goal)
   }
@@ -526,7 +538,9 @@ export class TrainingBot implements IUpdatable {
       if (!out) continue
       this.position.x = out.a.x
       this.position.z = out.a.z
+      this.groundCacheT = 0
       other.position.x = out.b.x
+      other.groundCacheT = 0
       other.position.z = out.b.z
     }
 
@@ -541,6 +555,7 @@ export class TrainingBot implements IUpdatable {
     if (!out) return
     this.position.x = out.a.x
     this.position.z = out.a.z
+    this.groundCacheT = 0
     player.nudgeHorizontal(out.b.x - player.position.x, out.b.z - player.position.z)
   }
 
@@ -1299,15 +1314,22 @@ export class TrainingBot implements IUpdatable {
     const settling = this.needsGroundSettle
     this.needsGroundSettle = false
 
-    // Reuse last ground Y briefly while planted — 5 bots × 1 ray/frame adds up on Dust II
-    if (!settling && this.isOnGround && this.groundCacheT > 0 && Math.abs(this.velocityY) < 0.01) {
+    // Only reuse ground Y while planted AND not sliding in XZ — a moving cache
+    // was freezing feet height while budget glides walked off ledges.
+    if (
+      !settling &&
+      !this.isMoving &&
+      this.isOnGround &&
+      this.groundCacheT > 0 &&
+      Math.abs(this.velocityY) < 0.01
+    ) {
       this.position.y = this.groundCacheY
       return
     }
 
     const probeUp = settling ? 4 : 0.6
     const fallProbe = this.isOnGround && !settling ? this.groundSnapDown + 0.15 : 400
-    const ground = this.probeGround(
+    let ground = this.probeGround(
       physics,
       this.position.x,
       this.position.z,
@@ -1315,17 +1337,32 @@ export class TrainingBot implements IUpdatable {
       probeUp + fallProbe
     )
 
+    // Short grounded probe can miss thin Dust II tris / small drops after a
+    // slide — retry deep before treating it as void and falling forever.
+    if (!ground && this.isOnGround && !settling) {
+      ground = this.probeGround(
+        physics,
+        this.position.x,
+        this.position.z,
+        this.position.y + 2.5,
+        400
+      )
+    }
+
     if (ground) {
       const targetY = ground.y + this.groundSkin
       const dy = targetY - this.position.y
+      // Slightly larger snap after a long-probe recover so a 1m miss doesn't void-fall
+      const canStick =
+        dy <= 4 &&
+        (dy >= -this.groundSnapDown || (settling && dy >= -4) || dy >= -1.5)
 
-      if (dy >= -this.groundSnapDown || (settling && dy >= -4)) {
-        // On or just above a surface — stick to it (ramps / curbs / small drops)
+      if (canStick) {
         this.position.y = targetY
         this.velocityY = 0
         this.isOnGround = true
         this.groundCacheY = targetY
-        this.groundCacheT = 0.1
+        this.groundCacheT = this.isMoving ? 0 : 0.08
         return
       }
 
@@ -1339,7 +1376,7 @@ export class TrainingBot implements IUpdatable {
         this.velocityY = 0
         this.isOnGround = true
         this.groundCacheY = targetY
-        this.groundCacheT = 0.1
+        this.groundCacheT = 0.08
       }
       return
     }
