@@ -79,7 +79,10 @@ export function authorizeHit(input: AuthorizeHitInput): AuthorizeHitResult {
   }
 
   // Knife claims beyond melee are rejected; guns use the global max
-  const maxRange = weapon === 'Knife' ? (WEAPONS.Knife?.maxRange ?? 3) + 1.5 : MAX_HIT_RANGE
+  const maxRange =
+    weapon === 'Knife' || weapon === 'Butterfly'
+      ? (WEAPONS.Butterfly?.maxRange ?? WEAPONS.Knife?.maxRange ?? 3) + 1.5
+      : MAX_HIT_RANGE
   const distance = flatDist(attacker, target)
   if (distance > maxRange) return { ok: false, reason: 'range' }
 

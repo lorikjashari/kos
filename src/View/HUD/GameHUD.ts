@@ -661,7 +661,15 @@ export class GameHUD {
     this.loadoutEl?.querySelectorAll<HTMLImageElement>('[data-icon]').forEach((img) => {
       const key = img.getAttribute('data-icon') || ''
       const src =
-        key === 'AK47' ? ak : key === 'AWP' ? awp : key === 'Usp' ? usp : key === 'Knife' ? knife : null
+        key === 'AK47'
+          ? ak
+          : key === 'AWP'
+            ? awp
+            : key === 'Usp'
+              ? usp
+              : key === 'Knife' || key === 'Butterfly'
+                ? knife
+                : null
       if (src) img.src = src
     })
     void usp
@@ -684,11 +692,12 @@ export class GameHUD {
       this.weaponIconEl.src = icon
       this.weaponIconEl.style.display = ''
     }
-    const sidearm = weaponKey === 'Usp' || weaponKey === 'Knife'
+    const sidearm = weaponKey === 'Usp' || weaponKey === 'Knife' || weaponKey === 'Butterfly'
     this.weaponIconEl.classList.toggle('is-sidearm', sidearm)
     // Small knife glyph stays knife; dim it when knife is the active weapon (big icon already shows it)
     if (this.knifeIconEl) {
-      this.knifeIconEl.style.opacity = weaponKey === 'Knife' ? '0.35' : '0.9'
+      this.knifeIconEl.style.opacity =
+        weaponKey === 'Knife' || weaponKey === 'Butterfly' ? '0.35' : '0.9'
     }
   }
 

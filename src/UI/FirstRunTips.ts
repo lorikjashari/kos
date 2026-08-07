@@ -92,7 +92,7 @@ export function mountFirstRunTips(onDone?: () => void): void {
       <p class="lead">KoS is a browser FPS — not a Valve product. A few controls to get you shooting.</p>
       <ol>
         <li><strong>Move</strong> — WASD / left stick. Jump with Space or scroll wheel. Crouch to peek.</li>
-        <li><strong>Loadout</strong> — at match start pick AK or AWP (keys 1 / 2). Slot 2 is USP, slot 3 is knife.</li>
+        <li><strong>Loadout</strong> — at match start pick AK or AWP (keys 1 / 2). Slot 2 is USP, slot 3 is butterfly knife.</li>
         <li><strong>Team Deathmatch</strong> — Dust II rounds: freeze, wipe the other side, first to N round wins. Die mid-round? Scroll to spectate teammates.</li>
       </ol>
       <button type="button" id="kos-tips-ok">Got it</button>

@@ -9,6 +9,7 @@ import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
 import { FPSCameraManager } from '../View/CameraManager/FPSCameraManager'
 import { CameraManager } from '../View/CameraManager/CameraManager'
 import { DEFAULT_KEYBINDS, type KeybindMap } from '../UI/SettingsStore'
+import { mapHasButterflyKnife } from '../Core/MapCatalog'
 
 export class InputManager implements IUpdatable {
   public keys: Map<Key, KeyBinding> = new Map<Key, KeyBinding>()
@@ -297,16 +298,23 @@ export class InputManager implements IUpdatable {
     const fps = playerRenderer as FPSRenderer | undefined
     const equip = (viewKey: string, logicKey: string) => {
       if (game.editorActive) {
-        const ed = viewKey === 'AK47' || viewKey === 'AK' ? 'AK' : viewKey === 'Knife' ? 'Knife' : 'Usp'
+        const ed =
+          viewKey === 'AK47' || viewKey === 'AK'
+            ? 'AK'
+            : viewKey === 'Butterfly' || viewKey === 'Knife'
+              ? 'Butterfly'
+              : viewKey === 'AWP'
+                ? 'AWP'
+                : 'Usp'
         fps?.equipEditorWeapon(ed)
-        void game.audioManager.playSwitch(logicKey)
+        void game.audioManager.playSwitch(logicKey === 'Butterfly' ? 'Knife' : logicKey)
         return
       }
       // Already holding this slot — ignore so 1/2/3 don't re-draw
       if (player.currentWeapon.key === logicKey) return
       if (player.setWeapon(logicKey)) {
         fps?.equipWeaponMesh(logicKey)
-        void game.audioManager.playSwitch(logicKey)
+        void game.audioManager.playSwitch(logicKey === 'Butterfly' ? 'Knife' : logicKey)
       }
     }
 
@@ -318,7 +326,8 @@ export class InputManager implements IUpdatable {
     }
 
     if (this.keys.get(Key.Three)?.justReleased) {
-      equip('Knife', 'Knife')
+      const butterfly = mapHasButterflyKnife(game.activeMapId)
+      equip(butterfly ? 'Butterfly' : 'Knife', butterfly ? 'Butterfly' : 'Knife')
     }
 
     if (this.playerWrapper.cameraManager instanceof FPSCameraManager) {

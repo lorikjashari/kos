@@ -122,6 +122,11 @@ export function mapSupportsTeams(id: MapId): boolean {
   return !!def.teamSpawns && def.teamSpawns.T.length > 0 && def.teamSpawns.CT.length > 0
 }
 
+/** CS butterfly viewmodel — Dust II only. Other maps use the default M9 knife. */
+export function mapHasButterflyKnife(id: MapId): boolean {
+  return id === 'de_dust2'
+}
+
 export const DEFAULT_MAP_ID: MapId = 'pool_day'
 
 export function getMapDefinition(id: MapId): MapDefinition {

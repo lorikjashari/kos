@@ -1,57 +1,36 @@
 /**
- * In-match editor chrome for /editormode — xray, transforms, toggles.
+ * Slim /editormode UI — tune your FPS viewmodel seat and copy coordinates.
+ * No dummy bot / bone / xray chrome.
  */
-export type EditorTool = 'select' | 'translate' | 'rotate' | 'scale'
+
+export type EditorWeaponKey = 'AK' | 'Usp' | 'AWP' | 'Butterfly'
 
 export type EditorMenuHandlers = {
-  onTool: (tool: EditorTool) => void
-  onToggleXray: (on: boolean) => void
-  onToggleWireframe: (on: boolean) => void
-  onToggleAxes: (on: boolean) => void
-  onToggleLookAtPlayer: (on: boolean) => void
-  onToggleHitZonesOnly: (on: boolean) => void
-  onScale: (value: number) => void
-  onNudge: (axis: 'x' | 'y' | 'z', delta: number) => void
-  onYaw: (deltaRad: number) => void
-  onSnapGround: () => void
-  onResetPose: () => void
-  onPreviewAnim: (clip: string) => void
-  /** Switch held weapon ('Usp' | 'AK') */
-  onSelectWeapon: (key: string) => void
-  /** '' = move whole bot; otherwise a bone key from getEditableBones() */
-  onSelectBone: (boneKey: string) => void
-  /** Set the selected joint's rotation (degrees, XYZ offset from bind) */
-  onBoneRot: (x: number, y: number, z: number) => void
-  /** Reset the selected joint to bind */
-  onResetBone: () => void
-  /** Returns a text summary of all joint edits (for copy/paste) */
-  getPoseText: () => string
-  /** Persist JSON pose to localStorage + download */
-  onSavePose: () => string
-  /** Load last saved JSON pose from localStorage */
-  onLoadPose: () => string
-  onFpsLook: () => void
-  onEditCursor: () => void
+  onSelectWeapon: (key: EditorWeaponKey) => void
+  onNudgeOffset: (axis: 'x' | 'y' | 'z', delta: number) => void
+  onNudgeRotation: (axis: 'x' | 'y' | 'z', deltaRad: number) => void
+  onNudgeKnife?: (axis: 'x' | 'y' | 'z', delta: number) => void
+  onNudgeKnifeScale?: (delta: number) => void
+  onResetOffset: () => void
+  onResetKnife?: () => void
+  getCopyText: () => string
   onExit: () => void
   getState: () => EditorMenuState
 }
 
 export type EditorMenuState = {
-  tool: EditorTool
-  xray: boolean
-  wireframe: boolean
-  axes: boolean
-  lookAtPlayer: boolean
-  hitZonesOnly: boolean
-  scale: number
-  pos: { x: number; y: number; z: number }
-  yawDeg: number
-  fpsLook: boolean
-  previewAnim: string
-  weapon: string
-  selectedBone: string
-  boneRot: { x: number; y: number; z: number }
+  weapon: EditorWeaponKey
+  offset: { x: number; y: number; z: number }
+  rotation: { x: number; y: number; z: number }
+  knife?: { x: number; y: number; z: number; scale: number }
 }
+
+const WEAPONS: Array<{ key: EditorWeaponKey; label: string }> = [
+  { key: 'AK', label: 'AK' },
+  { key: 'Usp', label: 'USP' },
+  { key: 'AWP', label: 'AWP' },
+  { key: 'Butterfly', label: 'Butterfly' },
+]
 
 export class EditorMenu {
   private root: HTMLDivElement
@@ -66,124 +45,91 @@ export class EditorMenu {
       <div class="kos-ed-panel">
         <header class="kos-ed-head">
           <div>
-            <strong>Editor Mode</strong>
-            <span class="kos-ed-sub">Pool Day · dummy</span>
+            <strong>Viewmodel Tune</strong>
+            <span class="kos-ed-sub">Your gun · nudge · copy coords</span>
           </div>
           <button type="button" class="kos-ed-x" data-act="exit" title="Exit">✕</button>
         </header>
 
         <section class="kos-ed-sec">
-          <div class="kos-ed-label">Transform</div>
-          <div class="kos-ed-row kos-ed-tools">
-            <button type="button" data-tool="select" title="Select (Q)">Sel</button>
-            <button type="button" data-tool="translate" class="is-on" title="Move (W)">Move</button>
-            <button type="button" data-tool="rotate" title="Rotate (E)">Rot</button>
-            <button type="button" data-tool="scale" title="Scale (R)">Scale</button>
-          </div>
-          <p class="kos-ed-hint">Drag the gizmo on the bot. Q/W/E/R switch tools.</p>
-        </section>
-
-        <section class="kos-ed-sec">
-          <div class="kos-ed-label">Display</div>
-          <label class="kos-ed-check"><input type="checkbox" data-tog="xray" /> X-Ray hitboxes</label>
-          <label class="kos-ed-check"><input type="checkbox" data-tog="wireframe" /> Wireframe mesh</label>
-          <label class="kos-ed-check"><input type="checkbox" data-tog="axes" checked /> Axes helper</label>
-          <label class="kos-ed-check"><input type="checkbox" data-tog="hitZonesOnly" /> Hit zones only (hide skin)</label>
-        </section>
-
-        <section class="kos-ed-sec">
-          <div class="kos-ed-label">Facing</div>
-          <label class="kos-ed-check"><input type="checkbox" data-tog="lookAtPlayer" checked /> Always face player</label>
-        </section>
-
-        <section class="kos-ed-sec">
-          <div class="kos-ed-label">Nudge</div>
-          <div class="kos-ed-nudge">
-            <button type="button" data-nudge="x,-0.25">−X</button>
-            <button type="button" data-nudge="x,0.25">+X</button>
-            <button type="button" data-nudge="y,-0.25">−Y</button>
-            <button type="button" data-nudge="y,0.25">+Y</button>
-            <button type="button" data-nudge="z,-0.25">−Z</button>
-            <button type="button" data-nudge="z,0.25">+Z</button>
-          </div>
-          <div class="kos-ed-nudge">
-            <button type="button" data-yaw="-15">⟲ Yaw</button>
-            <button type="button" data-yaw="15">Yaw ⟳</button>
-            <button type="button" data-act="snap">Snap ground</button>
-          </div>
-        </section>
-
-        <section class="kos-ed-sec">
-          <div class="kos-ed-label">Scale <span id="kos-ed-scale-val">1.00</span></div>
-          <input id="kos-ed-scale" type="range" min="0.25" max="3" step="0.05" value="1" />
-        </section>
-
-        <section class="kos-ed-sec">
-          <div class="kos-ed-label">Animation preview</div>
-          <p class="kos-ed-hint" style="margin-bottom:8px">Advanced gait on the CS terrorist — clavicles, shoulders, elbows, wrists. X-Ray is separate under Display.</p>
-          <div class="kos-ed-row kos-ed-anims">
-            <button type="button" data-anim="Idle" class="is-on">Idle</button>
-            <button type="button" data-anim="Walking">Walking</button>
-            <button type="button" data-anim="Running">Running</button>
-          </div>
-        </section>
-
-        <section class="kos-ed-sec">
           <div class="kos-ed-label">Weapon</div>
-          <p class="kos-ed-hint" style="margin-bottom:8px">Editor preview: AKM pack (arms + anims). USP / Knife = gameplay packs. Match guns unchanged.</p>
           <div class="kos-ed-row kos-ed-anims">
-            <button type="button" data-weapon="Usp">USP</button>
-            <button type="button" data-weapon="AK" class="is-on">AK</button>
-            <button type="button" data-weapon="Knife">Knife</button>
+            ${WEAPONS.map(
+              (w) =>
+                `<button type="button" data-weapon="${w.key}">${w.label}</button>`
+            ).join('')}
+          </div>
+        </section>
+
+        <section class="kos-ed-sec" id="kos-ed-knife" hidden>
+          <div class="kos-ed-label">Knife prop <span class="kos-ed-fine">(hands stay put)</span></div>
+          <div class="kos-ed-nudge">
+            <button type="button" data-knife="x,-0.02">← Left</button>
+            <button type="button" data-knife="x,0.02">Right →</button>
+            <button type="button" data-knife="y,0.02">↑ Up</button>
+            <button type="button" data-knife="y,-0.02">↓ Down</button>
+          </div>
+          <div class="kos-ed-nudge" style="margin-top:6px">
+            <button type="button" data-knife="z,-0.02">−Z back</button>
+            <button type="button" data-knife="z,0.02">+Z fwd</button>
+            <button type="button" data-knife-scale="-0.05">Smaller</button>
+            <button type="button" data-knife-scale="0.05">Bigger</button>
+          </div>
+          <div class="kos-ed-nudge" style="margin-top:6px">
+            <button type="button" data-knife="x,-0.08">−−X</button>
+            <button type="button" data-knife="x,0.08">++X</button>
+            <button type="button" data-knife="y,-0.08">−−Y</button>
+            <button type="button" data-knife="y,0.08">++Y</button>
+          </div>
+          <div class="kos-ed-row" style="margin-top:8px">
+            <button type="button" data-act="reset-knife">Reset knife</button>
           </div>
         </section>
 
         <section class="kos-ed-sec">
-          <div class="kos-ed-label">Rig · pose a joint</div>
-          <select id="kos-ed-bone" class="kos-ed-select">
-            <option value="">Whole body (move bot)</option>
-          </select>
-          <div id="kos-ed-bonerot" class="kos-ed-bonerot" style="display:none">
-            <div class="kos-ed-rotrow"><b>X</b><input type="range" data-brot="x" min="-180" max="180" step="1" value="0" /><span data-brotval="x">0°</span></div>
-            <div class="kos-ed-rotrow"><b>Y</b><input type="range" data-brot="y" min="-180" max="180" step="1" value="0" /><span data-brotval="y">0°</span></div>
-            <div class="kos-ed-rotrow"><b>Z</b><input type="range" data-brot="z" min="-180" max="180" step="1" value="0" /><span data-brotval="z">0°</span></div>
-            <div class="kos-ed-row"><button type="button" data-act="resetBone">Reset this joint</button></div>
+          <div class="kos-ed-label">Hands offset <span class="kos-ed-fine">(moves whole viewmodel)</span></div>
+          <div class="kos-ed-nudge">
+            <button type="button" data-off="x,-0.02">−X</button>
+            <button type="button" data-off="x,0.02">+X</button>
+            <button type="button" data-off="y,-0.02">−Y</button>
+            <button type="button" data-off="y,0.02">+Y</button>
+            <button type="button" data-off="z,-0.02">−Z back</button>
+            <button type="button" data-off="z,0.02">+Z fwd</button>
           </div>
-          <p class="kos-ed-hint">Pick a joint (head, elbow, knee…) then drag the sliders — or the gizmo — to rotate it. The animation pauses so your pose sticks. Choose “Whole body” to move the bot again.</p>
+          <div class="kos-ed-nudge" style="margin-top:6px">
+            <button type="button" data-off="z,-0.08">−−Z</button>
+            <button type="button" data-off="z,0.08">++Z</button>
+            <button type="button" data-off="x,-0.08">−−X</button>
+            <button type="button" data-off="x,0.08">++X</button>
+          </div>
         </section>
 
         <section class="kos-ed-sec">
-          <div class="kos-ed-label">Pose</div>
+          <div class="kos-ed-label">Rotation (deg)</div>
+          <div class="kos-ed-nudge">
+            <button type="button" data-rot="x,-5">−X</button>
+            <button type="button" data-rot="x,5">+X</button>
+            <button type="button" data-rot="y,-5">−Y</button>
+            <button type="button" data-rot="y,5">+Y</button>
+            <button type="button" data-rot="z,-5">−Z</button>
+            <button type="button" data-rot="z,5">+Z</button>
+          </div>
+        </section>
+
+        <section class="kos-ed-sec">
           <div class="kos-ed-row">
-            <button type="button" data-act="reset">Reset pose</button>
+            <button type="button" data-act="reset">Reset offset</button>
+            <button type="button" id="kos-ed-copy" data-act="copy" class="kos-ed-copybtn">Copy coords</button>
           </div>
-        </section>
-
-        <section class="kos-ed-sec">
-          <div class="kos-ed-label">Camera</div>
-          <div class="kos-ed-row">
-            <button type="button" data-act="editCursor" class="is-on" id="kos-ed-btn-edit">Edit cursor</button>
-            <button type="button" data-act="fpsLook" id="kos-ed-btn-fps">FPS look</button>
-          </div>
-          <p class="kos-ed-hint">Edit cursor = use menu + gizmo. FPS look = aim around (click to lock).</p>
+          <p class="kos-ed-hint">Copies Vector3D lines for the current weapon seat. Paste into chat or code.</p>
         </section>
 
         <section class="kos-ed-sec kos-ed-stats">
-          <div class="kos-ed-label">Selection</div>
+          <div class="kos-ed-label">Live</div>
           <pre id="kos-ed-stats">—</pre>
         </section>
 
-        <section class="kos-ed-sec">
-          <div class="kos-ed-label">Share your changes</div>
-          <div class="kos-ed-row">
-            <button type="button" id="kos-ed-copy" data-act="copyPose" class="kos-ed-copybtn">Copy my changes</button>
-          </div>
-          <div class="kos-ed-row" style="margin-top:8px">
-            <button type="button" data-act="savePose">Save pose</button>
-            <button type="button" data-act="loadPose">Load pose</button>
-          </div>
-          <p class="kos-ed-hint" id="kos-ed-pose-status">Save stores JSON locally (+ download). Load restores the last save.</p>
-        </section>
+        <p class="kos-ed-hint">Click the game to look around. WASD to walk. Esc / ✕ exits.</p>
       </div>
     `
 
@@ -247,7 +193,8 @@ export class EditorMenu {
           color: #7dd3fc;
           margin-bottom: 8px;
         }
-        .kos-ed-row, .kos-ed-tools, .kos-ed-nudge {
+        .kos-ed-fine { font-weight: 500; letter-spacing: 0; text-transform: none; color: #8090a5; }
+        .kos-ed-row, .kos-ed-nudge, .kos-ed-anims {
           display: flex;
           flex-wrap: wrap;
           gap: 6px;
@@ -267,43 +214,13 @@ export class EditorMenu {
           background: rgba(56,189,248,0.28);
           border-color: rgba(125,211,252,0.55);
         }
-        .kos-ed-check {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          margin-bottom: 6px;
-          cursor: pointer;
-          user-select: none;
-        }
         .kos-ed-hint {
           margin: 8px 0 0;
           font-size: 11px;
           line-height: 1.35;
           color: #8090a5;
         }
-        #kos-ed-scale {
-          width: 100%;
-          accent-color: #38bdf8;
-        }
-        .kos-ed-select {
-          width: 100%;
-          padding: 7px 8px;
-          border-radius: 6px;
-          border: 1px solid rgba(255,255,255,0.16);
-          background: rgba(255,255,255,0.06);
-          color: #f1f5f9;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-        }
-        .kos-ed-select:focus { outline: none; border-color: rgba(125,211,252,0.6); }
-        .kos-ed-bonerot { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
-        .kos-ed-rotrow { display: flex; align-items: center; gap: 8px; }
-        .kos-ed-rotrow b { width: 12px; color: #7dd3fc; font-size: 12px; }
-        .kos-ed-rotrow input[type="range"] { flex: 1; accent-color: #38bdf8; }
-        .kos-ed-rotrow span { width: 42px; text-align: right; font-size: 11px; color: #cbd5e1; }
-        .kos-ed-copybtn { width: 100%; background: rgba(56,189,248,0.2); border-color: rgba(125,211,252,0.5); }
+        .kos-ed-copybtn { flex: 1; background: rgba(56,189,248,0.2); border-color: rgba(125,211,252,0.5); }
         .kos-ed-copybtn.copied { background: rgba(74,222,128,0.3); border-color: rgba(74,222,128,0.6); }
         .kos-ed-stats pre {
           margin: 0;
@@ -328,56 +245,45 @@ export class EditorMenu {
     this.root.addEventListener('click', (e) => e.stopPropagation())
     this.root.addEventListener('wheel', (e) => e.stopPropagation(), { passive: false })
 
-    this.root.querySelectorAll('[data-tool]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const tool = (btn as HTMLElement).getAttribute('data-tool') as EditorTool
-        this.handlers.onTool(tool)
-        this.refresh()
-      })
-    })
-
-    this.root.querySelectorAll('[data-tog]').forEach((el) => {
-      el.addEventListener('change', () => {
-        const key = (el as HTMLElement).getAttribute('data-tog')
-        const on = (el as HTMLInputElement).checked
-        if (key === 'xray') this.handlers.onToggleXray(on)
-        if (key === 'wireframe') this.handlers.onToggleWireframe(on)
-        if (key === 'axes') this.handlers.onToggleAxes(on)
-        if (key === 'lookAtPlayer') this.handlers.onToggleLookAtPlayer(on)
-        if (key === 'hitZonesOnly') this.handlers.onToggleHitZonesOnly(on)
-        this.refresh()
-      })
-    })
-
-    this.root.querySelectorAll('[data-nudge]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const raw = (btn as HTMLElement).getAttribute('data-nudge') || 'x,0'
-        const [axis, delta] = raw.split(',')
-        this.handlers.onNudge(axis as 'x' | 'y' | 'z', Number(delta))
-        this.refresh()
-      })
-    })
-
-    this.root.querySelectorAll('[data-yaw]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const deg = Number((btn as HTMLElement).getAttribute('data-yaw') || 0)
-        this.handlers.onYaw((deg * Math.PI) / 180)
-        this.refresh()
-      })
-    })
-
-    this.root.querySelectorAll('[data-anim]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const clip = (btn as HTMLElement).getAttribute('data-anim') || 'Idle'
-        this.handlers.onPreviewAnim(clip)
-        this.refresh()
-      })
-    })
-
     this.root.querySelectorAll('[data-weapon]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const key = (btn as HTMLElement).getAttribute('data-weapon') || 'Usp'
+        const key = ((btn as HTMLElement).getAttribute('data-weapon') || 'AK') as EditorWeaponKey
         this.handlers.onSelectWeapon(key)
+        this.refresh()
+      })
+    })
+
+    this.root.querySelectorAll('[data-knife]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const raw = (btn as HTMLElement).getAttribute('data-knife') || 'y,0'
+        const [axis, delta] = raw.split(',')
+        this.handlers.onNudgeKnife?.(axis as 'x' | 'y' | 'z', Number(delta))
+        this.refresh()
+      })
+    })
+
+    this.root.querySelectorAll('[data-knife-scale]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const delta = Number((btn as HTMLElement).getAttribute('data-knife-scale') || '0')
+        this.handlers.onNudgeKnifeScale?.(delta)
+        this.refresh()
+      })
+    })
+
+    this.root.querySelectorAll('[data-off]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const raw = (btn as HTMLElement).getAttribute('data-off') || 'z,0'
+        const [axis, delta] = raw.split(',')
+        this.handlers.onNudgeOffset(axis as 'x' | 'y' | 'z', Number(delta))
+        this.refresh()
+      })
+    })
+
+    this.root.querySelectorAll('[data-rot]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const raw = (btn as HTMLElement).getAttribute('data-rot') || 'y,0'
+        const [axis, deg] = raw.split(',')
+        this.handlers.onNudgeRotation(axis as 'x' | 'y' | 'z', (Number(deg) * Math.PI) / 180)
         this.refresh()
       })
     })
@@ -385,76 +291,24 @@ export class EditorMenu {
     this.root.querySelectorAll('[data-act]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const act = (btn as HTMLElement).getAttribute('data-act')
-        if (act === 'snap') this.handlers.onSnapGround()
-        if (act === 'reset') this.handlers.onResetPose()
-        if (act === 'resetBone') this.handlers.onResetBone()
-        if (act === 'copyPose') {
-          this.copyPose()
+        if (act === 'reset') this.handlers.onResetOffset()
+        if (act === 'reset-knife') this.handlers.onResetKnife?.()
+        if (act === 'copy') {
+          void this.copyCoords()
           return
         }
-        if (act === 'savePose') {
-          const msg = this.handlers.onSavePose()
-          const status = this.root.querySelector('#kos-ed-pose-status')
-          if (status) status.textContent = msg
-          return
-        }
-        if (act === 'loadPose') {
-          const msg = this.handlers.onLoadPose()
-          const status = this.root.querySelector('#kos-ed-pose-status')
-          if (status) status.textContent = msg
-          this.refresh()
-          return
-        }
-        if (act === 'fpsLook') this.handlers.onFpsLook()
-        if (act === 'editCursor') this.handlers.onEditCursor()
         if (act === 'exit') this.handlers.onExit()
         this.refresh()
       })
     })
-
-    const readRot = (): { x: number; y: number; z: number } => {
-      const get = (ax: string) =>
-        Number((this.root.querySelector(`[data-brot="${ax}"]`) as HTMLInputElement)?.value ?? 0)
-      return { x: get('x'), y: get('y'), z: get('z') }
-    }
-    this.root.querySelectorAll('[data-brot]').forEach((el) => {
-      el.addEventListener('input', () => {
-        const r = readRot()
-        this.handlers.onBoneRot(r.x, r.y, r.z)
-        this.updateRotLabels(r)
-      })
-    })
-
-    const scale = this.root.querySelector('#kos-ed-scale') as HTMLInputElement
-    scale.addEventListener('input', () => {
-      this.handlers.onScale(Number(scale.value))
-      this.refresh()
-    })
-
-    const bone = this.root.querySelector('#kos-ed-bone') as HTMLSelectElement
-    bone.addEventListener('change', () => {
-      this.handlers.onSelectBone(bone.value)
-      this.refresh()
-    })
   }
 
-  private updateRotLabels(r: { x: number; y: number; z: number }): void {
-    const set = (ax: 'x' | 'y' | 'z') => {
-      const el = this.root.querySelector(`[data-brotval="${ax}"]`)
-      if (el) el.textContent = `${Math.round(r[ax])}°`
-    }
-    set('x')
-    set('y')
-    set('z')
-  }
-
-  private async copyPose(): Promise<void> {
-    const text = this.handlers.getPoseText()
+  private async copyCoords(): Promise<void> {
+    const text = this.handlers.getCopyText()
     const btn = this.root.querySelector('#kos-ed-copy') as HTMLButtonElement | null
     try {
       await navigator.clipboard.writeText(text)
     } catch {
-      // Fallback for non-secure contexts
       const ta = document.createElement('textarea')
       ta.value = text
       ta.style.position = 'fixed'
@@ -470,22 +324,13 @@ export class EditorMenu {
     }
     if (btn) {
       const prev = btn.textContent
-      btn.textContent = 'Copied! Paste it in chat'
+      btn.textContent = 'Copied!'
       btn.classList.add('copied')
       window.setTimeout(() => {
         btn.textContent = prev
         btn.classList.remove('copied')
-      }, 1600)
+      }, 1400)
     }
-  }
-
-  /** Populate the rig dropdown with the bot's editable joints. */
-  public setBones(bones: Array<{ key: string; label: string }>): void {
-    const sel = this.root.querySelector('#kos-ed-bone') as HTMLSelectElement | null
-    if (!sel) return
-    sel.innerHTML =
-      '<option value="">Whole body (move bot)</option>' +
-      bones.map((b) => `<option value="${b.key}">${b.label}</option>`).join('')
   }
 
   public isOpen(): boolean {
@@ -506,62 +351,30 @@ export class EditorMenu {
   public refresh(): void {
     if (!this.open) return
     const s = this.handlers.getState()
-
-    this.root.querySelectorAll('[data-tool]').forEach((btn) => {
-      btn.classList.toggle('is-on', (btn as HTMLElement).getAttribute('data-tool') === s.tool)
-    })
-
-    const setCheck = (key: string, on: boolean) => {
-      const el = this.root.querySelector(`[data-tog="${key}"]`) as HTMLInputElement | null
-      if (el) el.checked = on
-    }
-    setCheck('xray', s.xray)
-    setCheck('wireframe', s.wireframe)
-    setCheck('axes', s.axes)
-    setCheck('lookAtPlayer', s.lookAtPlayer)
-    setCheck('hitZonesOnly', s.hitZonesOnly)
-
-    const scale = this.root.querySelector('#kos-ed-scale') as HTMLInputElement
-    const scaleVal = this.root.querySelector('#kos-ed-scale-val')
-    if (scale && document.activeElement !== scale) scale.value = String(s.scale)
-    if (scaleVal) scaleVal.textContent = s.scale.toFixed(2)
-
-    this.root.querySelectorAll('[data-anim]').forEach((btn) => {
-      btn.classList.toggle('is-on', (btn as HTMLElement).getAttribute('data-anim') === s.previewAnim)
-    })
-
     this.root.querySelectorAll('[data-weapon]').forEach((btn) => {
       btn.classList.toggle('is-on', (btn as HTMLElement).getAttribute('data-weapon') === s.weapon)
     })
-
-    const bone = this.root.querySelector('#kos-ed-bone') as HTMLSelectElement | null
-    if (bone && document.activeElement !== bone && bone.value !== s.selectedBone) {
-      bone.value = s.selectedBone
-    }
-
-    const rotBox = this.root.querySelector('#kos-ed-bonerot') as HTMLElement | null
-    if (rotBox) rotBox.style.display = s.selectedBone ? 'flex' : 'none'
-    if (s.selectedBone) {
-      const axes: Array<'x' | 'y' | 'z'> = ['x', 'y', 'z']
-      for (const ax of axes) {
-        const slider = this.root.querySelector(`[data-brot="${ax}"]`) as HTMLInputElement | null
-        if (slider && document.activeElement !== slider) {
-          slider.value = String(Math.round(s.boneRot[ax]))
-        }
-      }
-      this.updateRotLabels(s.boneRot)
-    }
-
-    this.root.querySelector('#kos-ed-btn-edit')?.classList.toggle('is-on', !s.fpsLook)
-    this.root.querySelector('#kos-ed-btn-fps')?.classList.toggle('is-on', s.fpsLook)
+    const knifeSec = this.root.querySelector('#kos-ed-knife') as HTMLElement | null
+    if (knifeSec) knifeSec.hidden = s.weapon !== 'Butterfly'
 
     const stats = this.root.querySelector('#kos-ed-stats')
     if (stats) {
-      stats.textContent =
-        `pos  ${s.pos.x.toFixed(2)}  ${s.pos.y.toFixed(2)}  ${s.pos.z.toFixed(2)}\n` +
-        `yaw  ${s.yawDeg.toFixed(1)}°\n` +
-        `scale ${s.scale.toFixed(2)}\n` +
-        `tool  ${s.tool}`
+      const o = s.offset
+      const r = s.rotation
+      let text =
+        `${s.weapon}\n` +
+        `hands   ${o.x.toFixed(3)}  ${o.y.toFixed(3)}  ${o.z.toFixed(3)}\n` +
+        `rot°    ${((r.x * 180) / Math.PI).toFixed(1)}  ${((r.y * 180) / Math.PI).toFixed(1)}  ${((r.z * 180) / Math.PI).toFixed(1)}`
+      if (s.knife) {
+        const k = s.knife
+        text +=
+          `\nknife   ${k.x.toFixed(3)}  ${k.y.toFixed(3)}  ${k.z.toFixed(3)}\n` +
+          `scale   ${k.scale.toFixed(3)}×`
+      }
+      stats.textContent = text
     }
   }
 }
+
+/** @deprecated kept so old imports of EditorTool still typecheck during transition */
+export type EditorTool = 'select' | 'translate' | 'rotate' | 'scale'

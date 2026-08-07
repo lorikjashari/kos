@@ -84,6 +84,7 @@ export class Player extends Pawn implements IUpdatable {
     AK47: 30,
     Usp: 12,
     Knife: 0,
+    Butterfly: 0,
     AWP: 10,
   }
   /** Spare rounds outside the mag, per weapon. Reloads draw from here. */
@@ -735,6 +736,9 @@ export class Player extends Pawn implements IUpdatable {
   }
   /** Returns false if already holding that weapon (no re-equip) */
   public setWeapon(weaponKey: string): boolean {
+    if (weaponKey === 'Butterfly' && Game.getInstance().activeMapId !== 'de_dust2') {
+      weaponKey = 'Knife'
+    }
     if (this.currentWeapon.key === weaponKey) return false
 
     // Remember mag for the weapon we're leaving
@@ -943,12 +947,14 @@ export class Player extends Pawn implements IUpdatable {
       AK47: primaryKey === 'AK47' ? getWeaponConfig('AK47').reserveAmmo : 0,
       Usp: getWeaponConfig('Usp').reserveAmmo,
       Knife: 0,
+      Butterfly: 0,
       AWP: primaryKey === 'AWP' ? getWeaponConfig('AWP').reserveAmmo : 0,
     }
     this.ammoByWeapon = {
       AK47: primaryKey === 'AK47' ? getWeaponConfig('AK47').magazineSize : 0,
       Usp: getWeaponConfig('Usp').magazineSize,
       Knife: 0,
+      Butterfly: 0,
       AWP: primaryKey === 'AWP' ? getWeaponConfig('AWP').magazineSize : 0,
     }
     this.ammoInMag = this.currentWeapon.magazineSize

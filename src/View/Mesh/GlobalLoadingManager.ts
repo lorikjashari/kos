@@ -2,6 +2,9 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
 import { LoadableMesh } from './LoadableMesh'
 import { FPSMesh } from './FPSMesh'
+import { loadGoldSrcKnifeProp } from './GoldSrc/loadGoldSrcMDL'
+import type { MDLViewmodel } from './GoldSrc/loadGoldSrcMDL'
+import { cloneKnifeProp } from './GoldSrc/MDLKnifeProp'
 import { ThirdPersonMesh } from './ThirdPersonMesh'
 import { MapMesh } from './MapMesh'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader'
@@ -15,6 +18,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
   private static jsonLoader: THREE.ObjectLoader = new THREE.ObjectLoader()
   private static dracoLoader: DRACOLoader = new DRACOLoader()
   public loadableMeshs: Map<string, LoadableMesh> = new Map<string, LoadableMesh>()
+  private butterflyKnifeTemplate: MDLViewmodel | null = null
 
   public fpsMesh!: THREE.Mesh
   public thirdPersonMesh!: THREE.Mesh
@@ -52,7 +56,9 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
   }
   async loadAllMeshs() {
     // Idempotent — Start/Host/Join call this after menu dispose.
-    if (this.loadableMeshs.has('AK47') && this.loadableMeshs.has('CsTerrorist')) return
+    if (this.loadableMeshs.has('AK47') && this.loadableMeshs.has('CsTerrorist')) {
+      return
+    }
 
     // Good looking textures
     // https://opengameart.org/users/rubberduck
@@ -94,6 +100,9 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     await m9.load()
     m9.register(this.loadableMeshs)
 
+    this.butterflyKnifeTemplate = await loadGoldSrcKnifeProp('models/butterfly_knife.mdl')
+    this.registerButterflyViewmodel(m9)
+
     const bullet = new LoadableMesh('9mm2douille.glb', 'Bullet')
     await bullet.load()
     bullet.register(this.loadableMeshs)
@@ -132,6 +141,39 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     })
 
     awpFps.register(this.loadableMeshs)
+  }
+
+  /** FPS Butterfly: M9 hands + CS 1.6 MDL knife prop (hide default M9 blade). */
+  private registerButterflyViewmodel(m9Source: FPSMesh): void {
+    const bfly = m9Source.clone()
+    bfly.key = 'Butterfly'
+    bfly.viewmodelOffset = new Vector3D(-0.04, 0.02, 0)
+
+    const root = bfly.mesh as unknown as THREE.Object3D
+    // Hide default M9 blade mesh only — keep the skinned hands visible.
+    root.traverse((c) => {
+      const name = c.name.toLowerCase()
+      if (name === 'knife' || name.includes('blade')) {
+        c.visible = false
+        c.userData.butterflyGripRef = true
+      }
+    })
+
+    bfly.register(this.loadableMeshs)
+  }
+
+  /** Fresh butterfly knife prop for attaching onto M9 Armature seat. */
+  public createButterflyKnifeProp(): THREE.Group | undefined {
+    if (!this.butterflyKnifeTemplate) return undefined
+    const { group, framePlayer } = cloneKnifeProp(this.butterflyKnifeTemplate)
+    group.name = 'ButterflyKnifeProp'
+    group.userData.knifeFramePlayer = framePlayer
+    group.frustumCulled = false
+    group.traverse((c) => {
+      c.frustumCulled = false
+      c.visible = true
+    })
+    return group
   }
 
   /** Bake AKM rifle meshes (no Sketchfab arms) for third-person / HUD icons. */
@@ -327,6 +369,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     'AkmRaw',
     'Usp',
     'Knife',
+    'Butterfly',
     'Bullet',
     'CsTerrorist',
     'AwpRaw',
@@ -339,6 +382,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     seenMat: Set<THREE.Material> = new Set(),
     seenTex: Set<THREE.Texture> = new Set()
   ): void {
+    this.butterflyKnifeTemplate = null
     for (const key of GlobalLoadingManager.COMBAT_MESH_KEYS) {
       const mesh = this.loadableMeshs.get(key)
       if (!mesh) continue

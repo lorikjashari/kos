@@ -7,7 +7,7 @@ export class FPSMesh extends AnimatedLoadableMesh implements IUpdatable {
   private lights: THREE.Light[] = []
   public viewmodelOffset: Vector3D
   /** Mine-sketch packs need a -1 scale flip; Sketchfab AKM does not. */
-  private invertScale: boolean
+  protected invertScale: boolean
   constructor(
     path: string,
     key: string,

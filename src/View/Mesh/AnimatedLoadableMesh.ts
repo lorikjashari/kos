@@ -81,6 +81,48 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
     return this.currentAnim?.name ?? ''
   }
 
+  public findClip(name: string): THREE.AnimationClip | undefined {
+    const clips = this.mesh?.animations
+    if (!clips?.length) return undefined
+    const lower = name.toLowerCase()
+    return clips.find((c) => c.name === name || c.name.toLowerCase() === lower)
+  }
+
+  public hasNamedClip(name: string): boolean {
+    return !!this.findClip(name)
+  }
+
+  /** Play a GLB animation clip by name (CS 1.6 MDL exports: draw, slash1, …). Returns wall-clock seconds. */
+  public playNamedClip(clipName: string, loop = false, timeScale = 1.0): number {
+    const clip = this.findClip(clipName)
+    if (!clip || !this.mixer) {
+      console.warn(`[${this.key}] clip "${clipName}" not found`)
+      return 0
+    }
+
+    this.mixer.stopAllAction()
+    this.currentAnimIsLoop = loop
+    this.currentAnimIsInterrompable = true
+    this.currentAnim = {
+      name: clipName,
+      Start: { name: `${clipName}_Start`, time: 0, frame: 0 },
+      End: { name: `${clipName}_End`, time: clip.duration, frame: 0 },
+    }
+    this.animTimeScale = timeScale
+    this.lastAnimationDuration = clip.duration / Math.max(0.05, timeScale)
+
+    const action = this.mixer.clipAction(clip)
+    action.reset()
+    action.enabled = true
+    action.paused = false
+    action.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce
+    action.clampWhenFinished = true
+    action.timeScale = timeScale
+    action.play()
+    this.mixer.time = 0
+    return this.lastAnimationDuration
+  }
+
   // Loop: repeat
   // selfInterrompable: Possibility of the animation to stop itself to play again from 0
   public playAnimation(
@@ -105,6 +147,11 @@ export class AnimatedLoadableMesh extends LoadableMesh implements IUpdatable {
 
     this.playAnimationDelimiter(animationMarker, timeScale);
   }
+  public getAnimWallProgress(): number {
+    if (!this.lastAnimationDuration || this.lastAnimationDuration <= 0) return 1
+    return Math.min(1, Math.max(0, this.mixer.time / this.lastAnimationDuration))
+  }
+
   public playAnimationDelimiter(animationMarker: AnimationMarkerDelimiter, timeScale = 1.5) {
     if (!animationMarker?.Start || !animationMarker?.End) {
       console.warn(`Animation "${animationMarker?.name ?? 'unknown'}" is missing Start/End markers`)

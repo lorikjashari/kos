@@ -55,7 +55,6 @@ import {
 import { separatePair } from './Core/PawnSeparation'
 import * as THREE from 'three'
 import {
-  BOT_GROUND_Y,
   DEFAULT_MAP_ID,
   deriveSpawnsFromGeometry,
   getMapDefinition,
@@ -86,7 +85,7 @@ import { clampInterpDelay, DEFAULT_INTERP_DELAY } from './Net/NetInterp'
 import { clampFpsCap, CONSOLE_COMMANDS, consoleToNum, tokenizeConsoleLine } from './UI/ConsoleParse'
 import { CommandConsole } from './UI/CommandConsole'
 import { PerfOverlay } from './UI/PerfOverlay'
-import { EditorMenu, type EditorTool } from './UI/EditorMenu'
+import { EditorMenu, type EditorWeaponKey } from './UI/EditorMenu'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import type { CrosshairRenderer } from './UI/CrosshairRenderer'
 import type { PlayerSettings } from './UI/SettingsStore'
@@ -197,21 +196,14 @@ export class Game implements IUpdatable {
    * still animates at real speed instead of losing the skipped frames' time. */
   private renderAcc = 0
   private displayHz = 60
-  /** /editormode sandbox */
+  /** /editormode sandbox — viewmodel seat tuner (your gun only) */
   public editorActive = false
   private editorMenu: EditorMenu | null = null
   private transformControls: TransformControls | null = null
-  private editorTool: EditorTool = 'translate'
-  private editorXray = false
-  private editorWireframe = false
-  private editorAxes = true
-  private editorHitZonesOnly = false
   private editorFpsLook = false
   private editorDragging = false
-  private editorPreviewAnim = 'Idle'
-  private editorWeapon = 'Usp'
-  /** '' = gizmo moves the whole bot; otherwise a bone key being posed */
-  private editorBoneKey = ''
+  private editorWeapon: EditorWeaponKey = 'AK'
+  private editorSeatBaseline = new Vector3D()
   private readonly demoRecorder = new DemoRecorder()
   private readonly demoPlayer = new DemoPlayer()
   private lastDemo: DemoFile | null = null
@@ -719,26 +711,20 @@ export class Game implements IUpdatable {
   }
 
   /**
-   * Editor sandbox: Pool Day, one frozen bot in front of you (no AI / no shooting).
+   * Editor sandbox: Pool Day, your viewmodel only — nudge seat / copy coords.
    */
   public async enterEditorMode(): Promise<void> {
     this.onHideMenu?.()
     await this.reloadCombatMeshes()
     await this.ensureMap('pool_day')
     await this.prepareCombat()
-    // CS Source T model for the frozen editor dummy
-    await this.globalLoadingManager.ensureMesh('CsTerrorist', 'models/cs_terrorist.glb')
-    // Editor AK: same AKM as main game (already loaded as AK47). AkmRaw for third-person.
-    await this.globalLoadingManager.ensureMesh(
-      'AkmRaw',
-      'models/akm_assault_rifle_animated.glb'
-    )
     await this.globalLoadingManager.ensureFpsMesh(
       'AK47',
       'models/akm_assault_rifle_animated.glb',
       new Vector3D(0.2, -0.25, -0.16),
       false
     )
+    // Butterfly viewmodel is registered during combat load (M9 hands + knife prop)
     this.teardownEditorTools()
     this.clearBots()
     this.stats.reset()
@@ -750,18 +736,9 @@ export class Game implements IUpdatable {
     this.lockdownTimer = 0
     this.pendingBotSpawns = []
     this.editorActive = true
-    this.editorFpsLook = false
-    this.editorTool = 'translate'
-    this.editorXray = false
-    this.editorWireframe = false
-    this.editorAxes = true
-    this.editorHitZonesOnly = false
-    this.editorPreviewAnim = 'Idle'
-    this.editorWeapon = 'AK'
+    this.editorFpsLook = true
+    this.editorWeapon = 'Butterfly'
     TrainingBot.showHitboxes = false
-    // Cursor free so the editor panel + gizmo work
-    this.inputManager.gameplayEnabled = false
-    this.inputManager.unlock()
     this.applyMapMoveSpeed('pool_day')
 
     const spawn = spawnToPlayerVector(this.activeSpawns[0] ?? { x: 18.9, y: 2, z: 29.7 })
@@ -769,359 +746,107 @@ export class Game implements IUpdatable {
     player.teleportToSpawn(spawn)
     player.equipSpawnLoadout()
 
-    // Stand on the deck facing each other (not out in the pool)
-    const forward = new THREE.Vector3(0, 0, -1)
-    const cam = this.currentPlayer.cameraManager?.camera
-    if (cam) forward.applyQuaternion(cam.quaternion)
-    forward.y = 0
-    if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1)
-    else forward.normalize()
-    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
-
-    const standOff = 3.2
-    const side = 0.4
-    let botX = player.position.x + forward.x * standOff + right.x * side
-    let botZ = player.position.z + forward.z * standOff + right.z * side
-    let botY = BOT_GROUND_Y
-
-    const hit = this.physics.raycast(
-      new Vector3D(botX, player.position.y + 4, botZ),
-      new Vector3D(botX, player.position.y - 8, botZ)
-    )
-    if (hit?.hasHit && hit.hitPosition) {
-      botY = hit.hitPosition.y
-    }
-
-    const botPos = new Vector3D(botX, botY, botZ)
-    const yawFacingPlayer = Math.atan2(player.position.x - botPos.x, player.position.z - botPos.z)
-    const bot = new TrainingBot(botPos, yawFacingPlayer, 'medium', 'EDITOR')
-    bot.aiFrozen = true
-    bot.lookAtPlayer = true
-    bot.visualScale = 1
-    bot.visualModel = 'CsTerrorist'
-    bot.editorHome = {
-      x: botPos.x,
-      y: botPos.y,
-      z: botPos.z,
-      yaw: yawFacingPlayer,
-      scale: 1,
-    }
-    bot.addToWorld(this.physics)
-    const renderer = new TrainingBotRenderer(bot)
-    this.trainingBots.push(bot)
-    this.botRenderers.push(renderer)
-    renderer.setAxesVisible(true)
-    // Default Idle on the CS terrorist (not the robot avatar)
-    renderer.previewAnim(this.editorPreviewAnim)
-    renderer.setWeapon('AK')
-
     this.renderer.hud?.showGameplay()
     this.renderer.hud?.setLockdown(null)
     this.renderer.hud?.setScoreboardVisible(false)
     this.renderer.hud?.setPauseMenuOpen(false)
 
-    this.editorBoneKey = ''
-    this.setupEditorTools(renderer.getRoot())
     const menu = this.ensureEditorMenu()
-    menu.setBones(renderer.getEditableBones())
     menu.show()
+    await this.editorEquipWeapon('Butterfly')
+    this.inputManager.gameplayEnabled = true
+    setTimeout(() => this.inputManager.onLock(), 40)
   }
 
   private ensureEditorMenu(): EditorMenu {
     if (this.editorMenu) return this.editorMenu
     this.editorMenu = new EditorMenu({
-      onTool: (tool) => this.setEditorTool(tool),
-      onToggleXray: (on) => {
-        this.editorXray = on
-        TrainingBot.showHitboxes = on
-        this.botRenderers.forEach((r) => r.refreshHitboxDebugMeshes())
-      },
-      onToggleWireframe: (on) => {
-        this.editorWireframe = on
-        this.botRenderers.forEach((r) => r.setWireframe(on))
-      },
-      onToggleAxes: (on) => {
-        this.editorAxes = on
-        this.botRenderers.forEach((r) => r.setAxesVisible(on))
-      },
-      onToggleLookAtPlayer: (on) => {
-        const bot = this.trainingBots[0]
-        if (bot) bot.lookAtPlayer = on
-      },
-      onToggleHitZonesOnly: (on) => {
-        this.editorHitZonesOnly = on
-        this.botRenderers.forEach((r) => r.setHitZonesOnly(on))
-      },
-      onScale: (value) => {
-        const bot = this.trainingBots[0]
-        const mesh = this.botRenderers[0]?.getRoot()
-        if (!bot || !mesh) return
-        bot.visualScale = value
-        mesh.scale.setScalar(value)
-        this.syncBotFromMesh()
-      },
-      onNudge: (axis, delta) => {
-        const bot = this.trainingBots[0]
-        const mesh = this.botRenderers[0]?.getRoot()
-        if (!bot || !mesh) return
-        bot.lookAtPlayer = false
-        bot.position[axis] += delta
-        bot.spawnPosition.copy(bot.position)
-        mesh.position.copy(bot.position)
-        this.transformControls?.attach(mesh)
-      },
-      onYaw: (deltaRad) => {
-        const bot = this.trainingBots[0]
-        const mesh = this.botRenderers[0]?.getRoot()
-        if (!bot || !mesh) return
-        bot.lookAtPlayer = false
-        bot.yaw += deltaRad
-        mesh.rotation.y = bot.yaw
-      },
-      onSnapGround: () => this.editorSnapGround(),
-      onResetPose: () => this.editorResetPose(),
-      onPreviewAnim: (clip) => {
-        this.editorPreviewAnim = clip
-        // Playing an animation exits bone-pose mode and re-grabs the whole bot
-        if (this.editorBoneKey) {
-          this.editorBoneKey = ''
-          const root = this.botRenderers[0]?.getRoot()
-          if (root) this.transformControls?.attach(root)
-          this.setEditorTool(this.editorTool === 'select' ? 'translate' : this.editorTool)
-        }
-        this.botRenderers[0]?.previewAnim(clip)
-        // FPS look: drive viewmodel Idle/Move from the hand pack animations
-        if (this.editorFpsLook) {
-          const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
-          const vm = fps?.fpsMesh
-          if (!vm) return
-          if (vm.key === 'AK47') {
-            if (clip === 'Idle') vm.holdPoseAt(0)
-            return
-          }
-          if (clip === 'Idle' && vm.animations.has('Idle')) {
-            vm.playAnimation('Idle', true, true, 1.0)
-          } else if (vm.animations.has('Move')) {
-            vm.playAnimation('Move', true, true, 1.25)
-          }
-        }
-      },
       onSelectWeapon: (key) => {
-        this.editorWeapon = key
-        this.botRenderers[0]?.setWeapon(key)
-        if (this.editorFpsLook) {
-          const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
-          fps?.equipEditorWeapon(key)
-        }
+        void this.editorEquipWeapon(key)
       },
-      onSelectBone: (boneKey) => this.selectEditorBone(boneKey),
-      onBoneRot: (x, y, z) => {
-        if (!this.editorBoneKey) return
-        this.botRenderers[0]?.setBoneOffsetDeg(this.editorBoneKey, x, y, z)
-      },
-      onResetBone: () => {
-        if (!this.editorBoneKey) return
-        this.botRenderers[0]?.resetBone(this.editorBoneKey)
+      onNudgeOffset: (axis, delta) => {
+        const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+        fps?.nudgeViewmodelSeat(axis, delta)
         this.editorMenu?.refresh()
       },
-      getPoseText: () => this.botRenderers[0]?.getPoseEditsText() ?? '',
-      onSavePose: () => this.editorSavePose(),
-      onLoadPose: () => this.editorLoadPose(),
-      onFpsLook: () => this.editorEnableFpsLook(),
-      onEditCursor: () => this.editorEnableEditCursor(),
+      onNudgeRotation: (axis, deltaRad) => {
+        const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+        fps?.nudgeWeaponRotation(axis, deltaRad)
+        this.editorMenu?.refresh()
+      },
+      onNudgeKnife: (axis, delta) => {
+        const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+        fps?.nudgeKnifeProp(axis, delta)
+        this.editorMenu?.refresh()
+      },
+      onNudgeKnifeScale: (delta) => {
+        const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+        fps?.nudgeKnifePropSize(delta)
+        this.editorMenu?.refresh()
+      },
+      onResetOffset: () => {
+        const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+        if (!fps) return
+        fps.setViewmodelSeat(this.editorSeatBaseline.x, this.editorSeatBaseline.y, this.editorSeatBaseline.z)
+        fps.resetWeaponRotation()
+        this.editorMenu?.refresh()
+      },
+      onResetKnife: () => {
+        const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+        fps?.resetKnifePropTune()
+        this.editorMenu?.refresh()
+      },
+      getCopyText: () => {
+        const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+        const seat = fps?.getViewmodelSeat()
+        const rot = fps?.weaponRotation
+        const o = seat ?? new Vector3D()
+        const r = rot ?? new Vector3D()
+        let text =
+          `// ${this.editorWeapon} viewmodel seat\n` +
+          `new Vector3D(${o.x.toFixed(4)}, ${o.y.toFixed(4)}, ${o.z.toFixed(4)})\n` +
+          `// rotation (radians)\n` +
+          `new Vector3D(${r.x.toFixed(4)}, ${r.y.toFixed(4)}, ${r.z.toFixed(4)})`
+        if (this.editorWeapon === 'Butterfly') {
+          const knife = fps?.getKnifePropCopyText()
+          if (knife) text += `\n\n${knife}`
+        }
+        return text
+      },
       onExit: () => this.returnToMenu(),
       getState: () => {
-        const bot = this.trainingBots[0]
+        const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+        const seat = fps?.getViewmodelSeat()
+        const rot = fps?.weaponRotation
+        const knife = fps?.getKnifePropTuneState() ?? undefined
         return {
-          tool: this.editorTool,
-          xray: this.editorXray,
-          wireframe: this.editorWireframe,
-          axes: this.editorAxes,
-          lookAtPlayer: !!bot?.lookAtPlayer,
-          hitZonesOnly: this.editorHitZonesOnly,
-          scale: bot?.visualScale ?? 1,
-          pos: {
-            x: bot?.position.x ?? 0,
-            y: bot?.position.y ?? 0,
-            z: bot?.position.z ?? 0,
-          },
-          yawDeg: ((bot?.yaw ?? 0) * 180) / Math.PI,
-          fpsLook: this.editorFpsLook,
-          previewAnim: this.editorPreviewAnim,
           weapon: this.editorWeapon,
-          selectedBone: this.editorBoneKey,
-          boneRot: this.editorBoneKey
-            ? this.botRenderers[0]?.getBoneOffsetDeg(this.editorBoneKey) ?? { x: 0, y: 0, z: 0 }
-            : { x: 0, y: 0, z: 0 },
+          offset: {
+            x: seat?.x ?? 0,
+            y: seat?.y ?? 0,
+            z: seat?.z ?? 0,
+          },
+          rotation: {
+            x: rot?.x ?? 0,
+            y: rot?.y ?? 0,
+            z: rot?.z ?? 0,
+          },
+          knife,
         }
       },
     })
     return this.editorMenu
   }
 
-  /** Editor rig: attach the gizmo to a bone (rotate) or back to the whole bot. */
-  private selectEditorBone(boneKey: string): void {
-    const renderer = this.botRenderers[0]
-    const controls = this.transformControls
-    if (!renderer || !controls) return
-    const enteringRig = !!boneKey && !this.editorBoneKey
-    this.editorBoneKey = boneKey
-
-    if (!boneKey) {
-      renderer.setBoneEditMode(false)
-      controls.attach(renderer.getRoot())
-      this.setEditorTool(this.editorTool === 'select' ? 'translate' : this.editorTool)
-      this.editorMenu?.refresh()
-      return
-    }
-
-    const bone = renderer.getBoneByKey(boneKey)
-    if (!bone) return
-    // Stop the bot turning to face the player so the posed joint stays put
-    const bot = this.trainingBots[0]
-    if (bot) bot.lookAtPlayer = false
-    // First time entering rig mode: snap to bind so edits are clean offsets
-    if (enteringRig) renderer.beginBoneEdit()
-    else renderer.setBoneEditMode(true)
-    controls.attach(bone)
-    controls.setMode('rotate')
-    controls.enabled = true
-    controls.visible = true
+  private async editorEquipWeapon(key: EditorWeaponKey): Promise<void> {
+    this.editorWeapon = key
+    const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+    if (!fps) return
+    fps.equipEditorWeapon(key)
+    const seat = fps.getViewmodelSeat()
+    if (seat) this.editorSeatBaseline.copy(seat)
+    fps.resetWeaponRotation()
     this.editorMenu?.refresh()
-  }
-
-  private setupEditorTools(target: THREE.Object3D): void {
-    const camera = this.currentPlayer.cameraManager?.camera
-    if (!camera) return
-
-    const controls = new TransformControls(camera, this.renderer.domElement)
-    controls.setMode('translate')
-    controls.setSize(0.95)
-    controls.attach(target)
-    controls.addEventListener('dragging-changed', (event: any) => {
-      this.editorDragging = !!event.value
-      // Posing a bone must not write back to the bot's root transform
-      if (!this.editorDragging && !this.editorBoneKey) this.syncBotFromMesh()
-    })
-    controls.addEventListener('objectChange', () => {
-      if (!this.editorBoneKey) this.syncBotFromMesh()
-      this.editorMenu?.refresh()
-    })
-
-    this.renderer.scene.add(controls as unknown as THREE.Object3D)
-    this.transformControls = controls
-    this.setEditorTool('translate')
-
-    this.boundEditorKeys = (e: KeyboardEvent) => {
-      if (!this.editorActive || this.editorFpsLook) return
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
-      if (e.key === 'q' || e.key === 'Q') this.setEditorTool('select')
-      if (e.key === 'w' || e.key === 'W') this.setEditorTool('translate')
-      if (e.key === 'e' || e.key === 'E') this.setEditorTool('rotate')
-      if (e.key === 'r' || e.key === 'R') this.setEditorTool('scale')
-      if (e.key === 'Escape') this.editorEnableEditCursor()
-      this.editorMenu?.refresh()
-    }
-    window.addEventListener('keydown', this.boundEditorKeys)
-  }
-
-  private setEditorTool(tool: EditorTool): void {
-    this.editorTool = tool
-    if (!this.transformControls) return
-    if (tool === 'select') {
-      this.transformControls.enabled = false
-      this.transformControls.visible = false
-      return
-    }
-    this.transformControls.enabled = true
-    this.transformControls.visible = true
-    this.transformControls.setMode(tool)
-  }
-
-  private syncBotFromMesh(): void {
-    const bot = this.trainingBots[0]
-    const mesh = this.botRenderers[0]?.getRoot()
-    if (!bot || !mesh) return
-    bot.position.set(mesh.position.x, mesh.position.y, mesh.position.z)
-    bot.spawnPosition.copy(bot.position)
-    bot.yaw = mesh.rotation.y
-    const sx = mesh.scale.x
-    if (Number.isFinite(sx) && sx > 0.01) bot.visualScale = sx
-    if (this.editorDragging) bot.lookAtPlayer = false
-  }
-
-  private editorSnapGround(): void {
-    const bot = this.trainingBots[0]
-    const mesh = this.botRenderers[0]?.getRoot()
-    if (!bot || !mesh) return
-    const hit = this.physics.raycast(
-      new Vector3D(bot.position.x, bot.position.y + 6, bot.position.z),
-      new Vector3D(bot.position.x, bot.position.y - 20, bot.position.z)
-    )
-    if (hit?.hasHit && hit.hitPosition) {
-      bot.position.y = hit.hitPosition.y
-      bot.spawnPosition.copy(bot.position)
-      mesh.position.y = bot.position.y
-    }
-  }
-
-  private editorResetPose(): void {
-    const bot = this.trainingBots[0]
-    const renderer = this.botRenderers[0]
-    const mesh = renderer?.getRoot()
-    const home = bot?.editorHome
-    if (!bot || !mesh || !home) return
-    // Leave bone-pose mode and restore the animation on reset
-    this.editorBoneKey = ''
-    renderer?.previewAnim(this.editorPreviewAnim)
-    bot.position.set(home.x, home.y, home.z)
-    bot.spawnPosition.copy(bot.position)
-    bot.yaw = home.yaw
-    bot.visualScale = home.scale
-    bot.lookAtPlayer = true
-    mesh.position.copy(bot.position)
-    mesh.rotation.set(0, bot.yaw, 0)
-    mesh.scale.setScalar(bot.visualScale)
-    this.transformControls?.attach(mesh)
-    this.setEditorTool(this.editorTool === 'select' ? 'translate' : this.editorTool)
-    this.editorMenu?.refresh()
-  }
-
-  private static readonly EDITOR_POSE_KEY = 'kos-editor-pose-v1'
-
-  private editorSavePose(): string {
-    const renderer = this.botRenderers[0]
-    if (!renderer) return 'No dummy to save.'
-    const pose = renderer.getPoseEditsJson()
-    const json = JSON.stringify(pose, null, 2)
-    try {
-      localStorage.setItem(Game.EDITOR_POSE_KEY, json)
-    } catch {
-      /* ignore quota */
-    }
-    this.downloadTextFile(`kos-pose-${Date.now()}.json`, json)
-    const n = Object.keys(pose.bones).length
-    return n ? `Saved ${n} joint(s) + downloaded JSON.` : 'Saved empty pose (no joint edits).'
-  }
-
-  private editorLoadPose(): string {
-    const renderer = this.botRenderers[0]
-    if (!renderer) return 'No dummy to load onto.'
-    let raw: string | null = null
-    try {
-      raw = localStorage.getItem(Game.EDITOR_POSE_KEY)
-    } catch {
-      raw = null
-    }
-    if (!raw) return 'No saved pose in localStorage. Use Save pose first.'
-    try {
-      const n = renderer.applyPoseEditsJson(JSON.parse(raw))
-      this.editorBoneKey = ''
-      return n ? `Loaded ${n} joint(s).` : 'Pose file had no joints.'
-    } catch {
-      return 'Saved pose JSON was invalid.'
-    }
   }
 
   private downloadTextFile(filename: string, text: string): void {
@@ -1199,40 +924,7 @@ export class Game implements IUpdatable {
     cam.setAimAngles(pose.yaw, pose.pitch)
   }
 
-  private editorEnableFpsLook(): void {
-    this.editorFpsLook = true
-    // FPS look = roam and watch the dummy react, so make him track the player again.
-    // (Posing / nudging / rig editing turns this off; re-enable it here.)
-    const bot = this.trainingBots[0]
-    if (bot) bot.lookAtPlayer = true
-    if (this.transformControls) {
-      this.transformControls.enabled = false
-      this.transformControls.visible = false
-    }
-    // Editor-only viewmodels (new AKM arms; USP/Knife reuse those arms)
-    const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
-    const key = this.editorWeapon === 'Knife' || this.editorWeapon === 'AK' || this.editorWeapon === 'Usp'
-      ? this.editorWeapon
-      : 'AK'
-    fps?.equipEditorWeapon(key)
-    this.inputManager.gameplayEnabled = true
-    setTimeout(() => this.inputManager.onLock(), 40)
-    this.editorMenu?.refresh()
-  }
-
-  private editorEnableEditCursor(): void {
-    this.editorFpsLook = false
-    this.inputManager.gameplayEnabled = false
-    this.inputManager.unlock()
-    if (this.transformControls && this.editorTool !== 'select') {
-      this.transformControls.enabled = true
-      this.transformControls.visible = true
-    }
-    this.editorMenu?.refresh()
-  }
-
   private teardownEditorTools(): void {
-    this.editorBoneKey = ''
     if (this.boundEditorKeys) {
       window.removeEventListener('keydown', this.boundEditorKeys)
       this.boundEditorKeys = null
@@ -1246,6 +938,7 @@ export class Game implements IUpdatable {
     this.editorMenu?.hide()
     this.editorActive = false
     this.editorDragging = false
+    this.editorFpsLook = false
     TrainingBot.showHitboxes = false
   }
 

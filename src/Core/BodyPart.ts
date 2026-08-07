@@ -26,7 +26,7 @@ export function damageAtRange(part: BodyPart, weaponKey: string, distance: numbe
 
 export function damageForBodyPart(part: BodyPart, weaponKey: string): number {
   const base = BODY_PART_DAMAGE[part]
-  if (weaponKey === 'Knife') {
+  if (weaponKey === 'Knife' || weaponKey === 'Butterfly') {
     if (part === 'head') return 100
     if (part === 'body') return 70
     return 45

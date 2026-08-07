@@ -19,9 +19,9 @@ export const BOT_LOD_MID = 40
  * How many bots may run a full combatThink this frame.
  * Dust II trimeshes make each nav ray expensive — keep this low everywhere.
  */
-export const BOT_FULL_THINKS_PER_FRAME = 2
-/** Dust II: still allow 2 so fights don't feel frozen; glide covers the rest. */
-export const BOT_FULL_THINKS_PER_FRAME_HEAVY = 2
+export const BOT_FULL_THINKS_PER_FRAME = 3
+/** Dust II: allow more full thinks so movement doesn't stair-step. */
+export const BOT_FULL_THINKS_PER_FRAME_HEAVY = 4
 
 export function botLodFromDistSq(distSq: number): BotLod {
   if (distSq <= BOT_LOD_NEAR * BOT_LOD_NEAR) return 'near'

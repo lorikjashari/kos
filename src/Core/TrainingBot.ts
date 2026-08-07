@@ -203,7 +203,6 @@ export class TrainingBot implements IUpdatable {
    */
   public preferFullThink = false
   private aiSkipCounter = 0
-  private pendingAiDt = 0
   private wallPushCache = new Vector3D()
   private wallPushCacheT = 0
   private groundCacheY = 0
@@ -455,14 +454,13 @@ export class TrainingBot implements IUpdatable {
     this.renderLod = botLodFromDistSq(distSq)
     const heavyMap = game.activeMapId === 'de_dust2'
     const skipN = botAiSkipFrames(this.renderLod, isTouchDevice(), heavyMap)
-    this.pendingAiDt += dt
     this.aiSkipCounter++
     const lodAllowsFull = skipN <= 0 || this.aiSkipCounter % (skipN + 1) === 0
     // Global frame budget (preferFullThink) + LOD — demo freezes AI entirely; we stagger it
     const runFull = this.preferFullThink && lodAllowsFull
 
     if (!runFull) {
-      // Cheap frame: no LOS / retarget / wall rings — glide with ground check + stick
+      // Cheap frame: glide only — do not stack pendingAiDt or full think will burst-move
       this.fireCooldown = Math.max(0, this.fireCooldown - dt)
       this.strafeTimer -= dt
       this.retargetTimer -= dt
@@ -481,11 +479,7 @@ export class TrainingBot implements IUpdatable {
       return
     }
 
-    const thinkDt = this.pendingAiDt
-    this.pendingAiDt = 0
-    // Keep fighting even if the player is dead (bot free-for-all)
-    this.lockCombatFacing = false
-    this.combatThink(thinkDt, player, physics)
+    this.combatThink(dt, player, physics)
     this.applyPawnSeparation(player)
     this.followTerrain(physics, dt)
     this.checkVoidDeath()

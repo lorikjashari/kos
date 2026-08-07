@@ -27,16 +27,33 @@ import ParticleSystem, {
 } from 'three-nebula'
 import { DebugUI } from '../../DebugUI'
 import { LoadableMesh } from '../../Mesh/LoadableMesh'
+import {
+  BUTTERFLY_KNIFE_PROP,
+  BUTTERFLY_KNIFE_SEAT,
+  getKnifeClipDuration,
+  getKnifeFramePlayer,
+  getKnifeProp,
+  getKnifePropTune,
+  holdKnifeDrawStart,
+  holdKnifeRest,
+  nudgeKnifePropPosition,
+  nudgeKnifePropScale,
+  playKnifeClip,
+  resetKnifePropSeat,
+  seatKnifePropOnHands,
+  setKnifePropVisible,
+  updateKnifeProp,
+} from '../../Mesh/GoldSrc/MDLKnifeProp'
 import { Player } from '../../../Core/Player'
 import { HitscanResult } from '../../../Interface/utils'
 import { PlayerRenderer } from './PlayerRenderer'
 import { Vector2D, Vector3D } from '../../../Core/Vector'
 import { Game } from '../../../Game'
+import { mapHasButterflyKnife } from '../../../Core/MapCatalog'
 import { FPSCameraManager } from '../../CameraManager/FPSCameraManager'
 import { CameraManager } from '../../CameraManager/CameraManager'
 import { lerp } from '../../../Core/MathUtils'
 import { isTouchDevice } from '../../../UI/MobileDevice'
-
 // TODO: cette classe gère le mouvement de la FPS Mesh
 export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   public handleJump(): void {}
@@ -91,6 +108,29 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
         this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.012
         this.weaponBobbingAcc.z += 0.008
       }
+    } else if (key === 'Butterfly' || fps.key === 'Butterfly') {
+      this.cancelButterflyAnims()
+      this.ensureButterflyKnifeProp(fps)
+      const slash = this.butterflySlashAlt ? 'slash2' : 'slash1'
+      this.butterflySlashAlt = !this.butterflySlashAlt
+      const root = fps.mesh as unknown as THREE.Object3D
+      let knifeClip = slash
+      if (getKnifeClipDuration(root, slash, 1) <= 0) {
+        knifeClip =
+          getKnifeClipDuration(root, 'slash1', 1) > 0
+            ? 'slash1'
+            : 'midslash1'
+      }
+      const handScale = this.butterflyHandScaleForKnife('Shoot', knifeClip)
+      const knifeDur = this.playButterflyClip(knifeClip, 1)
+      const handWall = this.butterflyHandWallSec('Shoot', handScale)
+      fps.playAnimation('Shoot', false, true, handScale)
+      this.recoilEffect = 0.08
+      this.recoilRecover = 2.6
+      this.weaponBobbingAcc.x += 0.03
+      this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.02
+      this.weaponBobbingAcc.z += 0.015
+      this.scheduleButterflyReadyReturn(Math.max(knifeDur, handWall))
     } else {
       fps.playAnimation('Shoot', false, true, 1.55)
       this.recoilEffect = isMelee ? 0.06 : 0.11
@@ -109,10 +149,11 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (scopedAwp && rezoomLevel > 0) {
       this.beginScopedBoltCycle(rezoomLevel as 1 | 2)
     }
-    if (akm) return
+    if (akm || key === 'Butterfly' || fps.key === 'Butterfly') return
     const shootScale = key === 'AWP' ? 1.05 : key === 'AK47' ? 1.85 : 1.55
     this.scheduleIdleReturn('Shoot', shootScale)
   }
+
 
   public handleReload(): void {
     const fps = this.fpsMesh
@@ -164,6 +205,25 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       this.startAkDrawUp()
       return
     }
+    if (key === 'Butterfly') {
+      this.cancelButterflyAnims()
+      this.ensureButterflyKnifeProp(fps)
+      const root = fps.mesh as unknown as THREE.Object3D
+      setKnifePropVisible(root, false)
+      holdKnifeDrawStart(root)
+      const knifeClip = 'draw'
+      const handScale = this.butterflyHandScaleForKnife('Switch', knifeClip)
+      const knifeDur = this.playButterflyClip(knifeClip, 1)
+      const handWall = this.butterflyHandWallSec('Switch', handScale)
+      fps.playAnimation('Switch', false, true, handScale)
+      this.startBfDrawUp(Math.max(handWall, knifeDur))
+      this.weaponBobbingAcc.x += 0.02
+      if (this.playerCameraManager instanceof FPSCameraManager) {
+        this.playerCameraManager.resetRecoil()
+      }
+      this.scheduleButterflyReadyReturn(Math.max(handWall, knifeDur))
+      return
+    }
     const scale = key === 'AWP' ? 1.25 : key === 'AK47' ? 1.45 : 1.5
     fps.playAnimation('Switch', false, true, scale)
     this.weaponBobbingAcc.x += 0.02
@@ -186,6 +246,161 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   /** Raise editor AK from below into the ready hold. */
   private startAkDrawUp(): void {
     this.akDrawT = FPSRenderer.AK_DRAW_DUR
+  }
+
+  private playButterflyClip(name: string, timeScale: number): number {
+    const fps = this.fpsMesh
+    if (!fps) return 0
+    return playKnifeClip(fps.mesh as unknown as THREE.Object3D, name, false, timeScale)
+  }
+
+  /** M9 Switch/Shoot wall-clock length at a given hand time scale. */
+  private butterflyHandWallSec(clip: 'Switch' | 'Shoot', handTimeScale: number): number {
+    const fps = this.fpsMesh
+    if (!fps) return 0
+    const m = fps.animations.get(clip)
+    if (!m?.Start || !m?.End) return 0
+    return Math.max(0.05, (m.End.time - Math.abs(m.Start.time)) / Math.max(0.05, handTimeScale))
+  }
+
+  /** Natural M9 clip length (time scale 1). */
+  private butterflyHandClipSpan(clip: 'Switch' | 'Shoot'): number {
+    return this.butterflyHandWallSec(clip, 1)
+  }
+
+  /** Speed up hands toward knife length, capped so GLB motion stays smooth (knife stays 1×). */
+  private butterflyHandScaleForKnife(handClip: 'Switch' | 'Shoot', knifeClip: string): number {
+    const fps = this.fpsMesh
+    const cap =
+      handClip === 'Switch' ? FPSRenderer.BF_HAND_SWITCH_CAP : FPSRenderer.BF_HAND_SHOOT_CAP
+    const floor = handClip === 'Switch' ? 1.35 : 1.65
+    if (!fps) return floor
+    const root = fps.mesh as unknown as THREE.Object3D
+    const handSpan = this.butterflyHandClipSpan(handClip)
+    const knifeWall = getKnifeClipDuration(root, knifeClip, 1)
+    if (handSpan <= 0 || knifeWall <= 0) return floor
+    const ideal = handSpan / knifeWall
+    return Math.max(floor, Math.min(ideal, cap))
+  }
+
+  /** End of M9 Switch clip — ready knife hold (M9 has no Idle marker). */
+  private butterflyReadyPoseTime(): number {
+    const sw = this.fpsMesh?.animations.get('Switch')
+    return sw?.End?.time ?? 2.3
+  }
+
+  private butterflyReturnToReady(): void {
+    const fps = this.fpsMesh
+    if (!fps || fps.key !== 'Butterfly') return
+    holdKnifeRest(fps.mesh as unknown as THREE.Object3D)
+    this.blendButterflyHandsToReady(this.butterflyReadyPoseTime())
+  }
+
+  /** Ease M9 hands into the ready hold instead of snapping. */
+  private blendButterflyHandsToReady(targetTime: number): void {
+    const fps = this.fpsMesh
+    if (!fps?.mixer || !fps.mesh?.animations?.length) {
+      fps?.holdPoseAt(targetTime)
+      return
+    }
+
+    const token = ++this.butterflyReadyBlendToken
+    let startTime = targetTime
+    for (const clip of fps.mesh.animations) {
+      const action = fps.mixer.clipAction(clip)
+      if (action.time > 0.001) {
+        startTime = action.time
+        break
+      }
+    }
+
+    if (Math.abs(startTime - targetTime) < 0.02) {
+      fps.holdPoseAt(targetTime)
+      return
+    }
+
+    const durMs = FPSRenderer.BF_READY_BLEND_SEC * 1000
+    const t0 = performance.now()
+    const tick = (): void => {
+      if (token !== this.butterflyReadyBlendToken) return
+      const live = this.fpsMesh
+      if (!live || live.key !== 'Butterfly') return
+
+      const u = Math.min(1, (performance.now() - t0) / durMs)
+      const e = u * u * (3 - 2 * u)
+      live.holdPoseAt(startTime + (targetTime - startTime) * e)
+      if (u < 1) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }
+
+  private scheduleButterflyReadyReturn(durSec: number): void {
+    const fps = this.fpsMesh
+    if (!fps) return
+    const meshKey = fps.key
+    const token = this.butterflyAnimToken
+    this.locomotionBusyUntil = Math.max(
+      this.locomotionBusyUntil,
+      performance.now() + durSec * 1000
+    )
+    if (this.butterflyReadyTimeout !== null) {
+      clearTimeout(this.butterflyReadyTimeout)
+    }
+    this.butterflyReadyTimeout = window.setTimeout(() => {
+      this.butterflyReadyTimeout = null
+      if (token !== this.butterflyAnimToken) return
+      const live = this.fpsMesh
+      if (!live || live.key !== meshKey) return
+      if (this.scopeLevel > 0) return
+      this.butterflyReturnToReady()
+    }, durSec * 1000 + 30)
+  }
+
+  /** Stop pending butterfly callbacks / draw-up when swapping weapons quickly. */
+  private cancelButterflyAnims(): void {
+    if (this.fpsMesh?.key === 'Butterfly') {
+      setKnifePropVisible(this.fpsMesh.mesh as unknown as THREE.Object3D, false)
+    }
+    this.butterflyAnimToken++
+    this.butterflyReadyBlendToken++
+    if (this.butterflyReadyTimeout !== null) {
+      clearTimeout(this.butterflyReadyTimeout)
+      this.butterflyReadyTimeout = null
+    }
+    this.bfDrawT = 0
+  }
+
+  private ensureButterflyKnifeProp(fps: FPSMesh): void {
+    const root = fps.mesh as unknown as THREE.Object3D
+    if (!root.getObjectByName(BUTTERFLY_KNIFE_PROP)) {
+      this.attachButterflyKnife(fps)
+    }
+  }
+
+  /** Hide knife until draw-up passes ~10% — stops flash at rest pose on fast weapon swaps. */
+  private syncButterflyKnifeVisibility(drawUpProgress = 1): void {
+    if (!this.fpsMesh || this.fpsMesh.key !== 'Butterfly') return
+    const root = this.fpsMesh.mesh as unknown as THREE.Object3D
+    const prop = getKnifeProp(root)
+    if (!prop) return
+
+    if (this.bfDrawT > 0) {
+      prop.visible = drawUpProgress > 0.1
+      return
+    }
+
+    const player = getKnifeFramePlayer(root)
+    prop.visible = player?.isPlaying() ?? true
+  }
+
+  private scheduleButterflyIdleReturn(durSec: number): void {
+    this.scheduleButterflyReadyReturn(durSec)
+  }
+
+  /** Raise butterfly viewmodel from below during equip (matches M9 Switch rise). */
+  private startBfDrawUp(durationSec = FPSRenderer.BF_DRAW_DUR): void {
+    this.bfDrawDur = Math.max(0.12, durationSec)
+    this.bfDrawT = Math.max(this.bfDrawT, this.bfDrawDur)
   }
 
   private scheduleIdleReturn(fromAnim: string, timeScale: number): void {
@@ -212,7 +427,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   private updateLocomotionAnim(): void {
-    // AKM: frozen hold — only Reload plays from the Scene clip
+    if (this.fpsMesh?.key === 'Butterfly') return
     if (this.isAkmFps()) return
     if (!this.fpsMesh?.animations.has('Move')) return
     if (this.scopeLevel > 0) return
@@ -236,7 +451,19 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   private locomotionBusyUntil = 0
   /** AKM: seconds left on draw-up from below */
   private akDrawT = 0
+  /** Butterfly equip draw-up (whole viewmodel + knife). */
+  private bfDrawT = 0
+  private bfDrawDur = FPSRenderer.BF_DRAW_DUR
+  private butterflySlashAlt = false
+  private butterflyReadyBlendToken = 0
+  private butterflyAnimToken = 0
+  private butterflyReadyTimeout: number | null = null
   private static readonly AK_DRAW_DUR = 0.42
+  private static readonly BF_DRAW_DUR = 0.42
+  /** Cap hand speed — full sync (~3–4×) looks jerky on the M9 GLB. */
+  private static readonly BF_HAND_SWITCH_CAP = 2.05
+  private static readonly BF_HAND_SHOOT_CAP = 2.35
+  private static readonly BF_READY_BLEND_SEC = 0.14
   /** AKM: 1→0 shoot kick envelope */
   private akShootKick = 0
   /** Sketchfab AKM viewmodel (main AK47 + editor alias). */
@@ -282,7 +509,6 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   /** One ready viewmodel per weapon — never clone mid-match */
   private weaponCache = new Map<string, FPSMesh>()
   private shellTextureReady: Promise<void> | null = null
-
   constructor(player: Player) {
     super(player)
     // Always use the overlay viewmodel camera so the gun never depth-tests against walls
@@ -325,26 +551,31 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
 
   /** Get or create a fully-inited viewmodel for a weapon key */
   private getOrCreateWeaponMesh(key: string): FPSMesh | null {
+    const glm = Game.getInstance().globalLoadingManager
     const cached = this.weaponCache.get(key)
     if (cached) {
       if (key === 'AWP') {
         const root = cached.mesh as unknown as THREE.Object3D
         if (!root.getObjectByName('AwpViewProp')) this.attachAwpProp(cached)
       }
+      if (key === 'Butterfly') {
+        const root = cached.mesh as unknown as THREE.Object3D
+        if (!root.getObjectByName(BUTTERFLY_KNIFE_PROP)) this.attachButterflyKnife(cached)
+      }
       return cached
     }
-    const source = Game.getInstance().globalLoadingManager.loadableMeshs.get(key)
+
+    const source = glm.loadableMeshs.get(key)
     if (!source) return null
     const mesh = source.clone() as FPSMesh
     mesh.init()
     if (key === 'AWP') this.attachAwpProp(mesh)
+    if (key === 'Butterfly') this.attachButterflyKnife(mesh)
     if (key === 'AK47') {
       mesh.holdPoseAt(0)
     } else {
       for (const animName of ['Shoot', 'Reload', 'Switch']) {
-        if (mesh.animations.has(animName)) {
-          mesh.playAnimation(animName)
-        }
+        if (mesh.animations.has(animName)) mesh.playAnimation(animName)
       }
       mesh.mixer?.stopAllAction()
       mesh.mixer?.setTime(0)
@@ -396,11 +627,38 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (seat) seat.attach(prop)
   }
 
+  /** Seat CS 1.6 butterfly blade on M9 hands (Root-bone attach, same flow as AWP). */
+  private attachButterflyKnife(fps: FPSMesh): void {
+    const root = fps.mesh as unknown as THREE.Object3D
+    if (root.getObjectByName(BUTTERFLY_KNIFE_PROP)) return
+
+    const prop = Game.getInstance().globalLoadingManager.createButterflyKnifeProp()
+    if (!prop) {
+      console.warn('[Butterfly] createButterflyKnifeProp failed — is butterfly_knife.mdl loaded?')
+      return
+    }
+
+    if (!seatKnifePropOnHands(prop, root)) {
+      console.warn('[Butterfly] could not find Armature/Root seat bone')
+    }
+    holdKnifeDrawStart(root)
+    setKnifePropVisible(root, false)
+  }
+
   /**
    * Editor FPS viewmodels — AK uses the same AKM pack as the main game.
+   * Butterfly = M9 hands + CS 1.6 MDL knife prop.
    */
   public equipEditorWeapon(key: string): boolean {
-    const normalized = key === 'AK' || key === 'AK47' ? 'AK' : key === 'Knife' ? 'Knife' : 'Usp'
+    const normalized =
+      key === 'AK' || key === 'AK47'
+        ? 'AK'
+        : key === 'AWP'
+          ? 'AWP'
+          : key === 'Butterfly'
+            ? 'Butterfly'
+            : 'Usp'
+
     if (normalized === 'AK') {
       const already = this.isAkmFps()
       if (!already) {
@@ -413,17 +671,111 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       return true
     }
 
-    const packKey = normalized === 'Knife' ? 'Knife' : 'Usp'
-    const already = this.fpsMesh?.key === packKey
-    if (!already) {
-      const ok = this.equipWeaponMesh(packKey, true)
+    if (normalized === 'AWP') {
+      const ok = this.equipWeaponMesh('AWP', false)
       if (!ok) return false
-      this.player.setWeapon(packKey)
+      this.player.setWeapon('AWP')
       return true
     }
-    this.player.setWeapon(packKey)
+
+    if (normalized === 'Butterfly') {
+      this.invalidateWeaponCache('Butterfly')
+      const ok = this.equipWeaponMesh('Butterfly', true)
+      if (!ok) return false
+      this.player.setWeapon('Butterfly')
+      if (this.fpsMesh) this.handleWeaponSwitch()
+      return true
+    }
+
+    const already = this.fpsMesh?.key === 'Usp'
+    if (!already) {
+      const ok = this.equipWeaponMesh('Usp', true)
+      if (!ok) return false
+      this.player.setWeapon('Usp')
+      return true
+    }
+    this.player.setWeapon('Usp')
     this.handleWeaponSwitch()
     return true
+  }
+
+  /** Live seat offset for the equipped viewmodel (what /editormode nudges). */
+  public getViewmodelSeat(): Vector3D | null {
+    return this.fpsMesh?.viewmodelOffset ?? null
+  }
+
+  public nudgeViewmodelSeat(axis: 'x' | 'y' | 'z', delta: number): void {
+    const seat = this.fpsMesh?.viewmodelOffset
+    if (!seat) return
+    seat[axis] += delta
+  }
+
+  public setViewmodelSeat(x: number, y: number, z: number): void {
+    const seat = this.fpsMesh?.viewmodelOffset
+    if (!seat) return
+    seat.set(x, y, z)
+  }
+
+  /** Live butterfly knife prop seat (Root-bone local — hands stay put). */
+  public nudgeKnifeProp(axis: 'x' | 'y' | 'z', delta: number): boolean {
+    if (this.fpsMesh?.key !== 'Butterfly') return false
+    const root = this.fpsMesh.mesh as unknown as THREE.Object3D
+    const prop = getKnifeProp(root)
+    if (!prop) return false
+    nudgeKnifePropPosition(prop, axis, delta)
+    return true
+  }
+
+  public nudgeKnifePropSize(delta: number): boolean {
+    if (this.fpsMesh?.key !== 'Butterfly') return false
+    const root = this.fpsMesh.mesh as unknown as THREE.Object3D
+    const prop = getKnifeProp(root)
+    if (!prop) return false
+    nudgeKnifePropScale(prop, delta)
+    return true
+  }
+
+  public resetKnifePropTune(): boolean {
+    if (this.fpsMesh?.key !== 'Butterfly') return false
+    const root = this.fpsMesh.mesh as unknown as THREE.Object3D
+    const prop = getKnifeProp(root)
+    if (!prop) return false
+    resetKnifePropSeat(prop)
+    return true
+  }
+
+  public getKnifePropTuneState(): { x: number; y: number; z: number; scale: number } | null {
+    if (this.fpsMesh?.key !== 'Butterfly') return null
+    const root = this.fpsMesh.mesh as unknown as THREE.Object3D
+    const prop = getKnifeProp(root)
+    if (!prop) return null
+    const tune = getKnifePropTune(prop)
+    return {
+      x: tune.position.x,
+      y: tune.position.y,
+      z: tune.position.z,
+      scale: tune.scaleTune,
+    }
+  }
+
+  public getKnifePropCopyText(): string {
+    const tune = this.getKnifePropTuneState()
+    if (!tune) return ''
+    const rot = BUTTERFLY_KNIFE_SEAT.rotation
+    return (
+      `// Butterfly knife prop seat (MDLKnifeProp.ts)\n` +
+      `position: new THREE.Vector3(${tune.x.toFixed(4)}, ${tune.y.toFixed(4)}, ${tune.z.toFixed(4)}),\n` +
+      `rotation: new THREE.Euler(${rot.x.toFixed(4)}, ${rot.y.toFixed(4)}, ${rot.z.toFixed(4)}, 'XYZ'),\n` +
+      `scaleMul: ${(BUTTERFLY_KNIFE_SEAT.scaleMul * tune.scale).toFixed(4)},`
+    )
+  }
+
+  public nudgeWeaponRotation(axis: 'x' | 'y' | 'z', deltaRad: number): void {
+    this.weaponRotation[axis] += deltaRad
+  }
+
+  public resetWeaponRotation(): void {
+    this.weaponRotation.set(0, 0, 0)
   }
 
   /** Same-slot re-press: play switch/draw without rebuilding the mesh. */
@@ -436,11 +788,24 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.handleWeaponSwitch()
   }
 
+  /** Drop a pooled viewmodel so the next equip rebuilds from the registry. */
+  public invalidateWeaponCache(key: string): void {
+    const prev = this.weaponCache.get(key)
+    if (prev && this.fpsMesh === prev) {
+      this.removeMesh()
+      this.fpsMesh = null
+    }
+    this.weaponCache.delete(key)
+  }
+
   /**
    * Swap to a cached weapon mesh (no mid-match SkeletonUtils.clone).
    * @param playSwitchAnim false when warming / initial equip
    */
   public equipWeaponMesh(key: string, playSwitchAnim = true): boolean {
+    if (key === 'Butterfly' && !mapHasButterflyKnife(Game.getInstance().activeMapId)) {
+      key = 'Knife'
+    }
     const mesh = this.getOrCreateWeaponMesh(key)
     if (!mesh) return false
     if (this.fpsMesh === mesh) {
@@ -451,9 +816,9 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     return true
   }
 
-  /** Pre-init AK / USP / Knife + compile viewmodel shaders before combat */
+  /** Pre-init AK / USP / AWP + compile viewmodel shaders before combat */
   public warmWeapons(renderer: THREE.WebGLRenderer): void {
-    const keys = ['AK47', 'Usp', 'Knife', 'AWP']
+    const keys = ['AK47', 'Usp', 'Butterfly', 'AWP']
     const meshes: THREE.Object3D[] = []
     for (const key of keys) {
       const mesh = this.getOrCreateWeaponMesh(key)
@@ -535,12 +900,15 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   }
 
   public setMesh(mesh: LoadableMesh, playSwitchAnim = true): void {
+    this.cancelButterflyAnims()
     this.clearScope(false)
     this.removeMesh()
     this.fpsMesh = mesh as FPSMesh
-    // Cached / already-inited weapons skip the expensive material bleach pass
     if (!this.fpsMesh.mixer) {
       this.fpsMesh.init()
+    }
+    if (this.fpsMesh.key === 'Butterfly') {
+      this.ensureButterflyKnifeProp(this.fpsMesh)
     }
     this.weaponCache.set(this.fpsMesh.key, this.fpsMesh)
     // Remember post-init scale so hand flip never destroys model size
@@ -614,6 +982,9 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     if (this.scopeLevel > 0) return
 
     this.fpsMesh.update(dt)
+    if (this.fpsMesh.key === 'Butterfly') {
+      updateKnifeProp(this.fpsMesh.mesh as unknown as THREE.Object3D, dt)
+    }
     this.updateLocomotionAnim()
     this.idleSwayTime += dt
 
@@ -634,15 +1005,26 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.weaponBobbingAcc.y = lerp(this.weaponBobbingAcc.y, 0, bobbingLerpAmount)
     this.weaponBobbingAcc.z = lerp(this.weaponBobbingAcc.z, 0, bobbingLerpAmount)
 
-    // Editor AK draw-up from below → ready
+    // Draw-up from below → ready (AK + butterfly equip)
     let drawY = 0
     let drawPitch = 0
+    let bfDrawUp = 1
     if (this.akDrawT > 0) {
       this.akDrawT = Math.max(0, this.akDrawT - dt)
       const u = 1 - this.akDrawT / FPSRenderer.AK_DRAW_DUR
       const e = 1 - Math.pow(1 - u, 3)
       drawY = -0.58 * (1 - e)
       drawPitch = 0.42 * (1 - e)
+    } else if (this.bfDrawT > 0) {
+      this.bfDrawT = Math.max(0, this.bfDrawT - dt)
+      bfDrawUp = 1 - this.bfDrawT / this.bfDrawDur
+      const e = 1 - Math.pow(1 - bfDrawUp, 3)
+      drawY = -0.58 * (1 - e)
+      drawPitch = 0.42 * (1 - e)
+    }
+
+    if (this.fpsMesh.key === 'Butterfly') {
+      this.syncButterflyKnifeVisibility(bfDrawUp)
     }
 
     // Editor AK shoot kick — ease back (linear decay feels less "snap")
