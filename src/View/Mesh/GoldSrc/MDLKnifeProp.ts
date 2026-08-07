@@ -170,6 +170,10 @@ export function holdKnifeRest(root: THREE.Object3D): void {
   getKnifeFramePlayer(root)?.holdRest()
 }
 
+export function holdKnifeClipEnd(root: THREE.Object3D, clipName: string): void {
+  getKnifeFramePlayer(root)?.holdClipEnd(clipName)
+}
+
 export function setKnifePropVisible(root: THREE.Object3D, visible: boolean): void {
   const prop = getKnifeProp(root)
   if (!prop) return

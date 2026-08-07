@@ -34,6 +34,7 @@ import {
   getKnifeFramePlayer,
   getKnifeProp,
   getKnifePropTune,
+  holdKnifeClipEnd,
   holdKnifeDrawStart,
   holdKnifeRest,
   nudgeKnifePropPosition,
@@ -130,7 +131,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       this.weaponBobbingAcc.x += 0.03
       this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.02
       this.weaponBobbingAcc.z += 0.015
-      this.scheduleButterflyReadyReturn(Math.max(knifeDur, handWall))
+      this.scheduleButterflyReadyReturn(Math.max(knifeDur, handWall), true, knifeClip)
     } else {
       fps.playAnimation('Shoot', false, true, 1.55)
       this.recoilEffect = isMelee ? 0.06 : 0.11
@@ -289,15 +290,46 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     return sw?.End?.time ?? 2.3
   }
 
-  private butterflyReturnToReady(): void {
+  private butterflyReturnToReady(blendSec = FPSRenderer.BF_READY_BLEND_SEC): void {
     const fps = this.fpsMesh
     if (!fps || fps.key !== 'Butterfly') return
     holdKnifeRest(fps.mesh as unknown as THREE.Object3D)
-    this.blendButterflyHandsToReady(this.butterflyReadyPoseTime())
+    this.blendButterflyHandsToReady(this.butterflyReadyPoseTime(), blendSec)
+  }
+
+  /** Hold slash follow-through (hands extended left) before easing back to ready. */
+  private butterflyHoldShootFollowThrough(knifeClip: string): void {
+    const fps = this.fpsMesh
+    if (!fps || fps.key !== 'Butterfly') return
+    const root = fps.mesh as unknown as THREE.Object3D
+    fps.settlePose()
+    holdKnifeClipEnd(root, knifeClip)
+
+    const meshKey = fps.key
+    const token = this.butterflyAnimToken
+    const holdMs = FPSRenderer.BF_SHOOT_FOLLOW_HOLD_SEC * 1000
+    this.locomotionBusyUntil = Math.max(
+      this.locomotionBusyUntil,
+      performance.now() + holdMs + FPSRenderer.BF_SHOOT_RECOVER_BLEND_SEC * 1000
+    )
+    if (this.butterflyReadyTimeout !== null) {
+      clearTimeout(this.butterflyReadyTimeout)
+    }
+    this.butterflyReadyTimeout = window.setTimeout(() => {
+      this.butterflyReadyTimeout = null
+      if (token !== this.butterflyAnimToken) return
+      const live = this.fpsMesh
+      if (!live || live.key !== meshKey) return
+      if (this.scopeLevel > 0) return
+      this.butterflyReturnToReady(FPSRenderer.BF_SHOOT_RECOVER_BLEND_SEC)
+    }, holdMs + 30)
   }
 
   /** Ease M9 hands into the ready hold instead of snapping. */
-  private blendButterflyHandsToReady(targetTime: number): void {
+  private blendButterflyHandsToReady(
+    targetTime: number,
+    blendSec = FPSRenderer.BF_READY_BLEND_SEC
+  ): void {
     const fps = this.fpsMesh
     if (!fps?.mixer || !fps.mesh?.animations?.length) {
       fps?.holdPoseAt(targetTime)
@@ -319,7 +351,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       return
     }
 
-    const durMs = FPSRenderer.BF_READY_BLEND_SEC * 1000
+    const durMs = blendSec * 1000
     const t0 = performance.now()
     const tick = (): void => {
       if (token !== this.butterflyReadyBlendToken) return
@@ -334,14 +366,21 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     requestAnimationFrame(tick)
   }
 
-  private scheduleButterflyReadyReturn(durSec: number): void {
+  private scheduleButterflyReadyReturn(
+    durSec: number,
+    afterShoot = false,
+    knifeClip = 'slash1'
+  ): void {
     const fps = this.fpsMesh
     if (!fps) return
     const meshKey = fps.key
     const token = this.butterflyAnimToken
+    const tailSec = afterShoot
+      ? FPSRenderer.BF_SHOOT_FOLLOW_HOLD_SEC + FPSRenderer.BF_SHOOT_RECOVER_BLEND_SEC
+      : FPSRenderer.BF_READY_BLEND_SEC
     this.locomotionBusyUntil = Math.max(
       this.locomotionBusyUntil,
-      performance.now() + durSec * 1000
+      performance.now() + (durSec + tailSec) * 1000
     )
     if (this.butterflyReadyTimeout !== null) {
       clearTimeout(this.butterflyReadyTimeout)
@@ -352,7 +391,11 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       const live = this.fpsMesh
       if (!live || live.key !== meshKey) return
       if (this.scopeLevel > 0) return
-      this.butterflyReturnToReady()
+      if (afterShoot) {
+        this.butterflyHoldShootFollowThrough(knifeClip)
+      } else {
+        this.butterflyReturnToReady()
+      }
     }, durSec * 1000 + 30)
   }
 
@@ -460,6 +503,9 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   private static readonly BF_HAND_SWITCH_CAP = 2.05
   private static readonly BF_HAND_SHOOT_CAP = 2.35
   private static readonly BF_READY_BLEND_SEC = 0.14
+  /** Slash follow-through — keep hands extended before recovering to ready. */
+  private static readonly BF_SHOOT_FOLLOW_HOLD_SEC = 2.0
+  private static readonly BF_SHOOT_RECOVER_BLEND_SEC = 0.38
   /** AKM: 1→0 shoot kick envelope */
   private akShootKick = 0
   /** Sketchfab AKM viewmodel (main AK47 + editor alias). */

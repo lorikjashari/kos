@@ -65,6 +65,14 @@ export class MDLFramePlayer {
     this.applyFrameAt(idx, f)
   }
 
+  /** Freeze on the last frame of a clip (slash follow-through hold). */
+  public holdClipEnd(name: string): void {
+    const idx = this.findSequence(name)
+    if (idx < 0) return
+    const seq = this.sequences[idx]!
+    this.holdSequenceFrame(name, seq.numFrames - 1)
+  }
+
   public getSequenceDuration(name: string, timeScale = 1): number {
     const idx = this.findSequence(name)
     if (idx < 0) return 0
