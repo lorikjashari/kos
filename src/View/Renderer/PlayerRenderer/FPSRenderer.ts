@@ -381,16 +381,12 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   private syncButterflyKnifeVisibility(drawUpProgress = 1): void {
     if (!this.fpsMesh || this.fpsMesh.key !== 'Butterfly') return
     const root = this.fpsMesh.mesh as unknown as THREE.Object3D
-    const prop = getKnifeProp(root)
-    if (!prop) return
+    if (!getKnifeProp(root)) return
 
-    if (this.bfDrawT > 0) {
-      prop.visible = drawUpProgress > 0.1
-      return
-    }
-
-    const player = getKnifeFramePlayer(root)
-    prop.visible = player?.isPlaying() ?? true
+    // During equip draw-up: stay hidden until the viewmodel has risen slightly.
+    // After draw-up (or slash/idle): always show — holdRest/isPlaying() is false at ready pose.
+    const visible = this.bfDrawT <= 0 || drawUpProgress > 0.1
+    setKnifePropVisible(root, visible)
   }
 
   private scheduleButterflyIdleReturn(durSec: number): void {
