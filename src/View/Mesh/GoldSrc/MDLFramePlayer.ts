@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { MDLHandRetargeter } from './MDLHandRetargeter'
 import type { MDLMeshPart, MDLSequenceInfo } from './loadGoldSrcMDL'
 
 /** CPU-baked frame playback for GoldSrc MDL viewmodels (web-hlmv style). */
@@ -9,6 +10,9 @@ export class MDLFramePlayer {
   private loop = false
   private timeScale = 1
   private duration = 0
+
+  /** Optional — applies CS MDL cshands motion onto M9 GLB bones. */
+  public handRetargeter: MDLHandRetargeter | null = null
 
   constructor(
     private parts: MDLMeshPart[],
@@ -168,6 +172,7 @@ export class MDLFramePlayer {
       }
       attr.needsUpdate = true
     }
+    this.syncHandRetargeter(seqIndex, frameA, t)
   }
 
   private applyFrameAt(seqIndex: number, frame: number): void {
@@ -179,5 +184,14 @@ export class MDLFramePlayer {
       ;(attr.array as Float32Array).set(positions)
       attr.needsUpdate = true
     }
+    this.syncHandRetargeter(seqIndex, frame, 0)
+  }
+
+  private syncHandRetargeter(seqIndex: number, frameA: number, blendT: number): void {
+    const r = this.handRetargeter
+    if (!r) return
+    const seq = this.sequences[seqIndex]
+    if (!seq) return
+    r.applyFrames(seqIndex, frameA, seq, blendT)
   }
 }

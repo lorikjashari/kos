@@ -2,8 +2,10 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
 import { LoadableMesh } from './LoadableMesh'
 import { FPSMesh } from './FPSMesh'
-import { loadGoldSrcKnifeProp } from './GoldSrc/loadGoldSrcMDL'
+import { buildGoldSrcKnifeProp } from './GoldSrc/loadGoldSrcMDL'
 import type { MDLViewmodel } from './GoldSrc/loadGoldSrcMDL'
+import { parseGoldSrcMDL } from './GoldSrc/MDLParser'
+import type { MDLModelData } from './GoldSrc/MDLTypes'
 import { cloneKnifeProp } from './GoldSrc/MDLKnifeProp'
 import { ThirdPersonMesh } from './ThirdPersonMesh'
 import { MapMesh } from './MapMesh'
@@ -19,6 +21,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
   private static dracoLoader: DRACOLoader = new DRACOLoader()
   public loadableMeshs: Map<string, LoadableMesh> = new Map<string, LoadableMesh>()
   private butterflyKnifeTemplate: MDLViewmodel | null = null
+  private butterflyMdlModel: MDLModelData | null = null
 
   public fpsMesh!: THREE.Mesh
   public thirdPersonMesh!: THREE.Mesh
@@ -100,7 +103,11 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     await m9.load()
     m9.register(this.loadableMeshs)
 
-    this.butterflyKnifeTemplate = await loadGoldSrcKnifeProp('models/butterfly_knife.mdl')
+    const bflyResponse = await fetch('models/butterfly_knife.mdl')
+    if (!bflyResponse.ok) throw new Error('Failed to load butterfly_knife.mdl')
+    const bflyBuf = await bflyResponse.arrayBuffer()
+    this.butterflyMdlModel = parseGoldSrcMDL(bflyBuf)
+    this.butterflyKnifeTemplate = buildGoldSrcKnifeProp(bflyBuf)
     this.registerButterflyViewmodel(m9)
 
     const bullet = new LoadableMesh('9mm2douille.glb', 'Bullet')
@@ -172,6 +179,10 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
       c.visible = true
     })
     return group
+  }
+
+  public getButterflyMdlModel(): MDLModelData | null {
+    return this.butterflyMdlModel
   }
 
   /** Bake AKM rifle meshes (no Sketchfab arms) for third-person / HUD icons. */

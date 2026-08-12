@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { MDLFramePlayer } from './MDLFramePlayer'
+import type { MDLHandRetargeter } from './MDLHandRetargeter'
 import type { MDLMeshPart, MDLViewmodel } from './loadGoldSrcMDL'
 
 /**
@@ -195,6 +196,11 @@ export function getKnifePropTune(prop: THREE.Group): {
 }
 
 export const BUTTERFLY_KNIFE_PROP = 'ButterflyKnifeProp'
+
+export function bindHandRetargeter(root: THREE.Object3D, retargeter: MDLHandRetargeter): void {
+  const player = getKnifeFramePlayer(root)
+  if (player) player.handRetargeter = retargeter
+}
 
 export function getKnifeFramePlayer(root: THREE.Object3D): MDLFramePlayer | undefined {
   const prop = root.getObjectByName(BUTTERFLY_KNIFE_PROP)
