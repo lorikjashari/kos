@@ -204,6 +204,11 @@ export function buildGoldSrcKnifeProp(buffer: ArrayBuffer): MDLViewmodel {
   return buildScene(buffer, isKnifeBodyPart, KNIFE_PROP_TARGET_SIZE, knifePropMaterialFromMDL)
 }
 
+/** Full v_knife viewmodel — CS hands (cshands) + knife, single baked rig. */
+export function buildGoldSrcButterflyViewmodel(buffer: ArrayBuffer): MDLViewmodel {
+  return buildScene(buffer, () => true, VIEWMODEL_TARGET_SIZE, knifePropMaterialFromMDL)
+}
+
 export function buildGoldSrcMDLScene(buffer: ArrayBuffer): MDLViewmodel {
   return buildScene(buffer, () => true, VIEWMODEL_TARGET_SIZE)
 }
@@ -212,6 +217,12 @@ export async function loadGoldSrcKnifeProp(path: string): Promise<MDLViewmodel> 
   const response = await fetch(path)
   if (!response.ok) throw new Error(`Failed to load MDL: ${path}`)
   return buildGoldSrcKnifeProp(await response.arrayBuffer())
+}
+
+export async function loadGoldSrcButterflyViewmodel(path: string): Promise<MDLViewmodel> {
+  const response = await fetch(path)
+  if (!response.ok) throw new Error(`Failed to load MDL: ${path}`)
+  return buildGoldSrcButterflyViewmodel(await response.arrayBuffer())
 }
 
 export async function loadGoldSrcMDL(path: string): Promise<MDLViewmodel> {

@@ -2,9 +2,9 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
 import { LoadableMesh } from './LoadableMesh'
 import { FPSMesh } from './FPSMesh'
-import { loadGoldSrcKnifeProp } from './GoldSrc/loadGoldSrcMDL'
+import { loadGoldSrcButterflyViewmodel } from './GoldSrc/loadGoldSrcMDL'
 import type { MDLViewmodel } from './GoldSrc/loadGoldSrcMDL'
-import { cloneKnifeProp } from './GoldSrc/MDLKnifeProp'
+import { cloneButterflyViewmodel } from './GoldSrc/MDLKnifeProp'
 import { ThirdPersonMesh } from './ThirdPersonMesh'
 import { MapMesh } from './MapMesh'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader'
@@ -100,7 +100,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     await m9.load()
     m9.register(this.loadableMeshs)
 
-    this.butterflyKnifeTemplate = await loadGoldSrcKnifeProp('models/butterfly_knife.mdl')
+    this.butterflyKnifeTemplate = await loadGoldSrcButterflyViewmodel('models/butterfly_knife.mdl')
     this.registerButterflyViewmodel(m9)
 
     const bullet = new LoadableMesh('9mm2douille.glb', 'Bullet')
@@ -143,29 +143,34 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     awpFps.register(this.loadableMeshs)
   }
 
-  /** FPS Butterfly: M9 hands + CS 1.6 MDL knife prop (hide default M9 blade). */
+  /** FPS Butterfly: hide M9 GLB — full CS MDL viewmodel (hands + knife) is attached at runtime. */
   private registerButterflyViewmodel(m9Source: FPSMesh): void {
     const bfly = m9Source.clone()
     bfly.key = 'Butterfly'
     bfly.viewmodelOffset = new Vector3D(-0.04, 0.02, 0)
 
     const root = bfly.mesh as unknown as THREE.Object3D
-    // Hide default M9 blade mesh only — keep the skinned hands visible.
     root.traverse((c) => {
+      const mesh = c as THREE.Mesh
+      if (!mesh.isMesh) return
+      // Hide all skinned M9 geometry — MDL supplies hands + knife animations.
+      if (mesh.parent?.name === 'Armature' || mesh.parent?.type === 'Bone') {
+        mesh.visible = false
+        mesh.userData.butterflyHiddenGlb = true
+      }
       const name = c.name.toLowerCase()
       if (name === 'knife' || name.includes('blade')) {
-        c.visible = false
-        c.userData.butterflyGripRef = true
+        mesh.visible = false
       }
     })
 
     bfly.register(this.loadableMeshs)
   }
 
-  /** Fresh butterfly knife prop for attaching onto M9 Armature seat. */
+  /** Full CS butterfly viewmodel clone (cshands + knife, shared MDL sequences). */
   public createButterflyKnifeProp(): THREE.Group | undefined {
     if (!this.butterflyKnifeTemplate) return undefined
-    const { group, framePlayer } = cloneKnifeProp(this.butterflyKnifeTemplate)
+    const { group, framePlayer } = cloneButterflyViewmodel(this.butterflyKnifeTemplate)
     group.name = 'ButterflyKnifeProp'
     group.userData.knifeFramePlayer = framePlayer
     group.frustumCulled = false
