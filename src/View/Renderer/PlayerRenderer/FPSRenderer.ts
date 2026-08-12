@@ -115,15 +115,14 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       this.ensureButterflyKnifeProp(fps)
       const root = fps.mesh as unknown as THREE.Object3D
       const knifeClip = this.resolveButterflySlashClip(root)
-      // CS 1.6: hands stay at draw-ready; MDL knife carries midslash motion.
-      fps.holdPoseAt(this.butterflyReadyPoseTime())
       const knifeDur = this.playButterflyClip(knifeClip, 1)
+      const handWall = this.playButterflyHands('Shoot', knifeClip)
       this.recoilEffect = 0.05
       this.recoilRecover = 3.2
       this.weaponBobbingAcc.x += 0.024
       this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.014
       setKnifePropVisible(root, true)
-      this.scheduleButterflyReadyReturn(knifeDur, true, knifeClip)
+      this.scheduleButterflyReadyReturn(Math.max(knifeDur, handWall), true, knifeClip)
     } else {
       fps.playAnimation('Shoot', false, true, 1.55)
       this.recoilEffect = isMelee ? 0.06 : 0.11
@@ -206,14 +205,13 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       holdKnifeDrawStart(root)
       this.bfDrawing = true
       const knifeDur = this.playButterflyClip('draw', 1)
-      const handScale = this.butterflyDrawHandScale(knifeDur)
-      fps.playAnimation('Switch', false, true, handScale)
-      this.butterflyDeployUntil = performance.now() + Math.max(750, knifeDur * 1000)
+      const handWall = this.playButterflyHands('Switch', 'draw')
+      this.butterflyDeployUntil = performance.now() + Math.max(750, Math.max(knifeDur, handWall) * 1000)
       this.weaponBobbingAcc.x += 0.015
       if (this.playerCameraManager instanceof FPSCameraManager) {
         this.playerCameraManager.resetRecoil()
       }
-      this.scheduleButterflyReadyReturn(knifeDur)
+      this.scheduleButterflyReadyReturn(Math.max(knifeDur, handWall))
       return
     }
     const scale = key === 'AWP' ? 1.25 : key === 'AK47' ? 1.45 : 1.5
@@ -246,6 +244,31 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     return playKnifeClip(fps.mesh as unknown as THREE.Object3D, name, false, timeScale)
   }
 
+  /** Play M9 hands synced to MDL knife clip length (1× knife, scaled hands). */
+  private playButterflyHands(clip: 'Switch' | 'Shoot', knifeClip: string): number {
+    const fps = this.fpsMesh
+    if (!fps) return 0
+    const scale = this.butterflyHandScaleForKnife(clip, knifeClip)
+    fps.playAnimation(clip, false, true, scale)
+    return this.butterflyHandWallSec(clip, scale)
+  }
+
+  /** Speed M9 hands to match knife wall-clock; capped on slash so GLB stays smooth. */
+  private butterflyHandScaleForKnife(handClip: 'Switch' | 'Shoot', knifeClip: string): number {
+    const fps = this.fpsMesh
+    const shootCap = FPSRenderer.BF_HAND_SHOOT_CAP
+    const floor = handClip === 'Switch' ? 1.15 : 1.55
+    if (!fps) return floor
+    const root = fps.mesh as unknown as THREE.Object3D
+    const handSpan = this.butterflyHandClipSpan(handClip)
+    const knifeWall = getKnifeClipDuration(root, knifeClip, 1)
+    if (handSpan <= 0 || knifeWall <= 0) return floor
+    const ideal = handSpan / knifeWall
+    // Draw: lock hands to knife length (CS deploy is one motion).
+    if (handClip === 'Switch') return Math.max(floor, ideal)
+    return Math.max(floor, Math.min(ideal, shootCap))
+  }
+
   /** CS 1.6 primary slash — alternates midslash1 / midslash2. */
   private resolveButterflySlashClip(root: THREE.Object3D): string {
     const preferred = this.butterflySlashAlt ? 'midslash2' : 'midslash1'
@@ -254,13 +277,6 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       if (getKnifeClipDuration(root, name, 1) > 0) return name
     }
     return 'draw'
-  }
-
-  /** Sync M9 Switch length to MDL draw (~0.73s in CS knife). */
-  private butterflyDrawHandScale(knifeDrawSec: number): number {
-    const handSpan = this.butterflyHandClipSpan('Switch')
-    if (handSpan <= 0 || knifeDrawSec <= 0) return 1.45
-    return Math.min(FPSRenderer.BF_HAND_SWITCH_CAP, Math.max(1.15, handSpan / knifeDrawSec))
   }
 
   /** M9 Switch/Shoot wall-clock length at a given hand time scale. */
@@ -298,12 +314,12 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.butterflyReadyHold()
   }
 
-  /** Hold slash end pose on knife; hands stay at draw-ready (CS m_flTimeWeaponIdle gate). */
+  /** Hold slash end on both knife + hands (CS idle gate), then return to draw-ready. */
   private butterflyHoldShootFollowThrough(knifeClip: string): void {
     const fps = this.fpsMesh
     if (!fps || fps.key !== 'Butterfly') return
     const root = fps.mesh as unknown as THREE.Object3D
-    fps.holdPoseAt(this.butterflyReadyPoseTime())
+    fps.settlePose()
     holdKnifeClipEnd(root, knifeClip)
     setKnifePropVisible(root, true)
 
@@ -458,7 +474,7 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
   private butterflyReadyTimeout: number | null = null
   private static readonly AK_DRAW_DUR = 0.42
   /** Cap hand speed on M9 Switch during draw sync. */
-  private static readonly BF_HAND_SWITCH_CAP = 2.05
+  private static readonly BF_HAND_SHOOT_CAP = 2.35
   /** CS m_flTimeWeaponIdle after primary slash. */
   private static readonly BF_SHOOT_FOLLOW_HOLD_SEC = 2.0
   /** AKM: 1→0 shoot kick envelope */
