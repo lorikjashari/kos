@@ -40,10 +40,43 @@ export function cloneKnifeProp(template: MDLViewmodel): {
   framePlayer: MDLFramePlayer
   animations: THREE.AnimationClip[]
 } {
-  return cloneButterflyViewmodel(template, BUTTERFLY_KNIFE_SEAT.scaleMul)
+  const group = new THREE.Group()
+  group.name = 'ButterflyKnifePropRoot'
+
+  const orient = new THREE.Group()
+  orient.name = 'GoldSrcOrient'
+  orient.rotation.copy(GRIP_ORIENT)
+  const tplOrient = template.root.children[0]
+  if (tplOrient) orient.position.copy(tplOrient.position)
+  group.add(orient)
+  group.scale.copy(template.root.scale).multiplyScalar(BUTTERFLY_KNIFE_SEAT.scaleMul)
+
+  const parts: MDLMeshPart[] = []
+
+  for (const src of template.parts) {
+    const geometry = src.mesh.geometry.clone()
+    const material = (src.mesh.material as THREE.Material).clone()
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.frustumCulled = false
+    mesh.visible = true
+    mesh.castShadow = false
+    mesh.receiveShadow = false
+    orient.add(mesh)
+    parts.push({ mesh, framePositions: src.framePositions })
+  }
+
+  const framePlayer = new MDLFramePlayer(
+    parts,
+    template.sequences,
+    template.restSeqIndex,
+    template.restFrame
+  )
+  framePlayer.holdDrawStart()
+
+  return { group, framePlayer, animations: template.animations }
 }
 
-/** Clone full CS butterfly MDL (cshands + knife) for FPS attach. */
+/** @deprecated Full MDL viewmodel clone — do not use for FPS (includes cshands). */
 export function cloneButterflyViewmodel(
   template: MDLViewmodel,
   scaleMul = BUTTERFLY_VIEWMODEL_SEAT.scaleMul
@@ -89,11 +122,6 @@ export function cloneButterflyViewmodel(
 }
 
 export function seatKnifePropOnHands(prop: THREE.Group, viewmodelRoot: THREE.Object3D): boolean {
-  return seatButterflyViewmodel(prop, viewmodelRoot)
-}
-
-/** Attach full MDL viewmodel on the FPS root (hands + knife move together). */
-export function seatButterflyViewmodel(prop: THREE.Group, viewmodelRoot: THREE.Object3D): boolean {
   prop.visible = true
   prop.frustumCulled = false
   prop.traverse((c) => {
@@ -101,13 +129,25 @@ export function seatButterflyViewmodel(prop: THREE.Group, viewmodelRoot: THREE.O
     c.frustumCulled = false
   })
 
-  prop.position.copy(BUTTERFLY_VIEWMODEL_SEAT.position)
-  prop.rotation.copy(BUTTERFLY_VIEWMODEL_SEAT.rotation)
+  prop.position.copy(BUTTERFLY_KNIFE_SEAT.position)
+  prop.rotation.copy(BUTTERFLY_KNIFE_SEAT.rotation)
 
   viewmodelRoot.add(prop)
   viewmodelRoot.updateMatrixWorld(true)
+
+  const seat = findKnifeSeatBone(viewmodelRoot)
+  if (!seat) {
+    console.warn('[Butterfly] Armature/Root not found — knife prop left on viewmodel root')
+    return false
+  }
+  seat.attach(prop)
   initKnifePropTuneData(prop)
   return true
+}
+
+/** @deprecated */
+export function seatButterflyViewmodel(prop: THREE.Group, viewmodelRoot: THREE.Object3D): boolean {
+  return seatKnifePropOnHands(prop, viewmodelRoot)
 }
 
 /** Snapshot base scale after seating so editor +/- only adjusts from this. */
@@ -121,8 +161,8 @@ export function getKnifeProp(root: THREE.Object3D): THREE.Group | undefined {
 }
 
 export function resetKnifePropSeat(prop: THREE.Group): void {
-  prop.position.copy(BUTTERFLY_VIEWMODEL_SEAT.position)
-  prop.rotation.copy(BUTTERFLY_VIEWMODEL_SEAT.rotation)
+  prop.position.copy(BUTTERFLY_KNIFE_SEAT.position)
+  prop.rotation.copy(BUTTERFLY_KNIFE_SEAT.rotation)
   prop.userData.knifeScaleTune = 1
   const base = prop.userData.knifeBaseScale as number | undefined
   if (base !== undefined) prop.scale.setScalar(base)
