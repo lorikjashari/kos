@@ -119,6 +119,13 @@ export class MDLFramePlayer {
     return this.playing
   }
 
+  /** 0→1 progress through the active sequence (for draw visibility gating). */
+  public getSequenceProgress(): number {
+    const seq = this.sequences[this.seqIndex]
+    if (!seq || seq.duration <= 0) return 1
+    return Math.min(1, Math.max(0, this.time / seq.duration))
+  }
+
   private blendScratch = new WeakMap<MDLMeshPart, Float32Array>()
 
   private applySmoothFrame(seqIndex: number, time: number, seq: MDLSequenceInfo): void {

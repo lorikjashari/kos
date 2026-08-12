@@ -152,6 +152,10 @@ export function getKnifeClipDuration(
   return getKnifeFramePlayer(root)?.getSequenceDuration(clipName, timeScale) ?? 0
 }
 
+export function getKnifePlayProgress(root: THREE.Object3D): number {
+  return getKnifeFramePlayer(root)?.getSequenceProgress() ?? 1
+}
+
 export function holdKnifeDrawStart(root: THREE.Object3D): void {
   getKnifeFramePlayer(root)?.holdDrawStart()
 }
