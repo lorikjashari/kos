@@ -303,6 +303,7 @@ export class Game implements IUpdatable {
       this.mobileControls?.applySettings(s.mobile)
     }
     this.syncMobileControls()
+    this.renderer?.hud?.setHudStyle(s.hudStyle ?? 'cs-green')
   }
 
   public applyGraphicsQuality(quality: 'low' | 'medium' | 'high'): void {

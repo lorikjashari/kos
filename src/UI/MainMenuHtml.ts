@@ -274,6 +274,16 @@ export function buildMainMenuHtml(): string {
                   <button type="button" class="kos-chip" data-gfx="high">High</button>
                 </div>
               </div>
+              <div class="kos-mset-card">
+                <div class="kos-mset-head">
+                  <strong>HUD</strong>
+                  <em>Counter-Strike green/yellow pack</em>
+                </div>
+                <div class="kos-chip-row" id="kos-hud-row">
+                  <button type="button" class="kos-chip" data-hud="cs-green">CS 1.6</button>
+                  <button type="button" class="kos-chip" data-hud="kos">KoS</button>
+                </div>
+              </div>
               <div class="kos-mset-card" data-mobile-only>
                 <div class="kos-mset-head">
                   <strong>Resolution</strong>

@@ -11,8 +11,11 @@ export class MDLFramePlayer {
   private timeScale = 1
   private duration = 0
 
-  /** Optional — applies CS MDL cshands motion onto M9 GLB bones. */
+  /** Drives M9 GLB bones from CS MDL cshands during knife frame playback. */
   public handRetargeter: MDLHandRetargeter | null = null
+
+  private heldSeqIndex = 0
+  private heldFrame = 0
 
   constructor(
     private parts: MDLMeshPart[],
@@ -98,21 +101,46 @@ export class MDLFramePlayer {
   }
 
   public update(dt: number): void {
-    if (!this.playing) return
+    if (this.playing) {
+      const seq = this.sequences[this.seqIndex]!
+      this.time += dt * this.timeScale
 
-    const seq = this.sequences[this.seqIndex]!
-    this.time += dt * this.timeScale
-
-    if (this.time >= seq.duration) {
-      if (this.loop) {
-        this.time %= seq.duration
-      } else {
-        this.time = seq.duration
-        this.playing = false
+      if (this.time >= seq.duration) {
+        if (this.loop) {
+          this.time %= seq.duration
+        } else {
+          this.time = seq.duration
+          this.playing = false
+          this.holdCurrentPlayingFrame()
+        }
       }
-    }
 
-    this.applySmoothFrame(this.seqIndex, this.time, seq)
+      if (this.playing) {
+        this.applySmoothFrame(this.seqIndex, this.time, seq)
+      } else {
+        this.refreshHandRetargeter()
+      }
+    } else {
+      this.refreshHandRetargeter()
+    }
+  }
+
+  /** Pin hands + knife to the frame we ended on. */
+  private holdCurrentPlayingFrame(): void {
+    const seq = this.sequences[this.seqIndex]
+    if (!seq) return
+    const raw = this.time * seq.fps
+    const f = Math.min(seq.numFrames - 1, Math.max(0, Math.floor(raw)))
+    this.applyFrameAt(this.seqIndex, f)
+  }
+
+  /** Re-apply cshands retarget for the held frame (prevents GLB mixer from freezing hands). */
+  public refreshHandRetargeter(): void {
+    const r = this.handRetargeter
+    if (!r || this.playing) return
+    const seq = this.sequences[this.heldSeqIndex]
+    if (!seq) return
+    r.applyFrames(this.heldSeqIndex, this.heldFrame, seq, 0)
   }
 
   public getDuration(): number {
@@ -188,6 +216,8 @@ export class MDLFramePlayer {
   }
 
   private syncHandRetargeter(seqIndex: number, frameA: number, blendT: number): void {
+    this.heldSeqIndex = seqIndex
+    this.heldFrame = frameA
     const r = this.handRetargeter
     if (!r) return
     const seq = this.sequences[seqIndex]

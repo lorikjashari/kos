@@ -70,6 +70,10 @@ function isKnifeBodyPart(sub: MDLSubModel): boolean {
   return !n.includes('cshands') && !n.includes('hand')
 }
 
+function isCshandsBodyPart(sub: MDLSubModel): boolean {
+  return sub.name.toLowerCase().includes('cshands')
+}
+
 function bakePartFrames(
   model: MDLModelData,
   bindVerts: Float32Array,
@@ -125,6 +129,42 @@ function fitPartsToTarget(
   const size = box.getSize(new THREE.Vector3())
   const maxDim = Math.max(size.x, size.y, size.z, 0.001)
   root.scale.setScalar(targetSize / maxDim)
+}
+
+/** Bake fit centering + scale into vertex data so frame playback stays in local space. */
+function bakeFitIntoFramePositions(
+  parts: MDLMeshPart[],
+  orient: THREE.Group,
+  root: THREE.Group
+): void {
+  const ox = orient.position.x
+  const oy = orient.position.y
+  const oz = orient.position.z
+  const sc = root.scale.x
+
+  for (const part of parts) {
+    for (const seqFrames of part.framePositions) {
+      for (const frame of seqFrames) {
+        for (let i = 0; i < frame.length; i += 3) {
+          frame[i] = (frame[i]! + ox) * sc
+          frame[i + 1] = (frame[i + 1]! + oy) * sc
+          frame[i + 2] = (frame[i + 2]! + oz) * sc
+        }
+      }
+    }
+
+    const attr = part.mesh.geometry.getAttribute('position') as THREE.BufferAttribute
+    const arr = attr.array as Float32Array
+    for (let i = 0; i < arr.length; i += 3) {
+      arr[i] = (arr[i]! + ox) * sc
+      arr[i + 1] = (arr[i + 1]! + oy) * sc
+      arr[i + 2] = (arr[i + 2]! + oz) * sc
+    }
+    attr.needsUpdate = true
+  }
+
+  orient.position.set(0, 0, 0)
+  root.scale.setScalar(1)
 }
 
 function buildScene(
@@ -193,6 +233,7 @@ function buildScene(
   }
 
   fitPartsToTarget(root, orient, parts, restSeqIndex, restFrame, targetSize)
+  bakeFitIntoFramePositions(parts, orient, root)
 
   const animations = sequenceInfos.map((s) => new THREE.AnimationClip(s.label, s.duration, []))
 
@@ -202,6 +243,16 @@ function buildScene(
 /** Knife mesh only — for seating on existing FPS GLB hands. */
 export function buildGoldSrcKnifeProp(buffer: ArrayBuffer): MDLViewmodel {
   return buildScene(buffer, isKnifeBodyPart, KNIFE_PROP_TARGET_SIZE, knifePropMaterialFromMDL)
+}
+
+/** CS knife + cshands from butterfly_knife.mdl — exact in-game CS 1.6 animation. */
+export function buildGoldSrcButterflyAnimProp(buffer: ArrayBuffer): MDLViewmodel {
+  return buildScene(
+    buffer,
+    (sub) => isKnifeBodyPart(sub) || isCshandsBodyPart(sub),
+    VIEWMODEL_TARGET_SIZE,
+    knifePropMaterialFromMDL
+  )
 }
 
 /** Full v_knife viewmodel — CS hands (cshands) + knife, single baked rig. */

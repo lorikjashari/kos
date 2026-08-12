@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { bindKnifeWristFollower, MDLKnifeWristFollower } from './MDLKnifeFollower'
 import { MDLFramePlayer } from './MDLFramePlayer'
 import type { MDLHandRetargeter } from './MDLHandRetargeter'
 import type { MDLMeshPart, MDLViewmodel } from './loadGoldSrcMDL'
@@ -34,6 +35,52 @@ export function findKnifeSeatBone(root: THREE.Object3D): THREE.Object3D | undefi
     })
   }
   return seat
+}
+
+/** Combined CS knife + cshands at viewmodel scale — keeps hand/knife alignment from the MDL. */
+const BUTTERFLY_ANIM_SCREEN_SCALE = 0.58
+
+export function cloneButterflyAnimProp(template: MDLViewmodel): {
+  group: THREE.Group
+  framePlayer: MDLFramePlayer
+  animations: THREE.AnimationClip[]
+} {
+  const group = new THREE.Group()
+  group.name = 'ButterflyKnifePropRoot'
+
+  const orient = new THREE.Group()
+  orient.name = 'GoldSrcOrient'
+  orient.rotation.copy(GRIP_ORIENT)
+  const tplOrient = template.root.children[0]
+  if (tplOrient) orient.position.copy(tplOrient.position)
+  group.add(orient)
+  group.scale
+    .copy(template.root.scale)
+    .multiplyScalar(BUTTERFLY_VIEWMODEL_SEAT.scaleMul * BUTTERFLY_ANIM_SCREEN_SCALE)
+
+  const parts: MDLMeshPart[] = []
+
+  for (const src of template.parts) {
+    const geometry = src.mesh.geometry.clone()
+    const material = (src.mesh.material as THREE.Material).clone()
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.frustumCulled = false
+    mesh.visible = true
+    mesh.castShadow = false
+    mesh.receiveShadow = false
+    orient.add(mesh)
+    parts.push({ mesh, framePositions: src.framePositions })
+  }
+
+  const framePlayer = new MDLFramePlayer(
+    parts,
+    template.sequences,
+    template.restSeqIndex,
+    template.restFrame
+  )
+  framePlayer.holdRest()
+
+  return { group, framePlayer, animations: template.animations }
 }
 
 export function cloneKnifeProp(template: MDLViewmodel): {
@@ -72,7 +119,7 @@ export function cloneKnifeProp(template: MDLViewmodel): {
     template.restSeqIndex,
     template.restFrame
   )
-  framePlayer.holdDrawStart()
+  framePlayer.holdRest()
 
   return { group, framePlayer, animations: template.animations }
 }
@@ -122,6 +169,63 @@ export function cloneButterflyViewmodel(
   return { group, framePlayer, animations: template.animations }
 }
 
+const _seatScratch = {
+  local: new THREE.Matrix4(),
+  world: new THREE.Matrix4(),
+  invView: new THREE.Matrix4(),
+  quat: new THREE.Quaternion(),
+  scale: new THREE.Vector3(),
+}
+
+/**
+ * Seat the CS MDL anim prop (cshands + knife) on the viewmodel at the tuned screen XYZ.
+ */
+export function seatButterflyAnimProp(prop: THREE.Group, viewmodelRoot: THREE.Object3D): boolean {
+  return seatMdlPropOnViewmodel(prop, viewmodelRoot, BUTTERFLY_VIEWMODEL_SEAT)
+}
+
+function seatMdlPropOnViewmodel(
+  prop: THREE.Group,
+  viewmodelRoot: THREE.Object3D,
+  seat: { position: THREE.Vector3; rotation: THREE.Euler }
+): boolean {
+  prop.visible = true
+  prop.frustumCulled = false
+  prop.traverse((c) => {
+    c.visible = true
+    c.frustumCulled = false
+  })
+
+  viewmodelRoot.updateMatrixWorld(true)
+  const seatBone = findKnifeSeatBone(viewmodelRoot)
+  const keepScale = prop.scale.clone()
+
+  if (seatBone) {
+    _seatScratch.quat.setFromEuler(seat.rotation)
+    _seatScratch.local.compose(
+      seat.position,
+      _seatScratch.quat,
+      _seatScratch.scale.set(1, 1, 1)
+    )
+    _seatScratch.world.multiplyMatrices(seatBone.matrixWorld, _seatScratch.local)
+    _seatScratch.invView.copy(viewmodelRoot.matrixWorld).invert()
+    _seatScratch.world.premultiply(_seatScratch.invView)
+    _seatScratch.world.decompose(prop.position, prop.quaternion, _seatScratch.scale)
+    prop.scale.copy(keepScale)
+  } else {
+    console.warn('[Butterfly] Armature/Root not found — using raw seat on viewmodel root')
+    prop.position.copy(seat.position)
+    prop.rotation.copy(seat.rotation)
+  }
+
+  viewmodelRoot.add(prop)
+  initKnifePropTuneData(prop)
+  return !!seatBone
+}
+
+/**
+ * Seat knife on M9 Armature/Root — follows hand bone during CS animation.
+ */
 export function seatKnifePropOnHands(prop: THREE.Group, viewmodelRoot: THREE.Object3D): boolean {
   prop.visible = true
   prop.frustumCulled = false
@@ -139,6 +243,7 @@ export function seatKnifePropOnHands(prop: THREE.Group, viewmodelRoot: THREE.Obj
   const seat = findKnifeSeatBone(viewmodelRoot)
   if (!seat) {
     console.warn('[Butterfly] Armature/Root not found — knife prop left on viewmodel root')
+    initKnifePropTuneData(prop)
     return false
   }
   seat.attach(prop)
@@ -155,6 +260,8 @@ export function seatButterflyViewmodel(prop: THREE.Group, viewmodelRoot: THREE.O
 export function initKnifePropTuneData(prop: THREE.Group): void {
   prop.userData.knifeBaseScale = prop.scale.x
   prop.userData.knifeScaleTune = 1
+  prop.userData.knifeRestPosition = prop.position.clone()
+  prop.userData.knifeRestQuaternion = prop.quaternion.clone()
 }
 
 export function getKnifeProp(root: THREE.Object3D): THREE.Group | undefined {
@@ -162,8 +269,15 @@ export function getKnifeProp(root: THREE.Object3D): THREE.Group | undefined {
 }
 
 export function resetKnifePropSeat(prop: THREE.Group): void {
-  prop.position.copy(BUTTERFLY_KNIFE_SEAT.position)
-  prop.rotation.copy(BUTTERFLY_KNIFE_SEAT.rotation)
+  const restPos = prop.userData.knifeRestPosition as THREE.Vector3 | undefined
+  const restQuat = prop.userData.knifeRestQuaternion as THREE.Quaternion | undefined
+  if (restPos && restQuat) {
+    prop.position.copy(restPos)
+    prop.quaternion.copy(restQuat)
+  } else {
+    prop.position.copy(BUTTERFLY_KNIFE_SEAT.position)
+    prop.rotation.copy(BUTTERFLY_KNIFE_SEAT.rotation)
+  }
   prop.userData.knifeScaleTune = 1
   const base = prop.userData.knifeBaseScale as number | undefined
   if (base !== undefined) prop.scale.setScalar(base)
@@ -221,20 +335,49 @@ export function getKnifePlayProgress(root: THREE.Object3D): number {
 
 export function holdKnifeDrawStart(root: THREE.Object3D): void {
   getKnifeFramePlayer(root)?.holdDrawStart()
+  syncKnifeWristFollower(root)
 }
 
 export function playKnifeClip(root: THREE.Object3D, clipName: string, loop = false, timeScale = 1): number {
   const player = getKnifeFramePlayer(root)
   if (!player) return 0
-  return player.play(clipName, loop, timeScale)
+  const dur = player.play(clipName, loop, timeScale)
+  syncKnifeWristFollower(root)
+  return dur
+}
+
+export function bindKnifeWristFollowerToProp(
+  viewmodelRoot: THREE.Object3D,
+  prop: THREE.Group
+): MDLKnifeWristFollower | null {
+  const follower = bindKnifeWristFollower(viewmodelRoot, prop)
+  if (follower) prop.userData.knifeWristFollower = follower
+  return follower
 }
 
 export function updateKnifeProp(root: THREE.Object3D, dt: number): void {
-  getKnifeFramePlayer(root)?.update(dt)
+  const player = getKnifeFramePlayer(root)
+  player?.update(dt)
+  const prop = getKnifeProp(root)
+  const follower = prop?.userData?.knifeWristFollower as MDLKnifeWristFollower | undefined
+  follower?.update(dt, player?.isPlaying() ?? false)
+}
+
+function syncKnifeWristFollower(root: THREE.Object3D): void {
+  const prop = getKnifeProp(root)
+  const follower = prop?.userData?.knifeWristFollower as MDLKnifeWristFollower | undefined
+  follower?.syncToWrist()
+}
+
+function resetKnifeWristFollower(root: THREE.Object3D): void {
+  const prop = getKnifeProp(root)
+  const follower = prop?.userData?.knifeWristFollower as MDLKnifeWristFollower | undefined
+  follower?.snapToRest()
 }
 
 export function holdKnifeRest(root: THREE.Object3D): void {
   getKnifeFramePlayer(root)?.holdRest()
+  resetKnifeWristFollower(root)
 }
 
 export function holdKnifeClipEnd(root: THREE.Object3D, clipName: string): void {

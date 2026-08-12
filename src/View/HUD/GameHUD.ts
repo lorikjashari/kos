@@ -5,6 +5,9 @@ import { isTouchDevice } from '../../UI/MobileDevice'
 import { formatClock, formatPlaytime, ordinal, ratio, type MatchResult } from '../../Core/MatchStats'
 import { calloutAt } from '../../Core/Dust2Callouts'
 import { GAME_HUD_CSS } from './GameHUDStyles'
+import { CS_GREEN_HUD_CSS } from './CsGreenYellowHudStyles'
+import { CsGreenYellowHud } from './CsGreenYellowHud'
+import type { HudStyle } from '../../UI/SettingsStore'
 
 type FeedPush = {
   killer: string
@@ -80,6 +83,8 @@ export class GameHUD {
   private feedId = 0
   private readonly feedLifetimeMs = 4200
   private readonly maxFeed = 5
+  private readonly csGreenHud = new CsGreenYellowHud()
+  private hudStyle: HudStyle = 'cs-green'
 
   constructor() {
     document.getElementById('game-hud')?.remove()
@@ -299,6 +304,23 @@ export class GameHUD {
     if (this.killFeedEl) this.killFeedEl.innerHTML = ''
     this.setScoreboardVisible(false)
     this.setPauseMenuOpen(false)
+    void this.applyHudStyle(this.hudStyle)
+  }
+
+  public setHudStyle(style: HudStyle): void {
+    this.hudStyle = style
+    if (this.root.style.display !== 'none') {
+      void this.applyHudStyle(style)
+    }
+  }
+
+  private async applyHudStyle(style: HudStyle): Promise<void> {
+    if (style === 'cs-green') {
+      await this.csGreenHud.ensureLoaded()
+      this.csGreenHud.apply(this.root)
+    } else {
+      this.csGreenHud.remove(this.root)
+    }
   }
 
   private bind(): void {
@@ -705,7 +727,7 @@ export class GameHUD {
     document.getElementById('game-hud-styles')?.remove()
     const style = document.createElement('style')
     style.id = 'game-hud-styles'
-    style.textContent = GAME_HUD_CSS
+    style.textContent = GAME_HUD_CSS + CS_GREEN_HUD_CSS
     document.head.appendChild(style)
   }
 
@@ -896,11 +918,21 @@ export class GameHUD {
       this.armorFill.style.transform = `scaleX(${Math.max(0, Math.min(1, armor / 100))})`
     }
 
+    const reserve = this.reserveFor(player)
+    if (this.hudStyle === 'cs-green') {
+      this.csGreenHud.update(this.root, {
+        health: Math.round(player.health),
+        armor,
+        mag: player.ammoInMag,
+        reserve,
+        melee: isMelee,
+      })
+    }
+
     if (weapon.key !== this.lastWeapon) {
       this.setWeaponIcon(weapon.key)
     }
 
-    const reserve = this.reserveFor(player)
     if (player.ammoInMag !== this.lastAmmo || weapon.key !== this.lastWeapon || reserve !== this.lastReserve) {
       this.lastReserve = reserve
       this.ammoMagEl.textContent = isMelee ? '—' : String(player.ammoInMag)

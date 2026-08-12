@@ -83,6 +83,8 @@ export interface MobileControlsSettings {
   res43: MobileRes43
 }
 
+export type HudStyle = 'kos' | 'cs-green'
+
 export interface PlayerSettings {
   playerName: string
   crosshair: CrosshairSettings
@@ -96,6 +98,8 @@ export interface PlayerSettings {
   resolutionWidth: number
   resolutionHeight: number
   graphicsQuality: 'low' | 'medium' | 'high'
+  /** In-match HUD skin */
+  hudStyle: HudStyle
   mobile: MobileControlsSettings
 }
 
@@ -336,6 +340,7 @@ export function loadSettings(): PlayerSettings {
         parsed.graphicsQuality === 'low' || parsed.graphicsQuality === 'medium' || parsed.graphicsQuality === 'high'
           ? parsed.graphicsQuality
           : 'high',
+      hudStyle: parsed.hudStyle === 'kos' ? 'kos' : 'cs-green',
       mobile: normalizeMobileSettings(parsed.mobile),
     }
   } catch {
@@ -361,6 +366,7 @@ export function defaultSettings(): PlayerSettings {
     resolutionWidth: 1280,
     resolutionHeight: 960,
     graphicsQuality: 'high',
+    hudStyle: 'cs-green',
     mobile: defaultMobileSettings(),
   }
 }

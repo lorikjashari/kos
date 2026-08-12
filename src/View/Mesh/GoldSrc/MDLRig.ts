@@ -143,6 +143,45 @@ function calcBonePosition(bone: MDLBone): THREE.Vector3 {
   return new THREE.Vector3(bone.value[0]!, bone.value[1]!, bone.value[2]!)
 }
 
+/** Local rotation for one MDL bone at a sequence frame. */
+export function calcLocalBoneQuaternion(
+  model: MDLModelData,
+  sequence: MDLSequence,
+  frame: number,
+  boneIndex: number
+): THREE.Quaternion {
+  const bone = model.bones[boneIndex]!
+  const animation = getAnimation(model, sequence, boneIndex)
+  const adj = calcBoneAdj(model)
+  const s = frame - Math.floor(frame)
+  return calcBoneQuaternion(model.data, frame, s, bone, animation, adj)
+}
+
+const _weaponRelScratch = {
+  weaponInv: new THREE.Matrix4(),
+  rel: new THREE.Matrix4(),
+  pos: new THREE.Vector3(),
+  quat: new THREE.Quaternion(),
+  scale: new THREE.Vector3(),
+}
+
+/** Hand / forearm orientation relative to the MDL v_weapon root bone. */
+export function calcBoneQuatRelativeToWeapon(
+  transforms: Float32Array[],
+  weaponIndex: number,
+  boneIndex: number
+): THREE.Quaternion {
+  _weaponRelScratch.weaponInv.fromArray(transforms[weaponIndex]!).invert()
+  _weaponRelScratch.rel.fromArray(transforms[boneIndex]!)
+  _weaponRelScratch.rel.premultiply(_weaponRelScratch.weaponInv)
+  _weaponRelScratch.rel.decompose(
+    _weaponRelScratch.pos,
+    _weaponRelScratch.quat,
+    _weaponRelScratch.scale
+  )
+  return _weaponRelScratch.quat.clone()
+}
+
 /** World-space bone matrices for one animation frame (web-hlmv calcBoneTransforms). */
 export function calcBoneTransforms(model: MDLModelData, sequence: MDLSequence, frame: number): Float32Array[] {
   const adj = calcBoneAdj(model)

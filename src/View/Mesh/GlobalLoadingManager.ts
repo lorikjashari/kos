@@ -150,7 +150,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     awpFps.register(this.loadableMeshs)
   }
 
-  /** FPS Butterfly: M9 hands + CS MDL knife prop (hide default M9 blade only). */
+  /** FPS Butterfly: M9 hands + CS MDL knife (M9 mesh hidden blade only). */
   private registerButterflyViewmodel(m9Source: FPSMesh): void {
     const bfly = m9Source.clone()
     bfly.key = 'Butterfly'
@@ -167,7 +167,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     bfly.register(this.loadableMeshs)
   }
 
-  /** Knife-only MDL prop — seated on M9 Armature/Root. */
+  /** Knife-only MDL prop — animation from butterfly_knife.mdl, seated on M9 hands. */
   public createButterflyKnifeProp(): THREE.Group | undefined {
     if (!this.butterflyKnifeTemplate) return undefined
     const { group, framePlayer } = cloneKnifeProp(this.butterflyKnifeTemplate)
