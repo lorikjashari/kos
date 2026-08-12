@@ -799,8 +799,16 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
    * Swap to a cached weapon mesh (no mid-match SkeletonUtils.clone).
    * @param playSwitchAnim false when warming / initial equip
    */
-  public equipWeaponMesh(key: string, playSwitchAnim = true): boolean {
-    if (key === 'Butterfly' && !mapHasButterflyKnife(Game.getInstance().activeMapId)) {
+  public equipWeaponMesh(
+    key: string,
+    playSwitchAnim = true,
+    opts?: { forceButterfly?: boolean }
+  ): boolean {
+    if (
+      key === 'Butterfly' &&
+      !opts?.forceButterfly &&
+      !mapHasButterflyKnife(Game.getInstance().activeMapId)
+    ) {
       key = 'Knife'
     }
     const mesh = this.getOrCreateWeaponMesh(key)

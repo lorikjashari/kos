@@ -82,6 +82,11 @@ export const GAME_HUD_CSS = `
         align-items: flex-start;
         gap: 8px;
       }
+      .cs-pause-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
       .cs-pause-label {
         font-size: clamp(28px, 5vw, 42px);
         font-weight: 800;
@@ -141,6 +146,38 @@ export const GAME_HUD_CSS = `
       .cs-pause-btn.is-active {
         background: rgba(26, 95, 255, 0.45);
         border-color: rgba(201, 162, 39, 0.55);
+      }
+      .cs-console-btn {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        appearance: none;
+        border: 1px solid rgba(196, 181, 80, 0.45);
+        background: rgba(24, 20, 8, 0.55);
+        color: #e8d878;
+        cursor: pointer;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+        transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+      }
+      #game-hud-top.is-touch .cs-console-btn { display: flex; }
+      .cs-console-btn svg {
+        width: 22px;
+        height: 22px;
+        display: block;
+        filter: drop-shadow(0 1px 1px rgba(0,0,0,0.55));
+      }
+      .cs-console-btn:active {
+        background: rgba(196, 181, 80, 0.28);
+        border-color: rgba(230, 210, 100, 0.75);
+        transform: scale(0.96);
       }
       .cs-pause-panel {
         display: none;

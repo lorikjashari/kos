@@ -380,6 +380,44 @@ export class Game implements IUpdatable {
     return consoleToNum(v, fallback)
   }
 
+  /** Console: !m9 / !butterfly — swap knife viewmodel without changing map slot rules. */
+  private equipKnifeFromConsole(variant: 'Knife' | 'Butterfly'): void {
+    if (!this.matchStarted) {
+      this.conPrint('Start a match first.', 'warn')
+      return
+    }
+
+    const fps = this.currentPlayer?.renderer as FPSRenderer | undefined
+    if (!fps) {
+      this.conPrint('Player not ready.', 'warn')
+      return
+    }
+
+    const label = variant === 'Butterfly' ? 'butterfly knife' : 'M9 knife'
+
+    if (this.editorActive) {
+      if (variant === 'Butterfly') {
+        void this.editorEquipWeapon('Butterfly')
+      } else {
+        fps.equipWeaponMesh('Knife', true, { forceButterfly: true })
+        this.currentPlayer.player.setWeapon('Knife', { forceButterfly: true })
+      }
+      this.conPrint(`Equipped ${label}.`, 'ok')
+      return
+    }
+
+    if (this.currentPlayer.player.currentWeapon.key === variant) {
+      this.conPrint(`Already using ${label}.`)
+      return
+    }
+
+    if (!this.currentPlayer.player.setWeapon(variant, { forceButterfly: true })) return
+
+    fps.equipWeaponMesh(variant, true, { forceButterfly: true })
+    void this.audioManager.playSwitch(variant === 'Butterfly' ? 'Knife' : variant)
+    this.conPrint(`Equipped ${label}.`, 'ok')
+  }
+
   private ensurePerfOverlay(): PerfOverlay {
     if (!this.perfOverlay) this.perfOverlay = new PerfOverlay()
     return this.perfOverlay
@@ -439,8 +477,16 @@ export class Game implements IUpdatable {
         this.conPrint('  cl_showfps, net_graph, volume, MP3Volume, bgmvolume, fps_max,')
         this.conPrint('  sensitivity, zoom_sensitivity, disconnect, retry, reconnect,')
         this.conPrint('  connect, editormode, record, stop, playdemo, demolist,')
-        this.conPrint('  toggleconsole, clear')
+        this.conPrint('  !m9, !butterfly, toggleconsole, clear')
         this.conPrint('Tip: type a few letters — matches show under the input. Tab / ↓ fills.')
+        return
+      case '!m9':
+      case 'm9':
+        this.equipKnifeFromConsole('Knife')
+        return
+      case '!butterfly':
+      case 'butterfly':
+        this.equipKnifeFromConsole('Butterfly')
         return
       case 'record':
         if (this.editorActive) {

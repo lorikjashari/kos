@@ -42,6 +42,10 @@ export const CONSOLE_COMMANDS: string[] = [
   'stop',
   'playdemo',
   'demolist',
+  '!m9',
+  'm9',
+  '!butterfly',
+  'butterfly',
 ]
 
 /** Split a command line into tokens, honouring "quoted strings". */

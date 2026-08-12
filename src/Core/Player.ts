@@ -735,8 +735,12 @@ export class Player extends Pawn implements IUpdatable {
     this.move(movementVector)
   }
   /** Returns false if already holding that weapon (no re-equip) */
-  public setWeapon(weaponKey: string): boolean {
-    if (weaponKey === 'Butterfly' && Game.getInstance().activeMapId !== 'de_dust2') {
+  public setWeapon(weaponKey: string, opts?: { forceButterfly?: boolean }): boolean {
+    if (
+      weaponKey === 'Butterfly' &&
+      !opts?.forceButterfly &&
+      Game.getInstance().activeMapId !== 'de_dust2'
+    ) {
       weaponKey = 'Knife'
     }
     if (this.currentWeapon.key === weaponKey) return false

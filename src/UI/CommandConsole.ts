@@ -193,6 +193,21 @@ export class CommandConsole {
         margin-top: 0;
       }
       .kos-con-submit:active { background: linear-gradient(#333940, #4a5159); }
+      @media (pointer: coarse) {
+        .kos-con-win {
+          top: 4%;
+          height: min(520px, 82vh);
+        }
+        #kos-con-input {
+          font-size: 16px;
+          min-height: 36px;
+        }
+        .kos-con-submit {
+          min-width: 56px;
+          min-height: 36px;
+          font-size: 14px;
+        }
+      }
     `
     document.head.appendChild(style)
     document.body.appendChild(this.root)

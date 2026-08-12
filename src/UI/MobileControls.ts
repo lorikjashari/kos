@@ -40,6 +40,7 @@ const ICONS: Partial<Record<MobileControlId, string>> = {
   leanLeft: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   leanRight: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   scoreboard: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`,
+  console: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10l-4 3.5V5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="9.5" cy="11" r="1.1" fill="currentColor"/><circle cx="12" cy="11" r="1.1" fill="currentColor"/><circle cx="14.5" cy="11" r="1.1" fill="currentColor"/></svg>`,
 }
 
 /**
@@ -262,7 +263,9 @@ export class MobileControls {
             ? ' is-aim'
             : meta.id === 'jump'
               ? ' is-jump'
-              : ''
+              : meta.id === 'console'
+                ? ' is-console'
+                : ''
       if (meta.id === 'joystick') {
         html.push(`
           <div class="kos-mc-btn kos-mc-joy${selected}${hidden}${down}" data-id="joystick" role="group" aria-label="${meta.label}"
@@ -432,6 +435,14 @@ export class MobileControls {
       this.holdPointers.set(e.pointerId, id)
       Game.getInstance().renderer?.hud?.setScoreboardVisible(true)
       btn.classList.add('is-down')
+      this.vibrateLight()
+      return
+    }
+
+    if (id === 'console') {
+      Game.getInstance().toggleCommandConsole()
+      btn.classList.add('is-down')
+      window.setTimeout(() => btn.classList.remove('is-down'), 140)
       this.vibrateLight()
       return
     }
@@ -732,6 +743,18 @@ export class MobileControls {
       }
       #kos-mobile-controls .kos-mc-btn.is-jump {
         border-color: rgba(180,255,200,0.42);
+      }
+      #kos-mobile-controls .kos-mc-btn.is-console {
+        border-color: rgba(196,181,80,0.55);
+        background:
+          linear-gradient(165deg, rgba(196,181,80,0.22), rgba(40,36,12,0.42)),
+          radial-gradient(circle at 32% 26%, rgba(255,240,160,0.22), transparent 55%);
+      }
+      #kos-mobile-controls .kos-mc-btn.is-console.is-down {
+        border-color: rgba(230,210,100,0.92);
+        background:
+          linear-gradient(165deg, rgba(196,181,80,0.48), rgba(60,52,16,0.58)),
+          radial-gradient(circle at 32% 26%, rgba(255,240,160,0.35), transparent 58%);
       }
       #kos-mobile-controls .kos-mc-glyph {
         position: relative;

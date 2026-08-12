@@ -476,7 +476,7 @@ export class InputManager implements IUpdatable {
     if (target?.closest?.('#kos-mobile-controls')) return true
     if (target?.closest?.('#game-hud-top')) return true
     if (target.nodeName === 'BODY' || target.nodeName === 'CANVAS') return false
-    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu, .cs-loadout, #kos-con, #kos-editor')
+    return !!target.closest('.cs-pause-btn, .cs-pause-panel, .cs-pause-menu, .cs-console-btn, .cs-loadout, #kos-con, #kos-editor')
   }
 
   onMouseDown(event: MouseEvent): void {

@@ -190,9 +190,14 @@ export class GameHUD {
       </div>
 
       <div class="cs-pause-menu" id="hud-pause">
-        <button type="button" class="cs-pause-btn" id="hud-pause-btn" title="Menu" aria-label="Open menu">
-          <span></span><span></span>
-        </button>
+        <div class="cs-pause-top">
+          <button type="button" class="cs-pause-btn" id="hud-pause-btn" title="Menu" aria-label="Open menu">
+            <span></span><span></span>
+          </button>
+          <button type="button" class="cs-console-btn" id="hud-console-btn" data-touch-only title="Console" aria-label="Open console">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10l-4 3.5V5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="9.5" cy="11" r="1.1" fill="currentColor"/><circle cx="12" cy="11" r="1.1" fill="currentColor"/><circle cx="14.5" cy="11" r="1.1" fill="currentColor"/></svg>
+          </button>
+        </div>
         <div class="cs-pause-panel" id="hud-pause-panel" aria-hidden="true">
           <button type="button" class="cs-pause-opt" data-pause="resume">Resume</button>
           <button type="button" class="cs-pause-opt" data-pause="scores" data-touch-only>Scores</button>
@@ -389,6 +394,17 @@ export class GameHUD {
     this.sbRowsEl = document.getElementById('hud-sb-rows')!
     this.pauseMenuEl = document.getElementById('hud-pause')!
     this.pauseBtnEl = document.getElementById('hud-pause-btn')!
+    const consoleBtn = document.getElementById('hud-console-btn')
+    consoleBtn?.addEventListener('pointerup', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      consoleBtn.blur()
+      Game.getInstance().toggleCommandConsole()
+    })
+    consoleBtn?.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+    })
     this.scoreboardEl.addEventListener('pointerup', (e) => {
       if (!this.scoreboardEl?.classList.contains('is-on')) return
       if ((e.target as HTMLElement).closest('.cs-sb-panel')) return
