@@ -30,7 +30,6 @@ import { LoadableMesh } from '../../Mesh/LoadableMesh'
 import {
   BUTTERFLY_KNIFE_PROP,
   BUTTERFLY_KNIFE_SEAT,
-  bindHandRetargeter,
   getKnifeClipDuration,
   getKnifePlayProgress,
   getKnifeProp,
@@ -46,7 +45,6 @@ import {
   setKnifePropVisible,
   updateKnifeProp,
 } from '../../Mesh/GoldSrc/MDLKnifeProp'
-import { createHandRetargeter, pauseViewmodelGlbMixer } from '../../Mesh/GoldSrc/MDLHandRetargeter'
 import { Player } from '../../../Core/Player'
 import { HitscanResult } from '../../../Interface/utils'
 import { PlayerRenderer } from './PlayerRenderer'
@@ -117,14 +115,14 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       this.ensureButterflyKnifeProp(fps)
       const root = fps.mesh as unknown as THREE.Object3D
       const knifeClip = this.resolveButterflySlashClip(root)
-      pauseViewmodelGlbMixer(fps)
       const knifeDur = this.playButterflyClip(knifeClip, 1)
+      const handWall = this.playButterflyHands('Shoot', knifeClip)
       this.recoilEffect = 0.05
       this.recoilRecover = 3.2
       this.weaponBobbingAcc.x += 0.024
       this.weaponBobbingAcc.y += (Math.random() - 0.5) * 0.014
       setKnifePropVisible(root, true)
-      this.scheduleButterflyReadyReturn(knifeDur, true, knifeClip)
+      this.scheduleButterflyReadyReturn(Math.max(knifeDur, handWall), true, knifeClip)
     } else {
       fps.playAnimation('Shoot', false, true, 1.55)
       this.recoilEffect = isMelee ? 0.06 : 0.11
@@ -206,14 +204,14 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
       setKnifePropVisible(root, false)
       holdKnifeDrawStart(root)
       this.bfDrawing = true
-      pauseViewmodelGlbMixer(fps)
       const knifeDur = this.playButterflyClip('draw', 1)
-      this.butterflyDeployUntil = performance.now() + Math.max(750, knifeDur * 1000)
+      const handWall = this.playButterflyHands('Switch', 'draw')
+      this.butterflyDeployUntil = performance.now() + Math.max(750, Math.max(knifeDur, handWall) * 1000)
       this.weaponBobbingAcc.x += 0.015
       if (this.playerCameraManager instanceof FPSCameraManager) {
         this.playerCameraManager.resetRecoil()
       }
-      this.scheduleButterflyReadyReturn(knifeDur)
+      this.scheduleButterflyReadyReturn(Math.max(knifeDur, handWall))
       return
     }
     const scale = key === 'AWP' ? 1.25 : key === 'AK47' ? 1.45 : 1.5
@@ -246,6 +244,42 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     return playKnifeClip(fps.mesh as unknown as THREE.Object3D, name, false, timeScale)
   }
 
+  /** M9 GLB hands synced to MDL knife clip (M9 has no Bip01 bones for direct retarget). */
+  private playButterflyHands(clip: 'Switch' | 'Shoot', knifeClip: string): number {
+    const fps = this.fpsMesh
+    if (!fps) return 0
+    const scale = this.butterflyHandScaleForKnife(clip, knifeClip)
+    fps.playAnimation(clip, false, true, scale)
+    return this.butterflyHandWallSec(clip, scale)
+  }
+
+  private butterflyHandScaleForKnife(handClip: 'Switch' | 'Shoot', knifeClip: string): number {
+    const fps = this.fpsMesh
+    const shootCap = 2.35
+    const floor = handClip === 'Switch' ? 1.15 : 1.55
+    if (!fps) return floor
+    const root = fps.mesh as unknown as THREE.Object3D
+    const handSpan = this.butterflyHandWallSec(handClip, 1)
+    const knifeWall = getKnifeClipDuration(root, knifeClip, 1)
+    if (handSpan <= 0 || knifeWall <= 0) return floor
+    const ideal = handSpan / knifeWall
+    if (handClip === 'Switch') return Math.max(floor, ideal)
+    return Math.max(floor, Math.min(ideal, shootCap))
+  }
+
+  private butterflyHandWallSec(clip: 'Switch' | 'Shoot', handTimeScale: number): number {
+    const fps = this.fpsMesh
+    if (!fps) return 0
+    const m = fps.animations.get(clip)
+    if (!m?.Start || !m?.End) return 0
+    return Math.max(0.05, (m.End.time - Math.abs(m.Start.time)) / Math.max(0.05, handTimeScale))
+  }
+
+  private butterflyReadyPoseTime(): number {
+    const sw = this.fpsMesh?.animations.get('Switch')
+    return sw?.End?.time ?? 2.3
+  }
+
   /** CS 1.6 primary slash — alternates midslash1 / midslash2. */
   private resolveButterflySlashClip(root: THREE.Object3D): string {
     const preferred = this.butterflySlashAlt ? 'midslash2' : 'midslash1'
@@ -256,12 +290,13 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     return 'draw'
   }
 
-  /** CS draw-ready on knife; M9 hands follow via MDL cshands retarget. */
+  /** CS draw-ready on knife; M9 hands at Switch end. */
   private butterflyReadyHold(): void {
     const fps = this.fpsMesh
     if (!fps || fps.key !== 'Butterfly') return
     const root = fps.mesh as unknown as THREE.Object3D
     holdKnifeRest(root)
+    fps.holdPoseAt(this.butterflyReadyPoseTime())
     this.bfDrawing = false
     setKnifePropVisible(root, true)
   }
@@ -270,12 +305,13 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     this.butterflyReadyHold()
   }
 
-  /** Hold slash end — knife + retargeted M9 hands (CS idle gate). */
+  /** Hold slash end — knife on MDL clip; M9 hands stay at ready during CS idle gate. */
   private butterflyHoldShootFollowThrough(knifeClip: string): void {
     const fps = this.fpsMesh
     if (!fps || fps.key !== 'Butterfly') return
     const root = fps.mesh as unknown as THREE.Object3D
     holdKnifeClipEnd(root, knifeClip)
+    fps.holdPoseAt(this.butterflyReadyPoseTime())
     setKnifePropVisible(root, true)
 
     const meshKey = fps.key
@@ -358,7 +394,9 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
 
     let drawProgress = 1
     if (this.bfDrawing) {
-      drawProgress = getKnifePlayProgress(root)
+      const knifeProgress = getKnifePlayProgress(root)
+      const handProgress = this.fpsMesh.getAnimWallProgress()
+      drawProgress = Math.max(knifeProgress, handProgress)
       if (drawProgress >= 0.995) this.bfDrawing = false
     }
 
@@ -604,21 +642,6 @@ export class FPSRenderer extends PlayerRenderer implements IUpdatable {
     }
 
     seatKnifePropOnHands(prop, root)
-    pauseViewmodelGlbMixer(fps)
-
-    const sw = fps.animations.get('Switch')
-    const readyTime = sw?.End?.time ?? 2.3
-    fps.holdPoseAt(readyTime)
-
-    const mdl = Game.getInstance().globalLoadingManager.getButterflyMdlModel()
-    if (mdl) {
-      const retargeter = createHandRetargeter(mdl, root)
-      bindHandRetargeter(root, retargeter)
-      if (retargeter.mappedBoneCount === 0) {
-        console.warn('[Butterfly] no M9 bones matched MDL cshands — check GLB skeleton names')
-      }
-    }
-
     holdKnifeDrawStart(root)
     setKnifePropVisible(root, false)
   }
