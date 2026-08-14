@@ -127,6 +127,13 @@ export function mapHasButterflyKnife(id: MapId): boolean {
   return id === 'de_dust2'
 }
 
+export type KnifeSlotKey = 'Knife' | 'Butterfly' | 'Karambit'
+
+/** Slot 3 default before the player picks !butterfly / !karambit. */
+export function defaultKnifeSlotKey(_id: MapId): KnifeSlotKey {
+  return 'Knife'
+}
+
 export const DEFAULT_MAP_ID: MapId = 'pool_day'
 
 export function getMapDefinition(id: MapId): MapDefinition {

@@ -44,8 +44,8 @@ export const CONSOLE_COMMANDS: string[] = [
   'demolist',
   '!m9',
   'm9',
-  '!butterfly',
-  'butterfly',
+  '!karambit',
+  'karambit',
 ]
 
 /** Split a command line into tokens, honouring "quoted strings". */

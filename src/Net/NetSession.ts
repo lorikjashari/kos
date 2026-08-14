@@ -1,4 +1,4 @@
-import { Peer, type DataConnection } from 'peerjs'
+import { Peer, type DataConnection, type PeerJSOption } from 'peerjs'
 import {
   makeRoomCode,
   peerIdForRoom,
@@ -15,7 +15,7 @@ type SessionHandlers = {
   onMessage: (fromId: string, msg: NetMsg) => void
 }
 
-const PEER_OPTS = loadNetConfig().peer
+const peerOpts = (): PeerJSOption => loadNetConfig().peer
 
 const OPEN_TIMEOUT_MS = 20000
 const JOIN_TIMEOUT_MS = 18000
@@ -169,7 +169,7 @@ export class NetSession {
   private openPeerOnce(fixedId?: string): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false
-      const peer = fixedId ? new Peer(fixedId, PEER_OPTS) : new Peer(PEER_OPTS)
+      const peer = fixedId ? new Peer(fixedId, peerOpts()) : new Peer(peerOpts())
       this.peer = peer
 
       const finish = (err?: Error) => {

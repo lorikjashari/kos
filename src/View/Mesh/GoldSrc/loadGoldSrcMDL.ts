@@ -4,6 +4,8 @@ import { applyBoneTransforms, readFacesData, resolveSkinTextureIndex } from './M
 import { calcBoneTransforms } from './MDLRig'
 import type { MDLModelData, MDLSequence, MDLSubModel } from './MDLTypes'
 
+export type MdlKnifePartFilter = (sub: MDLSubModel) => boolean
+
 export interface MDLSequenceInfo {
   label: string
   fps: number
@@ -65,7 +67,7 @@ function pickBodyModel(partModels: MDLSubModel[]): MDLSubModel {
   return partModels[0]!
 }
 
-function isKnifeBodyPart(sub: MDLSubModel): boolean {
+export function isKnifeBodyPart(sub: MDLSubModel): boolean {
   const n = sub.name.toLowerCase()
   return !n.includes('cshands') && !n.includes('hand')
 }
@@ -200,7 +202,6 @@ function buildScene(
   for (let pi = 0; pi < model.bodyParts.length; pi++) {
     const sub = pickBodyModel(model.models[pi]!)
     if (!includePart(sub)) continue
-
     for (const strip of sub.mesh) {
       const texIdx = resolveSkinTextureIndex(model, strip.skinRef)
       const tex = model.textures[texIdx] ?? model.textures[0]!
@@ -241,8 +242,12 @@ function buildScene(
 }
 
 /** Knife mesh only — for seating on existing FPS GLB hands. */
-export function buildGoldSrcKnifeProp(buffer: ArrayBuffer): MDLViewmodel {
-  return buildScene(buffer, isKnifeBodyPart, KNIFE_PROP_TARGET_SIZE, knifePropMaterialFromMDL)
+export function buildGoldSrcKnifeProp(
+  buffer: ArrayBuffer,
+  includePart: MdlKnifePartFilter = isKnifeBodyPart,
+  targetSize = KNIFE_PROP_TARGET_SIZE
+): MDLViewmodel {
+  return buildScene(buffer, includePart, targetSize, knifePropMaterialFromMDL)
 }
 
 /** CS knife + cshands from butterfly_knife.mdl — exact in-game CS 1.6 animation. */

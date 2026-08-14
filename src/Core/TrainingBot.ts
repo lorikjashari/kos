@@ -300,6 +300,8 @@ export class TrainingBot implements IUpdatable {
     this.isOnGround = true
     this.needsGroundSettle = true
     this.groundCacheT = 0
+    const physics = Game.getInstance().getPhysics()
+    this.resolveWallPenetration(physics)
     if (!this.aiFrozen) {
       this.yaw = Math.random() * Math.PI * 2
     }
@@ -499,9 +501,14 @@ export class TrainingBot implements IUpdatable {
       this.isMoving = false
       return
     }
-    const step = Math.min(speed * dt, len)
-    const nx = this.position.x + (dx / len) * step
-    const nz = this.position.z + (dz / len) * step
+    const dir = new Vector3D(dx / len, 0, dz / len)
+    const step = Math.min(speed * dt, len, this.stepProbe * 0.85)
+    if (!this.isCorridorClear(physics, dir, Math.max(step, this.stepProbe * 0.55))) {
+      this.isMoving = false
+      return
+    }
+    const nx = this.position.x + dir.x * step
+    const nz = this.position.z + dir.z * step
     if (!this.hasGroundNear(physics, nx, nz)) {
       this.isMoving = false
       this.groundCacheT = 0
@@ -509,6 +516,7 @@ export class TrainingBot implements IUpdatable {
     }
     this.position.x = nx
     this.position.z = nz
+    this.resolveWallPenetration(physics)
     this.groundCacheT = 0
     this.isMoving = true
     if (!this.lockCombatFacing) this.faceToward(goal)
@@ -1129,8 +1137,8 @@ export class TrainingBot implements IUpdatable {
 
   private clearanceAt(physics: Physics, at: Vector3D): number {
     let min = this.wallPrefer * 2
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2
       const dir = new Vector3D(Math.cos(a), 0, Math.sin(a))
       const origin = at.clone().add(new Vector3D(0, 1.05, 0))
       const end = origin.clone().add(dir.clone().multiplyScalar(this.wallPrefer * 2))
@@ -1140,6 +1148,31 @@ export class TrainingBot implements IUpdatable {
       min = Math.min(min, hit.hitPosition.distanceTo(origin))
     }
     return min
+  }
+
+  /** Push the bot out of nearby vertical geometry so XZ moves cannot end inside a wall. */
+  private resolveWallPenetration(physics: Physics): void {
+    const need = this.bodyRadius * 0.95
+    for (let pass = 0; pass < 4; pass++) {
+      let moved = false
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2
+        const dir = new Vector3D(Math.cos(a), 0, Math.sin(a))
+        const dist = this.wallDistance(physics, dir, need * 1.6)
+        if (dist >= need) continue
+        const push = (need - dist) * 1.05
+        this.position.x -= dir.x * push
+        this.position.z -= dir.z * push
+        moved = true
+      }
+      if (!moved) break
+    }
+    if (this.clearanceAt(physics, this.position) < need * 0.85) {
+      this.isMoving = false
+    }
+    this.groundCacheT = 0
+    this.corridorCacheT = 0
+    this.wallPushCacheT = 0
   }
 
   private opennessAhead(physics: Physics, dir: Vector3D, dist: number): number {
@@ -1171,6 +1204,7 @@ export class TrainingBot implements IUpdatable {
     this.tryStepUp(physics, use)
     this.position.x += use.x * step
     this.position.z += use.z * step
+    this.resolveWallPenetration(physics)
     this.isMoving = true
   }
 
@@ -1330,26 +1364,32 @@ export class TrainingBot implements IUpdatable {
       this.position.y + probeUp,
       probeUp + fallProbe
     )
+    if (ground && !ground.walkable) ground = null
 
     // Short grounded probe can miss thin Dust II tris / small drops after a
     // slide — retry deep before treating it as void and falling forever.
     if (!ground && this.isOnGround && !settling) {
-      ground = this.probeGround(
+      const deep = this.probeGround(
         physics,
         this.position.x,
         this.position.z,
         this.position.y + 2.5,
         400
       )
+      ground = deep?.walkable ? deep : null
     }
 
-    if (ground) {
+    if (!ground && settling) {
+      const settle = this.probeGround(physics, this.position.x, this.position.z, this.position.y + 6, 12)
+      ground = settle?.walkable ? settle : null
+    }
+
+    if (ground?.walkable) {
       const targetY = ground.y + this.groundSkin
       const dy = targetY - this.position.y
-      // Slightly larger snap after a long-probe recover so a 1m miss doesn't void-fall
       const canStick =
-        dy <= 4 &&
-        (dy >= -this.groundSnapDown || (settling && dy >= -4) || dy >= -1.5)
+        dy <= this.maxStepUp + 0.05 &&
+        (dy >= -this.groundSnapDown || (settling && dy >= -this.maxStepUp))
 
       if (canStick) {
         this.position.y = targetY
@@ -1357,6 +1397,7 @@ export class TrainingBot implements IUpdatable {
         this.isOnGround = true
         this.groundCacheY = targetY
         this.groundCacheT = this.isMoving ? 0 : 0.08
+        this.resolveWallPenetration(physics)
         return
       }
 
@@ -1371,8 +1412,13 @@ export class TrainingBot implements IUpdatable {
         this.isOnGround = true
         this.groundCacheY = targetY
         this.groundCacheT = 0.08
+        this.resolveWallPenetration(physics)
       }
       return
+    }
+
+    if (settling) {
+      this.resolveWallPenetration(physics)
     }
 
     // Nothing below at all — void death picks them up after the fall

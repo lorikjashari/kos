@@ -7,6 +7,13 @@ import type { MDLViewmodel } from './GoldSrc/loadGoldSrcMDL'
 import { parseGoldSrcMDL } from './GoldSrc/MDLParser'
 import type { MDLModelData } from './GoldSrc/MDLTypes'
 import { cloneKnifeProp } from './GoldSrc/MDLKnifeProp'
+import {
+  CS_MDL_KNIFE_KEYS,
+  CS_MDL_KNIVES,
+  CS_MDL_KNIFE_BUILD,
+  getCsMdlKnifeDef,
+  type CsMdlKnifeKey,
+} from './GoldSrc/CsMdlKnife'
 import { ThirdPersonMesh } from './ThirdPersonMesh'
 import { MapMesh } from './MapMesh'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader'
@@ -20,8 +27,8 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
   private static jsonLoader: THREE.ObjectLoader = new THREE.ObjectLoader()
   private static dracoLoader: DRACOLoader = new DRACOLoader()
   public loadableMeshs: Map<string, LoadableMesh> = new Map<string, LoadableMesh>()
-  private butterflyKnifeTemplate: MDLViewmodel | null = null
-  private butterflyMdlModel: MDLModelData | null = null
+  private csMdlKnifeTemplates = new Map<CsMdlKnifeKey, MDLViewmodel>()
+  private csMdlKnifeModels = new Map<CsMdlKnifeKey, MDLModelData>()
 
   public fpsMesh!: THREE.Mesh
   public thirdPersonMesh!: THREE.Mesh
@@ -103,12 +110,19 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     await m9.load()
     m9.register(this.loadableMeshs)
 
-    const bflyResponse = await fetch('models/butterfly_knife.mdl')
-    if (!bflyResponse.ok) throw new Error('Failed to load butterfly_knife.mdl')
-    const bflyBuf = await bflyResponse.arrayBuffer()
-    this.butterflyMdlModel = parseGoldSrcMDL(bflyBuf)
-    this.butterflyKnifeTemplate = buildGoldSrcKnifeProp(bflyBuf)
-    this.registerButterflyViewmodel(m9)
+    for (const knifeKey of CS_MDL_KNIFE_KEYS) {
+      const def = getCsMdlKnifeDef(knifeKey)
+      const res = await fetch(def.mdlPath)
+      if (!res.ok) throw new Error(`Failed to load ${def.mdlPath}`)
+      const buf = await res.arrayBuffer()
+      this.csMdlKnifeModels.set(knifeKey, parseGoldSrcMDL(buf))
+      const template = buildGoldSrcKnifeProp(buf, def.includeKnifePart)
+      if (template.parts.length === 0) {
+        throw new Error(`[CsKnife] ${def.mdlPath} produced 0 mesh parts — check includeKnifePart filter`)
+      }
+      this.csMdlKnifeTemplates.set(knifeKey, template)
+      this.registerCsMdlKnifeViewmodel(m9, def)
+    }
 
     const bullet = new LoadableMesh('9mm2douille.glb', 'Bullet')
     await bullet.load()
@@ -150,13 +164,13 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     awpFps.register(this.loadableMeshs)
   }
 
-  /** FPS Butterfly: M9 hands + CS MDL knife (M9 mesh hidden blade only). */
-  private registerButterflyViewmodel(m9Source: FPSMesh): void {
-    const bfly = m9Source.clone()
-    bfly.key = 'Butterfly'
-    bfly.viewmodelOffset = new Vector3D(-0.04, 0.02, 0)
+  /** FPS CS MDL knife: M9 hands + knife prop (M9 mesh hidden blade only). */
+  private registerCsMdlKnifeViewmodel(m9Source: FPSMesh, def: (typeof CS_MDL_KNIVES)[CsMdlKnifeKey]): void {
+    const fps = m9Source.clone()
+    fps.key = def.key
+    fps.viewmodelOffset = def.viewmodelOffset.clone()
 
-    const root = bfly.mesh as unknown as THREE.Object3D
+    const root = fps.mesh as unknown as THREE.Object3D
     root.traverse((c) => {
       const name = c.name.toLowerCase()
       if (name === 'knife' || name.includes('blade')) {
@@ -164,15 +178,22 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
       }
     })
 
-    bfly.register(this.loadableMeshs)
+    fps.register(this.loadableMeshs)
   }
 
-  /** Knife-only MDL prop — animation from butterfly_knife.mdl, seated on M9 hands. */
-  public createButterflyKnifeProp(): THREE.Group | undefined {
-    if (!this.butterflyKnifeTemplate) return undefined
-    const { group, framePlayer } = cloneKnifeProp(this.butterflyKnifeTemplate)
-    group.name = 'ButterflyKnifeProp'
+  /** Knife-only MDL prop — animation from CS v_knife MDL, seated on M9 hands. */
+  public createCsMdlKnifeProp(key: CsMdlKnifeKey): THREE.Group | undefined {
+    const template = this.csMdlKnifeTemplates.get(key)
+    const def = getCsMdlKnifeDef(key)
+    if (!template) return undefined
+    const { group, framePlayer } = cloneKnifeProp(template, {
+      scaleMul: def.knifeSeat.scaleMul,
+      rootName: `${def.propName}Root`,
+    })
+    group.name = def.propName
     group.userData.knifeFramePlayer = framePlayer
+    group.userData.csMdlKnifeKey = key
+    group.userData.csMdlKnifeBuild = CS_MDL_KNIFE_BUILD
     group.frustumCulled = false
     group.traverse((c) => {
       c.frustumCulled = false
@@ -181,8 +202,18 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     return group
   }
 
+  public getCsMdlKnifeModel(key: CsMdlKnifeKey): MDLModelData | null {
+    return this.csMdlKnifeModels.get(key) ?? null
+  }
+
+  /** @deprecated */
+  public createButterflyKnifeProp(): THREE.Group | undefined {
+    return this.createCsMdlKnifeProp('Butterfly')
+  }
+
+  /** @deprecated */
   public getButterflyMdlModel(): MDLModelData | null {
-    return this.butterflyMdlModel
+    return this.getCsMdlKnifeModel('Butterfly')
   }
 
   /** Bake AKM rifle meshes (no Sketchfab arms) for third-person / HUD icons. */
@@ -379,6 +410,7 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     'Usp',
     'Knife',
     'Butterfly',
+    'Karambit',
     'Bullet',
     'CsTerrorist',
     'AwpRaw',
@@ -391,7 +423,8 @@ export class GlobalLoadingManager extends THREE.LoadingManager {
     seenMat: Set<THREE.Material> = new Set(),
     seenTex: Set<THREE.Texture> = new Set()
   ): void {
-    this.butterflyKnifeTemplate = null
+    this.csMdlKnifeTemplates.clear()
+    this.csMdlKnifeModels.clear()
     for (const key of GlobalLoadingManager.COMBAT_MESH_KEYS) {
       const mesh = this.loadableMeshs.get(key)
       if (!mesh) continue

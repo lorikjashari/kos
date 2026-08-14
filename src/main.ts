@@ -122,7 +122,7 @@ async function main() {
         game.applyGraphicsQuality(settings.graphicsQuality || 'high')
       }
       game.getMobileControls()?.applySettings(settings.mobile)
-      game.renderer.hud?.setHudStyle(settings.hudStyle ?? 'cs-green')
+      game.renderer.hud?.setHudStyle()
       if (isTouchDevice()) {
         game.applyMobileResMode(settings.mobile.resMode, settings.mobile.res43)
         game.applyMobilePerfProfile(settings.mobile.perfProfile)

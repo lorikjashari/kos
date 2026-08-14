@@ -5,9 +5,7 @@ import { isTouchDevice } from '../../UI/MobileDevice'
 import { formatClock, formatPlaytime, ordinal, ratio, type MatchResult } from '../../Core/MatchStats'
 import { calloutAt } from '../../Core/Dust2Callouts'
 import { GAME_HUD_CSS } from './GameHUDStyles'
-import { CS_GREEN_HUD_CSS } from './CsGreenYellowHudStyles'
-import { CsGreenYellowHud } from './CsGreenYellowHud'
-import type { HudStyle } from '../../UI/SettingsStore'
+import { isCsMdlKnifeKey } from '../Mesh/GoldSrc/CsMdlKnife'
 
 type FeedPush = {
   killer: string
@@ -83,8 +81,6 @@ export class GameHUD {
   private feedId = 0
   private readonly feedLifetimeMs = 4200
   private readonly maxFeed = 5
-  private readonly csGreenHud = new CsGreenYellowHud()
-  private hudStyle: HudStyle = 'cs-green'
 
   constructor() {
     document.getElementById('game-hud')?.remove()
@@ -309,24 +305,10 @@ export class GameHUD {
     if (this.killFeedEl) this.killFeedEl.innerHTML = ''
     this.setScoreboardVisible(false)
     this.setPauseMenuOpen(false)
-    void this.applyHudStyle(this.hudStyle)
   }
 
-  public setHudStyle(style: HudStyle): void {
-    this.hudStyle = style
-    if (this.root.style.display !== 'none') {
-      void this.applyHudStyle(style)
-    }
-  }
-
-  private async applyHudStyle(style: HudStyle): Promise<void> {
-    if (style === 'cs-green') {
-      await this.csGreenHud.ensureLoaded()
-      this.csGreenHud.apply(this.root)
-    } else {
-      this.csGreenHud.remove(this.root)
-    }
-  }
+  /** KoS HUD is the only style — kept for callers that still invoke this. */
+  public setHudStyle(_style?: string): void {}
 
   private bind(): void {
     this.ammoMagEl = document.getElementById('hud-ammo')!
@@ -705,7 +687,7 @@ export class GameHUD {
             ? awp
             : key === 'Usp'
               ? usp
-              : key === 'Knife' || key === 'Butterfly'
+              : key === 'Knife' || isCsMdlKnifeKey(key)
                 ? knife
                 : null
       if (src) img.src = src
@@ -730,12 +712,12 @@ export class GameHUD {
       this.weaponIconEl.src = icon
       this.weaponIconEl.style.display = ''
     }
-    const sidearm = weaponKey === 'Usp' || weaponKey === 'Knife' || weaponKey === 'Butterfly'
+    const sidearm = weaponKey === 'Usp' || weaponKey === 'Knife' || isCsMdlKnifeKey(weaponKey)
     this.weaponIconEl.classList.toggle('is-sidearm', sidearm)
     // Small knife glyph stays knife; dim it when knife is the active weapon (big icon already shows it)
     if (this.knifeIconEl) {
       this.knifeIconEl.style.opacity =
-        weaponKey === 'Knife' || weaponKey === 'Butterfly' ? '0.35' : '0.9'
+        weaponKey === 'Knife' || isCsMdlKnifeKey(weaponKey) ? '0.35' : '0.9'
     }
   }
 
@@ -743,7 +725,7 @@ export class GameHUD {
     document.getElementById('game-hud-styles')?.remove()
     const style = document.createElement('style')
     style.id = 'game-hud-styles'
-    style.textContent = GAME_HUD_CSS + CS_GREEN_HUD_CSS
+    style.textContent = GAME_HUD_CSS
     document.head.appendChild(style)
   }
 
@@ -935,15 +917,6 @@ export class GameHUD {
     }
 
     const reserve = this.reserveFor(player)
-    if (this.hudStyle === 'cs-green') {
-      this.csGreenHud.update(this.root, {
-        health: Math.round(player.health),
-        armor,
-        mag: player.ammoInMag,
-        reserve,
-        melee: isMelee,
-      })
-    }
 
     if (weapon.key !== this.lastWeapon) {
       this.setWeaponIcon(weapon.key)

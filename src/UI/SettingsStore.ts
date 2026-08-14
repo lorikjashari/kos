@@ -84,7 +84,7 @@ export interface MobileControlsSettings {
   res43: MobileRes43
 }
 
-export type HudStyle = 'kos' | 'cs-green'
+export type HudStyle = 'kos'
 
 export interface PlayerSettings {
   playerName: string
@@ -343,7 +343,7 @@ export function loadSettings(): PlayerSettings {
         parsed.graphicsQuality === 'low' || parsed.graphicsQuality === 'medium' || parsed.graphicsQuality === 'high'
           ? parsed.graphicsQuality
           : 'high',
-      hudStyle: parsed.hudStyle === 'kos' ? 'kos' : 'cs-green',
+      hudStyle: 'kos',
       mobile: normalizeMobileSettings(parsed.mobile),
     }
   } catch {
@@ -369,7 +369,7 @@ export function defaultSettings(): PlayerSettings {
     resolutionWidth: 1280,
     resolutionHeight: 960,
     graphicsQuality: 'high',
-    hudStyle: 'cs-green',
+    hudStyle: 'kos',
     mobile: defaultMobileSettings(),
   }
 }

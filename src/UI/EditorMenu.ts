@@ -3,7 +3,9 @@
  * No dummy bot / bone / xray chrome.
  */
 
-export type EditorWeaponKey = 'AK' | 'Usp' | 'AWP' | 'Butterfly'
+import { isCsMdlKnifeKey } from '../View/Mesh/GoldSrc/CsMdlKnife'
+
+export type EditorWeaponKey = 'AK' | 'Usp' | 'AWP' | 'Butterfly' | 'Karambit'
 
 export type EditorMenuHandlers = {
   onSelectWeapon: (key: EditorWeaponKey) => void
@@ -30,6 +32,7 @@ const WEAPONS: Array<{ key: EditorWeaponKey; label: string }> = [
   { key: 'Usp', label: 'USP' },
   { key: 'AWP', label: 'AWP' },
   { key: 'Butterfly', label: 'Butterfly' },
+  { key: 'Karambit', label: 'Karambit' },
 ]
 
 export class EditorMenu {
@@ -355,7 +358,7 @@ export class EditorMenu {
       btn.classList.toggle('is-on', (btn as HTMLElement).getAttribute('data-weapon') === s.weapon)
     })
     const knifeSec = this.root.querySelector('#kos-ed-knife') as HTMLElement | null
-    if (knifeSec) knifeSec.hidden = s.weapon !== 'Butterfly'
+    if (knifeSec) knifeSec.hidden = !isCsMdlKnifeKey(s.weapon)
 
     const stats = this.root.querySelector('#kos-ed-stats')
     if (stats) {

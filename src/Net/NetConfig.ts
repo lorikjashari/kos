@@ -3,6 +3,8 @@ import type { PeerJSOption } from 'peerjs'
 /** Default public brokers — used when no VITE_* overrides are set. */
 export const DEFAULT_MQTT_BROKER = 'wss://broker.emqx.io:8084/mqtt'
 export const DEFAULT_MQTT_TOPIC = 'kos/fps/rooms/v1'
+/** peerjs-server default when VITE_PEER_HOST is set without VITE_PEER_PORT. */
+export const DEFAULT_PEER_PORT = 9000
 
 export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -101,13 +103,13 @@ export function loadNetConfig(): KosNetConfig {
   if (key) peer.key = key
   if (host) {
     peer.host = host
-    if (portRaw) {
-      const port = Number(portRaw)
-      if (Number.isFinite(port)) peer.port = port
-    }
+    const port = portRaw ? Number(portRaw) : DEFAULT_PEER_PORT
+    peer.port = Number.isFinite(port) && port > 0 ? port : DEFAULT_PEER_PORT
     peer.path = path || '/'
     if (secureRaw !== undefined) {
       peer.secure = secureRaw === '1' || secureRaw.toLowerCase() === 'true'
+    } else if (host === 'localhost' || host === '127.0.0.1') {
+      peer.secure = false
     }
   }
 

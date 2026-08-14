@@ -1,4 +1,5 @@
 import { getWeaponConfig } from './Weapon'
+import { isCsMdlKnifeKey } from '../View/Mesh/GoldSrc/CsMdlKnife'
 
 export type BodyPart = 'head' | 'body' | 'legs'
 
@@ -26,7 +27,7 @@ export function damageAtRange(part: BodyPart, weaponKey: string, distance: numbe
 
 export function damageForBodyPart(part: BodyPart, weaponKey: string): number {
   const base = BODY_PART_DAMAGE[part]
-  if (weaponKey === 'Knife' || weaponKey === 'Butterfly') {
+  if (weaponKey === 'Knife' || isCsMdlKnifeKey(weaponKey)) {
     if (part === 'head') return 100
     if (part === 'body') return 70
     return 45

@@ -2,6 +2,7 @@ import { IUpdatable } from '../Interface/IUpdatable'
 import { Pawn } from './Pawn'
 import { Vector2D, Vector3D } from './Vector'
 import { Game } from '../Game'
+import { defaultKnifeSlotKey, type KnifeSlotKey } from './MapCatalog'
 import * as THREE from 'three'
 import Ammo from 'ammojs-typed'
 import { Physics } from '../Physics/Physics'
@@ -13,6 +14,7 @@ import { raycastBotMeshes } from './BotMeshHit'
 import { damageAtRange } from './BodyPart'
 import { FPSMesh } from '../View/Mesh/FPSMesh'
 import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
+import { isCsMdlKnifeKey } from '../View/Mesh/GoldSrc/CsMdlKnife'
 
 /** World Y at or below this → fall through map / void death */
 const VOID_DEATH_Y = -30
@@ -76,6 +78,8 @@ export class Player extends Pawn implements IUpdatable {
   public currentWeapon: WeaponConfig = getWeaponConfig('AK47')
   /** Match primary from loadout picker — bound to key 1 */
   public primaryWeaponKey: 'AK47' | 'AWP' = 'AK47'
+  /** Slot 3 / !m9 !butterfly !karambit — persists until next match. */
+  public knifeWeaponKey: KnifeSlotKey = 'Knife'
   public ammoInMag = 30
   public isReloading = false
   private reloadTimer = 0
@@ -85,6 +89,7 @@ export class Player extends Pawn implements IUpdatable {
     Usp: 12,
     Knife: 0,
     Butterfly: 0,
+    Karambit: 0,
     AWP: 10,
   }
   /** Spare rounds outside the mag, per weapon. Reloads draw from here. */
@@ -734,11 +739,25 @@ export class Player extends Pawn implements IUpdatable {
     movementVector.multiplyScalar(-1)
     this.move(movementVector)
   }
+  /** Console !m9 / !butterfly / !karambit — also used for slot 3. */
+  public setKnifePreference(key: KnifeSlotKey): void {
+    this.knifeWeaponKey = key
+  }
+
+  /** New match — map default (Butterfly on Dust II, M9 elsewhere). */
+  public resetKnifePreferenceForMap(mapId: Parameters<typeof defaultKnifeSlotKey>[0]): void {
+    this.knifeWeaponKey = defaultKnifeSlotKey(mapId)
+  }
+
   /** Returns false if already holding that weapon (no re-equip) */
-  public setWeapon(weaponKey: string, opts?: { forceButterfly?: boolean }): boolean {
+  public setWeapon(
+    weaponKey: string,
+    opts?: { forceButterfly?: boolean; forceCsKnife?: boolean }
+  ): boolean {
+    const forceCs = opts?.forceCsKnife ?? opts?.forceButterfly
     if (
-      weaponKey === 'Butterfly' &&
-      !opts?.forceButterfly &&
+      isCsMdlKnifeKey(weaponKey) &&
+      !forceCs &&
       Game.getInstance().activeMapId !== 'de_dust2'
     ) {
       weaponKey = 'Knife'
@@ -952,6 +971,7 @@ export class Player extends Pawn implements IUpdatable {
       Usp: getWeaponConfig('Usp').reserveAmmo,
       Knife: 0,
       Butterfly: 0,
+      Karambit: 0,
       AWP: primaryKey === 'AWP' ? getWeaponConfig('AWP').reserveAmmo : 0,
     }
     this.ammoByWeapon = {
@@ -959,6 +979,7 @@ export class Player extends Pawn implements IUpdatable {
       Usp: getWeaponConfig('Usp').magazineSize,
       Knife: 0,
       Butterfly: 0,
+      Karambit: 0,
       AWP: primaryKey === 'AWP' ? getWeaponConfig('AWP').magazineSize : 0,
     }
     this.ammoInMag = this.currentWeapon.magazineSize

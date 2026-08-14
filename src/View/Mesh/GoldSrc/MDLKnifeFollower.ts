@@ -46,6 +46,28 @@ export class MDLKnifeWristFollower {
     this.prop.position.copy(this.restPropLocalParent)
   }
 
+  /** Editor / seat reset — re-capture rest anchors from the prop's current local pose. */
+  public syncRestFromProp(): void {
+    this.viewRoot.updateMatrixWorld(true)
+    this.prop.updateMatrixWorld(true)
+    this.restPropLocalParent.copy(this.prop.position)
+    this.smoothParentLocal.copy(this.prop.position)
+    this.viewRoot.worldToLocal(
+      this.restPropLocalVm.setFromMatrixPosition(this.prop.matrixWorld)
+    )
+  }
+
+  /** Editor nudge — shift rest so wrist follow does not undo the tune next frame. */
+  public nudgeRestPosition(axis: 'x' | 'y' | 'z', delta: number): void {
+    this.restPropLocalParent[axis] += delta
+    this.smoothParentLocal[axis] += delta
+    this.viewRoot.updateMatrixWorld(true)
+    this.prop.updateMatrixWorld(true)
+    this.viewRoot.worldToLocal(
+      this.restPropLocalVm.setFromMatrixPosition(this.prop.matrixWorld)
+    )
+  }
+
   /** Snap knife to current wrist — use after hands jump to draw frame 0. */
   public syncToWrist(): void {
     const target = this.computeTargetParentLocal(FOLLOW_ANIM)

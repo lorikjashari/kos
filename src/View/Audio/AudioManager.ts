@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { isCsMdlKnifeKey } from '../Mesh/GoldSrc/CsMdlKnife'
 
 type SoundId =
   | 'ak_shot'
@@ -580,7 +581,7 @@ export class AudioManager extends THREE.AudioListener {
    * Omit position for local player shots (full volume, no panning).
    */
   public playShot(weaponKey = 'AK47', worldPos?: { x: number; y: number; z: number }): Promise<void> {
-    if (weaponKey === 'Knife' || weaponKey === 'Butterfly') {
+    if (weaponKey === 'Knife' || isCsMdlKnifeKey(weaponKey)) {
       this.playKnife()
       return Promise.resolve()
     }
@@ -644,7 +645,7 @@ export class AudioManager extends THREE.AudioListener {
       )
       return Promise.resolve()
     }
-    if (weaponKey === 'Knife' || weaponKey === 'Butterfly') return Promise.resolve()
+    if (weaponKey === 'Knife' || isCsMdlKnifeKey(weaponKey)) return Promise.resolve()
     if (weaponKey === 'AWP') {
       this.playId('awp_clipout')
       this.reloadTimers.push(
@@ -668,7 +669,7 @@ export class AudioManager extends THREE.AudioListener {
     this.clearAwpBoltTimers()
     this.playId('weapon_select', 0.7)
     if (weaponKey === 'Usp') this.playId('usp_draw')
-    else if (weaponKey === 'Knife' || weaponKey === 'Butterfly') this.playId('knife_deploy')
+    else if (weaponKey === 'Knife' || isCsMdlKnifeKey(weaponKey)) this.playId('knife_deploy')
     else if (weaponKey === 'AWP') this.playId('awp_draw')
     else this.playId('ak_draw')
     return Promise.resolve()

@@ -9,7 +9,8 @@ import { FPSRenderer } from '../View/Renderer/PlayerRenderer/FPSRenderer'
 import { FPSCameraManager } from '../View/CameraManager/FPSCameraManager'
 import { CameraManager } from '../View/CameraManager/CameraManager'
 import { DEFAULT_KEYBINDS, type KeybindMap } from '../UI/SettingsStore'
-import { mapHasButterflyKnife } from '../Core/MapCatalog'
+import { isCsMdlKnifeKey } from '../View/Mesh/GoldSrc/CsMdlKnife'
+import { isCsMdlKnifeKey } from '../View/Mesh/GoldSrc/CsMdlKnife'
 
 export class InputManager implements IUpdatable {
   public keys: Map<Key, KeyBinding> = new Map<Key, KeyBinding>()
@@ -296,25 +297,25 @@ export class InputManager implements IUpdatable {
 
     // 1 = match primary (AK or AWP), 2 = USP, 3 = knife
     const fps = playerRenderer as FPSRenderer | undefined
-    const equip = (viewKey: string, logicKey: string) => {
+    const equip = (viewKey: string, logicKey: string, opts?: { forceCsKnife?: boolean }) => {
       if (game.editorActive) {
         const ed =
           viewKey === 'AK47' || viewKey === 'AK'
             ? 'AK'
-            : viewKey === 'Butterfly' || viewKey === 'Knife'
-              ? 'Butterfly'
+            : viewKey === 'Butterfly' || viewKey === 'Karambit' || viewKey === 'Knife'
+              ? viewKey === 'Knife' ? 'Knife' : (viewKey as 'Butterfly' | 'Karambit')
               : viewKey === 'AWP'
                 ? 'AWP'
                 : 'Usp'
         fps?.equipEditorWeapon(ed)
-        void game.audioManager.playSwitch(logicKey === 'Butterfly' ? 'Knife' : logicKey)
+        void game.audioManager.playSwitch(isCsMdlKnifeKey(logicKey) ? 'Knife' : logicKey)
         return
       }
       // Already holding this slot — ignore so 1/2/3 don't re-draw
       if (player.currentWeapon.key === logicKey) return
-      if (player.setWeapon(logicKey)) {
-        fps?.equipWeaponMesh(logicKey)
-        void game.audioManager.playSwitch(logicKey === 'Butterfly' ? 'Knife' : logicKey)
+      if (player.setWeapon(logicKey, opts)) {
+        fps?.equipWeaponMesh(logicKey, true, opts)
+        void game.audioManager.playSwitch(isCsMdlKnifeKey(logicKey) ? 'Knife' : logicKey)
       }
     }
 
@@ -326,8 +327,9 @@ export class InputManager implements IUpdatable {
     }
 
     if (this.keys.get(Key.Three)?.justReleased) {
-      const butterfly = mapHasButterflyKnife(game.activeMapId)
-      equip(butterfly ? 'Butterfly' : 'Knife', butterfly ? 'Butterfly' : 'Knife')
+      const knifeKey = player.knifeWeaponKey
+      const forceCs = isCsMdlKnifeKey(knifeKey)
+      equip(knifeKey, knifeKey, forceCs ? { forceCsKnife: true } : undefined)
     }
 
     if (this.playerWrapper.cameraManager instanceof FPSCameraManager) {

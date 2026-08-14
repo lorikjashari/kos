@@ -471,7 +471,7 @@ export class MainMenu {
       }
 
       const t = (e.target as HTMLElement).closest(
-        '[data-action], [data-diff], [data-length], [data-team], [data-mode], [data-side], [data-mp-side], [data-mp-diff], [data-mp-map], [data-tab], [data-map], [data-res], [data-mres], [data-mres43], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx], [data-hud]'
+        '[data-action], [data-diff], [data-length], [data-team], [data-mode], [data-side], [data-mp-side], [data-mp-diff], [data-mp-map], [data-tab], [data-map], [data-res], [data-mres], [data-mres43], [data-mobile-id], [data-fps], [data-hold], [data-perf], [data-gfx]'
       ) as HTMLElement | null
       if (!t) return
 
@@ -598,17 +598,6 @@ export class MainMenu {
         }
       }
 
-      const hud = t.getAttribute('data-hud') as 'kos' | 'cs-green' | null
-      if (hud === 'kos' || hud === 'cs-green') {
-        this.settings.hudStyle = hud
-        this.syncHudControls()
-        this.persist()
-        try {
-          Game.getInstance().renderer.hud?.setHudStyle(hud)
-        } catch {
-          /* ignore */
-        }
-      }
 
       const mapId = t.getAttribute('data-map') as MapId | null
       if (mapId === 'pool_day' || mapId === 'de_dust2') {
@@ -1019,14 +1008,6 @@ export class MainMenu {
       })
       .join('')
     this.syncGraphicsControls()
-    this.syncHudControls()
-  }
-
-  private syncHudControls(): void {
-    const style = this.settings.hudStyle ?? 'cs-green'
-    this.root.querySelectorAll('[data-hud]').forEach((el) => {
-      el.classList.toggle('is-on', el.getAttribute('data-hud') === style)
-    })
   }
 
   private syncGraphicsControls(): void {

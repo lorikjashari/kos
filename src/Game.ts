@@ -18,6 +18,7 @@ import {
   BOT_FULL_THINKS_PER_FRAME_HEAVY,
 } from './Core/BotPerf'
 import { FPSRenderer } from './View/Renderer/PlayerRenderer/FPSRenderer'
+import { isCsMdlKnifeKey } from './View/Mesh/GoldSrc/CsMdlKnife'
 import type { BotMatchConfig } from './UI/MainMenu'
 import {
   CareerStats,
@@ -303,7 +304,7 @@ export class Game implements IUpdatable {
       this.mobileControls?.applySettings(s.mobile)
     }
     this.syncMobileControls()
-    this.renderer?.hud?.setHudStyle(s.hudStyle ?? 'cs-green')
+    this.renderer?.hud?.setHudStyle()
   }
 
   public applyGraphicsQuality(quality: 'low' | 'medium' | 'high'): void {
@@ -380,8 +381,8 @@ export class Game implements IUpdatable {
     return consoleToNum(v, fallback)
   }
 
-  /** Console: !m9 / !butterfly — swap knife viewmodel without changing map slot rules. */
-  private equipKnifeFromConsole(variant: 'Knife' | 'Butterfly'): void {
+  /** Console: !m9 / !butterfly / !karambit — swap knife viewmodel. */
+  private equipKnifeFromConsole(variant: 'Knife' | 'Butterfly' | 'Karambit'): void {
     if (!this.matchStarted) {
       this.conPrint('Start a match first.', 'warn')
       return
@@ -393,14 +394,17 @@ export class Game implements IUpdatable {
       return
     }
 
-    const label = variant === 'Butterfly' ? 'butterfly knife' : 'M9 knife'
+    const label =
+      variant === 'Butterfly' ? 'butterfly knife' : variant === 'Karambit' ? 'karambit' : 'M9 knife'
+
+    this.currentPlayer.player.setKnifePreference(variant)
 
     if (this.editorActive) {
-      if (variant === 'Butterfly') {
-        void this.editorEquipWeapon('Butterfly')
+      if (variant === 'Knife') {
+        fps.equipWeaponMesh('Knife', true, { forceCsKnife: true })
+        this.currentPlayer.player.setWeapon('Knife', { forceCsKnife: true })
       } else {
-        fps.equipWeaponMesh('Knife', true, { forceButterfly: true })
-        this.currentPlayer.player.setWeapon('Knife', { forceButterfly: true })
+        void this.editorEquipWeapon(variant)
       }
       this.conPrint(`Equipped ${label}.`, 'ok')
       return
@@ -411,10 +415,13 @@ export class Game implements IUpdatable {
       return
     }
 
-    if (!this.currentPlayer.player.setWeapon(variant, { forceButterfly: true })) return
+    if (!this.currentPlayer.player.setWeapon(variant, { forceCsKnife: true })) return
 
-    fps.equipWeaponMesh(variant, true, { forceButterfly: true })
-    void this.audioManager.playSwitch(variant === 'Butterfly' ? 'Knife' : variant)
+    if (isCsMdlKnifeKey(variant)) {
+      fps.invalidateWeaponCache(variant)
+    }
+    fps.equipWeaponMesh(variant, true, { forceCsKnife: true })
+    void this.audioManager.playSwitch(isCsMdlKnifeKey(variant) ? 'Knife' : variant)
     this.conPrint(`Equipped ${label}.`, 'ok')
   }
 
@@ -477,7 +484,7 @@ export class Game implements IUpdatable {
         this.conPrint('  cl_showfps, net_graph, volume, MP3Volume, bgmvolume, fps_max,')
         this.conPrint('  sensitivity, zoom_sensitivity, disconnect, retry, reconnect,')
         this.conPrint('  connect, editormode, record, stop, playdemo, demolist,')
-        this.conPrint('  !m9, !butterfly, toggleconsole, clear')
+        this.conPrint('  !m9, !butterfly, !karambit, toggleconsole, clear')
         this.conPrint('Tip: type a few letters — matches show under the input. Tab / ↓ fills.')
         return
       case '!m9':
@@ -487,6 +494,10 @@ export class Game implements IUpdatable {
       case '!butterfly':
       case 'butterfly':
         this.equipKnifeFromConsole('Butterfly')
+        return
+      case '!karambit':
+      case 'karambit':
+        this.equipKnifeFromConsole('Karambit')
         return
       case 'record':
         if (this.editorActive) {
@@ -854,7 +865,7 @@ export class Game implements IUpdatable {
           `new Vector3D(${o.x.toFixed(4)}, ${o.y.toFixed(4)}, ${o.z.toFixed(4)})\n` +
           `// rotation (radians)\n` +
           `new Vector3D(${r.x.toFixed(4)}, ${r.y.toFixed(4)}, ${r.z.toFixed(4)})`
-        if (this.editorWeapon === 'Butterfly') {
+        if (isCsMdlKnifeKey(this.editorWeapon)) {
           const knife = fps?.getKnifePropCopyText()
           if (knife) text += `\n\n${knife}`
         }
@@ -1038,6 +1049,7 @@ export class Game implements IUpdatable {
     this.inputManager.gameplayEnabled = true
     this.syncMobileControls()
     this.applyMapMoveSpeed(this.activeMapId)
+    this.currentPlayer?.player.resetKnifePreferenceForMap(this.activeMapId)
 
     this.teamScores = { T: 0, CT: 0 }
     this.teamSize = clampTeamSize(config.teamSize)
