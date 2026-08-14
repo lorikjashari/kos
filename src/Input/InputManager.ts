@@ -10,7 +10,6 @@ import { FPSCameraManager } from '../View/CameraManager/FPSCameraManager'
 import { CameraManager } from '../View/CameraManager/CameraManager'
 import { DEFAULT_KEYBINDS, type KeybindMap } from '../UI/SettingsStore'
 import { isCsMdlKnifeKey } from '../View/Mesh/GoldSrc/CsMdlKnife'
-import { isCsMdlKnifeKey } from '../View/Mesh/GoldSrc/CsMdlKnife'
 
 export class InputManager implements IUpdatable {
   public keys: Map<Key, KeyBinding> = new Map<Key, KeyBinding>()
